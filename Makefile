@@ -11,6 +11,7 @@ ROM_IN  = super-mario-land-gb.gb
 SVT     = build/gfx/w1_obj_8000.svt
 LVL     = build/levels/level_00.bin
 ARC     = build/data/jumparc.bin
+TABLES  = build/data/jumparc.bin build/data/speedtab.bin build/data/mario_poses.bin build/data/statusbar.bin
 OBJS    = build/main.o build/gfxdata.o build/leveldata.o build/datatables.o
 ROM     = build/super-mario-land.sv
 
@@ -32,7 +33,7 @@ build/leveldata.o: src/leveldata.s $(LVL)
 	@mkdir -p build
 	$(AS) $(ASFLAGS) src/leveldata.s -o $@
 
-build/datatables.o: src/datatables.s $(ARC)
+build/datatables.o: src/datatables.s $(TABLES)
 	@mkdir -p build
 	$(AS) $(ASFLAGS) src/datatables.s -o $@
 
@@ -41,7 +42,7 @@ $(SVT): tools/extract_gfx.py $(ROM_IN)
 	python3 tools/extract_gfx.py
 $(LVL): tools/extract_levels.py $(ROM_IN)
 	python3 tools/extract_levels.py
-$(ARC): tools/extract_tables.py $(ROM_IN)
+$(TABLES): tools/extract_tables.py $(ROM_IN)
 	python3 tools/extract_tables.py
 
 clean:

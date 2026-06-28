@@ -9,6 +9,8 @@
 .import level0_map           ; World 1-1 tilemap (column-major, 16 tiles/col)
 .import jumparc              ; Mario's jump arc table (27 bytes; $7F = apex)
 .import speedtab            ; horizontal walk speed table (px/frame)
+.import mario_poses          ; 4 poses x 4 tiles (metasprite tiles from ROM $4C37)
+.import statusbar_tiles      ; 2x20 status-bar template (ROM $3F9C)
 
 ; ---------------------------------------------------------------------------
 .segment "ZEROPAGE"
@@ -863,24 +865,11 @@ FB_MAX_COL = 420 - 24            ; last fb_col0 that keeps cols fb_col0..+23 in 
     rts
 .endproc
 
+; mario_poses (4 poses x 4 tiles) and statusbar_tiles (2x20 template) are now
+; ROM-derived BUILD ARTIFACTS extracted by tools/extract_tables.py (rule 5) and
+; .incbin'd from src/datatables.s — see there.
+
 ; ---------------------------------------------------------------------------
-; mario_poses: per-pose metasprite (TL,TR,BL,BR tile numbers), captured from the
-; GB shadow OAM ($C00C) of the real game — NOT a simple grid.
-; TODO(rule 5 / task #19): extract these from the $4C37 metasprite tables at build
-; time instead of hardcoding. Jump pose still needs a capture (placeholder = stand).
-.segment "RODATA"
-; Status-bar tile layout (2 rows x 20), captured from the GB BG map ($9800).
-; TODO(rule 5): reconstruct from the status-bar draw code / make values dynamic.
-statusbar_tiles:
-    .byte $16,$0a,$1b,$12,$18,$2b,$00,$02,$2c,$2c,$20,$18,$1b,$15,$0d,$2c,$1d,$12,$16,$0e  ; MARIO  WORLD TIME
-    .byte $2c,$2c,$2c,$2c,$2c,$00,$2c,$2a,$2b,$00,$00,$2c,$01,$29,$01,$2c,$2c,$03,$07,$02  ; score/coins/1-1/time
-
-mario_poses:                     ; small Mario, all captured from the real game ($C00C)
-    .byte $00, $01, $10, $11      ; 0: stand
-    .byte $00, $01, $16, $17      ; 1: walk A (same upper body as stand, different legs)
-    .byte $02, $03, $12, $13      ; 2: walk B
-    .byte $08, $09, $18, $19      ; 3: jump
-
 ; draw_quad: X = tile index; dcol/dy set. src_ptr = chardata + X*16; blit transparent.
 .proc draw_quad
     txa                          ; src_ptr = chardata + X*16

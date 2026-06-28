@@ -16,6 +16,21 @@ JUMPARC_LEN  = 27
 SPEEDTAB_ADDR = 0x1ECE    # horizontal walk speed table (px/frame), indexed by $C20E+toggle
 SPEEDTAB_LEN  = 6
 
+# Mario metasprite poses. The metasprite pointer table is at bank 3 $4C37 (idx*2 ->
+# 4-byte struct; struct[0:2] = tile-data ptr). Each tile-data entry is
+# [oam-list ptr:2][4 tile numbers][$FF]. We take the 4 tile numbers for the 4 poses the
+# port uses, in its order: stand, walkA, walkB, jump = metasprite indices 0, 3, 1, 4.
+META_TABLE   = 0x4C37     # bank 3
+POSE_INDICES = [0, 3, 1, 4]
+
+# Status-bar template: 2 rows x 20 tiles at bank 0 $3F9C (the HUD-init at $060F copies it
+# to BG map $9800). Static labels + zero/blank placeholders for the dynamic values.
+STATUSBAR_ADDR = 0x3F9C   # bank 0 (file offset == addr)
+STATUSBAR_LEN  = 40
+
+def bank_off(bank, addr): return bank * 0x4000 + (addr - 0x4000)
+def u16(d, o):            return d[o] | (d[o + 1] << 8)
+
 def main():
     rom = sys.argv[1] if len(sys.argv) > 1 and not sys.argv[1].startswith("--") else "super-mario-land-gb.gb"
     out = "build/data"
@@ -33,6 +48,21 @@ def main():
     with open(os.path.join(out, "speedtab.bin"), "wb") as f:
         f.write(spd)
     print(f"speedtab.bin: {len(spd)} bytes -> {out}/  ({' '.join(f'{b:02X}' for b in spd)})")
+
+    poses = bytearray()
+    for idx in POSE_INDICES:
+        struct_ptr = u16(d, bank_off(3, META_TABLE) + idx * 2)
+        tiledata   = u16(d, bank_off(3, struct_ptr))      # struct[0:2] = tile-data ptr
+        tdo        = bank_off(3, tiledata)
+        poses += d[tdo + 2:tdo + 6]                        # 4 tiles after the oam-list ptr
+    with open(os.path.join(out, "mario_poses.bin"), "wb") as f:
+        f.write(poses)
+    print(f"mario_poses.bin: {len(poses)} bytes -> {out}/  ({' '.join(f'{b:02X}' for b in poses)})")
+
+    sb = d[STATUSBAR_ADDR:STATUSBAR_ADDR + STATUSBAR_LEN]
+    with open(os.path.join(out, "statusbar.bin"), "wb") as f:
+        f.write(sb)
+    print(f"statusbar.bin: {len(sb)} bytes -> {out}/  ({' '.join(f'{b:02X}' for b in sb)})")
 
 if __name__ == "__main__":
     main()
