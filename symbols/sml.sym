@@ -1,0 +1,298 @@
+; Super Mario Land - project symbol file (hand-authored RE knowledge).
+; Auto-loaded by mgbdis as super-mario-land-gb.sym. NO ROM bytes here (rule 5).
+; FORMAT: each non-comment line MUST be exactly 'BB:AAAA token' (2 tokens).
+; Inline comments after a token BREAK mgbdis parsing - keep comments on ; lines.
+
+; ==== Master game-state dispatch table ($FFB3) ====
+00:02A6 .data:7c
+00:02A6 GameStateTable
+
+; 62 state handlers (indices $00-$3D). bank-0 targets marked code+named.
+00:0627 .code:3
+00:0627 State_00_handler
+00:06BC .code:3
+00:06BC State_01_handler
+00:06DC .code:3
+00:06DC State_02_handler
+00:0B8D .code:3
+00:0B8D State_03_handler
+00:0BD6 .code:3
+00:0BD6 State_04_handler
+00:0C73 .code:3
+00:0C73 State_05_handler
+00:0CCB .code:3
+00:0CCB State_06_handler
+00:0C40 .code:3
+00:0C40 State_07_handler
+00:0D49 .code:3
+00:0D49 State_08_handler
+00:161B .code:3
+00:161B State_09_handler
+00:162F .code:3
+00:162F State_0A_handler
+00:166C .code:3
+00:166C State_0B_handler
+00:16DA .code:3
+00:16DA State_0C_handler
+00:2376 .code:3
+00:2376 State_0D_handler
+00:0322 .code:3
+00:0322 State_0E_handler
+00:04C3 .code:3
+00:04C3 State_0F_handler
+00:05CE .code:3
+00:05CE State_10_handler
+00:0576 .code:3
+00:0576 State_11_handler
+00:3D97 .code:3
+00:3D97 State_12_handler
+00:3DD7 .code:3
+00:3DD7 State_13_handler
+00:3EA7 .code:3
+00:3EA7 State_16_handler
+00:0DF9 .code:3
+00:0DF9 State_1B_handler
+00:0E15 .code:3
+00:0E15 State_1C_handler
+00:0E31 .code:3
+00:0E31 State_1D_handler
+00:0E5D .code:3
+00:0E5D State_1E_handler
+00:0E96 .code:3
+00:0E96 State_1F_handler
+00:0EA9 .code:3
+00:0EA9 State_20_handler
+00:0ECD .code:3
+00:0ECD State_21_handler
+00:0F12 .code:3
+00:0F12 State_22_handler
+00:0F33 .code:3
+00:0F33 State_23_handler
+00:0F6A .code:3
+00:0F6A State_24_handler
+00:0FFD .code:3
+00:0FFD State_25_handler
+00:1055 .code:3
+00:1055 State_26_handler
+00:1099 .code:3
+00:1099 State_27_handler
+00:0EA9 .code:3
+00:0EA9 State_28_handler
+00:1116 .code:3
+00:1116 State_29_handler
+00:1165 .code:3
+00:1165 State_2A_handler
+00:1194 .code:3
+00:1194 State_2B_handler
+00:11D0 .code:3
+00:11D0 State_2C_handler
+00:121B .code:3
+00:121B State_2D_handler
+00:1254 .code:3
+00:1254 State_2E_handler
+00:12A1 .code:3
+00:12A1 State_2F_handler
+00:12C2 .code:3
+00:12C2 State_30_handler
+00:12F1 .code:3
+00:12F1 State_31_handler
+00:138E .code:3
+00:138E State_32_handler
+00:13F0 .code:3
+00:13F0 State_33_handler
+00:1441 .code:3
+00:1441 State_34_handler
+00:145A .code:3
+00:145A State_35_handler
+00:1466 .code:3
+00:1466 State_36_handler
+00:1488 .code:3
+00:1488 State_37_handler
+00:14DC .code:3
+00:14DC State_38_handler
+00:1C7C .code:3
+00:1C7C State_39_handler
+00:1CE8 .code:3
+00:1CE8 State_3A_handler
+00:1CF0 .code:3
+00:1CF0 State_3B_handler
+00:1D1D .code:3
+00:1D1D State_3C_handler
+00:06BB .code:3
+00:06BB State_3D_handler
+
+; ==== Shared VRAM/util subroutines (bank 0) ====
+; Memcpy_HL_to_DE_BC: copy BC bytes [HL]->[DE]
+00:05DE Memcpy_HL_to_DE_BC
+; Fill20_HL_A: fill 20 ($14) bytes at [HL] with A (one BG-map row)
+00:056F Fill20_HL_A
+; FillBGMap0_2C: fill $9800..$9BFF (BG map 0) with tile $2C
+00:05CF .code:3
+00:05CF FillBGMap0_2C
+00:05D5 FillBGMap0_2C_loop
+
+; ==== VBlank rendering chain (called from VBlank ISR, in order) ====
+; OAMDMARoutineSrc: 10 bytes copied to HRAM $FFB6; DMAs $C000->OAM
+00:3F92 OAMDMARoutineSrc
+; VBlank_ScrollColumnUpd: draw next BG column from $C0B0 (cursor $FFE9, gate $FFEA)
+00:2258 VBlank_ScrollColumnUpd
+; VBlank_ProcessVRAMQueue: deferred VRAM tile-write queue (cmd $FFEE)
+00:1B86 VBlank_ProcessVRAMQueue
+; VBlank_UpdateDisp_DA15: 2-digit BCD $DA15 -> map $9806/$9807
+00:1C33 VBlank_UpdateDisp_DA15
+00:1C56 UpdateDisp_DA15_inner
+; VBlank_DrawScore: BCD score $C0A0..2 -> tiles @ $9820 (gate $FFB1 dirty)
+00:3F39 VBlank_DrawScore
+00:3F4D DrawScore_inner
+; VBlank_UpdateDisp_DA00: 3-digit BCD $DA00..2 -> map $9831..33 (coins?)
+00:3D6A VBlank_UpdateDisp_DA00
+00:3D7E UpdateDisp_DA00_inner
+; VBlank_AnimateTiles: 8-byte tile pattern -> $95D1 every 8 frames
+00:2401 VBlank_AnimateTiles
+
+; ==== Input / joypad (bank 3) ====
+; ReadJoypad: per-frame. $FF80=held, $FF81=pressed.
+; bits: 0=A 1=B 2=Select 3=Start 4=Right 5=Left 6=Up 7=Down
+03:47F2 ReadJoypad
+
+; ==== Player (Mario) ====
+; Player struct base $C200. $C201=Y, $C202=X, $C203=anim/facing,
+; $C207=vert state(0 grnd/fall,1 ascend,2 blocked), $C20A=on-ground flag,
+; $C20C=H-accel(0..6)/jump-force seed($30 jump,$20 down), $C20E/$C20F=H speed-table idx/toggle.
+; Player_HorizControl: horizontal movement (reads $FF80)
+00:1D26 Player_HorizControl
+; Player_SpeedTable: horizontal speed curve (indexed by $C20E)
+00:1ECE Player_SpeedTable
+; Player_CeilingCheck: head/ceiling collision, runs when $C207==1 (ascending)
+00:198C Player_CeilingCheck
+; Player_FloorCheck: floor collision + constant descent ($C201 += 3/frame), runs when $C207!=1
+00:17BC Player_FloorCheck
+; Player_LandSnap: align $C201 to tile on landing, set $C207=0 $C20A=1
+00:185D Player_LandSnap
+
+; ==== Bank 3 player vertical/sprite routines (entries called cross-bank from bank 0) ====
+03:4823 .code:3
+03:4823 Bank3_PlayerInit_4823
+03:48FC .code:3
+03:48FC Bank3_PlayerSprite_48FC
+03:490D .code:3
+03:490D Bank3_ApplyGravityArc
+03:498B .code:3
+03:498B Bank3_JumpControl_498B
+03:4A94 .code:3
+03:4A94 Bank3_Player_4A94
+03:4AEA .code:3
+03:4AEA Bank3_Player_4AEA
+
+; PlayerAscentContinue: A-held jump-hold extend (uses $C208/$C209)
+03:4966 PlayerAscentContinue
+; PlayerJumpDown: down-press jump variant (force seed $C20C=$20)
+03:4A77 PlayerJumpDown
+
+; ---- Object/ballistic physics engine (enemies + ridden platforms) ----
+; PhysicsParamTable_3375: 2-byte entries per object type; byte0 = accel ($FFC7)
+00:3375 PhysicsParamTable_3375
+; ObjectPhysics_Integrate: $FFC1=vel, $FFC7=accel(grav), applies to $FFC2; also $C201 if $FFCB set
+00:2975 ObjectPhysics_Integrate
+00:24D6 ObjectPhysics_InitAccel_24D6
+00:24EF ObjectPhysics_Init_24EF
+00:2491 EnemyUpdate_2491
+; State_30 cutscene: scripted "Mario rises" (dec $C201 every other frame until Y==$58)
+
+; ---- Jump / gravity arc (SOLVED via dynamic trace, see docs/08-player.md) ----
+; JumpArcTable: per-frame |dY|, indexed by object's vel-index field (+8).
+; 27 bytes; entry $7F = apex marker (switch ascend->descend). $216D..$2187.
+00:216D .data:1b
+00:216D JumpArcTable
+; Bank3_ApplyGravityArc ($490D): generic ballistic mover. Caller sets BC=obj+8
+; (vel index), HL=$216D. Walks BC down to obj+7 (state 0/1/2) and obj+1 (Y).
+; state1: Y-=table[idx], idx++ ; state2: Y+=table[idx], idx-- ; $7F=apex; idx=$FF=land.
+; Called for Mario (BC=$C208) and 4 objects ($C218/$C228/$C238/$C248).
+
+; ---- Level loader ----
+; LevelLoader_2442: loads level $FFE4 (0-11) into VRAM/map; called by State_08/State_11
+00:2442 .code:3
+00:2442 LevelLoader_2442
+
+; ---- Level loader + data (level data is in BANK 2) ----
+; LevelColumnStream: per-8px-scroll, builds next 16-tile column into $C0B0
+00:2198 LevelColumnStream
+; LevelSpawnSeek: seek spawn-list ptr ($D010/11) to current column ($C0AB)
+00:245C LevelSpawnSeek
+; LevelParamTable: per-level (0-11) param byte -> $D014
+00:2436 .data:c
+00:2436 LevelParamTable
+; LevelSegPtrTable (bank2): per-level -> segment-pointer table (indexed by $FFE5)
+02:4000 .data:18
+02:4000 LevelSegPtrTable
+; LevelSpawnListTable (bank2): per-level -> object spawn list (3-byte: col,type,param)
+02:401A .data:18
+02:401A LevelSpawnListTable
+
+; SelectWorldBank: world (hi nibble $FFB4) -> data bank ($2000/$FFFD).
+; world1->bank2, world2->bank1, world3->bank3, world4->bank1. Then loads level gfx.
+00:0D6D SelectWorldBank
+
+; ---- Enemy / object subsystem ----
+; EnemyUpdate_2491: per-frame = spawn-check + AI update + collision
+; 10 object slots @ $D100 (stride $10, 16 bytes; first 13 -> $FFC0..CC working area)
+00:249B ObjectSpawnCheck      ; spawn next list entry when column ($C0AB) reached
+00:2648 ObjectAIUpdate        ; loop slots $D100..$D190, run physics+AI script per type
+00:2568 ObjectCollision_2568  ; object-vs-player / object handling
+00:2676 ObjectPhysicsAndScript; apply physics ($FFC7/C8) + step AI script (PC=$FFC4)
+00:2CEB ObjectLoadSlot        ; copy 13-byte slot [HL] -> $FFC0..CC
+00:2CFD ObjectSaveSlot        ; copy $FFC0..CC -> slot [HL]
+; AIScriptPtrTable: per object-type (~28, $00-$1B) -> movement-script bytecode
+00:349E .data:38
+00:349E AIScriptPtrTable
+; AI movement scripts (bytecode interpreted by ObjectPhysicsAndScript): $3564..~$3790
+00:3564 AIScripts_3564
+
+; ---- Sound engine (bank 2) ----
+; SoundDriver: per-frame sound update, called from gameplay states
+02:5844 .code:3
+02:5844 SoundDriver
+
+; GameTimerUpdate ($584B, bank2): decrement BCD timer $DA00-02; $DA1D=time-up trigger
+02:584B GameTimerUpdate
+; SoundUpdate_5892 ($5892, bank2): per-frame SFX/channel state update
+02:5892 SoundUpdate_5892
+; Bank-3 APU channel engine entry (called cross-bank from sound driver)
+03:6ECD SoundChannelEngine_6ECD
+
+; ---- Banked game-state handlers (states $14/$15/$17/$18/$19/$1A run with bank 2 mapped) ----
+; $5832-$5841 are jp trampolines -> real handlers in bank 2:
+02:5832 .code:18
+02:5832 StateBank2_Tramps
+02:5A72 State14_handler_b2
+02:5ABB State15_handler_b2
+02:5B65 State17_handler_b2
+02:5BEB State18_handler_b2
+02:5C44 State19_handler_b2
+02:5CDE State1A_handler_b2
+
+; SoundSeqInit_69C6: start a channel — A=priority, HL=sequence data ptr
+03:69C6 SoundSeqInit_69C6
+; NoteFreqTable_6ECD: GB note frequency/period table (data) used by channel readers
+03:6ECD NoteFreqTable_6ECD
+
+; Sound sequence fetch helpers (bank 3)
+03:6C30 SoundSeqAdvancePtr   ; advance a channel's 16-bit data pointer by 1
+03:6C3C SoundSeqAdvancePtr2  ; advance by 2
+03:6C45 SoundSeqDerefPtr     ; read the byte at a channel's data pointer
+
+; ---- Music data format (bank 3) ----
+; SongTable_663C: music id (1-19) -> song header ptr (index (id-1)*2)
+03:663C SongTable_663C
+; MusicStart_6AB5: read song id from $DFE8, look up & load channels
+03:6AB5 MusicStart_6AB5
+; SongHeaderLoad_6B8C: parse header (flag + 5 channel order ptrs) into $DF00-$DF40
+03:6B8C SongHeaderLoad_6B8C
+; NoteFreqTable_6E74: master note freq table (byte -> 11-bit freq); $6ECD is a slice
+03:6E74 NoteFreqTable_6E74
+; SoundSeqTableIndex_6A0A: hl=table, a=index -> hl=table[(a-1)*2]
+03:6A0A SoundSeqTableIndex_6A0A
+
+; World graphics source tables (bank 0), indexed by (world-2)*2 for worlds 2-4
+00:0DED WorldGfxTable1_8A00   ; -> VRAM $8A00 overlay (61 tiles)
+00:0DF3 WorldGfxTable2_9310   ; -> VRAM $9310 overlay (63 tiles)
