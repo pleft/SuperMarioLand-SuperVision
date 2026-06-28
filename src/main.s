@@ -12,6 +12,8 @@
 .import mario_poses          ; 4 poses x 4 tiles (metasprite tiles from ROM $4C37)
 .import statusbar_tiles      ; 2x20 status-bar template (ROM $3F9C)
 .import level0_cols          ; World 1-1 width in columns (from the level binary size)
+.import room_ptrs            ; table of underground room map pointers
+.import pipe_table, pipe_count ; pipe entries: entry_col(16), room, resume_col(16)
 
 ; ---------------------------------------------------------------------------
 .segment "ZEROPAGE"
@@ -59,6 +61,14 @@ feet_col:    .res 2          ; world tile column under Mario's centre (for colli
 mrow:        .res 1          ; level row being collision-tested
 fall_v:      .res 1          ; fall mode: 0 = jump-arc descent, nonzero = free-fall (+3)
 respawn_req: .res 1          ; set when Mario falls into a pit -> restart the level
+map_base:    .res 2          ; current tilemap base (surface level0_map, or a pipe room)
+room_mode:   .res 1          ; 0 = surface (scrolls), 1 = inside a single-screen pipe room
+save_cam_x:  .res 2          ; surface camera saved on pipe entry (restored on exit)
+save_spr_x:  .res 1
+save_spr_y:  .res 1          ; Mario's height on the pipe (restored on exit)
+pipe_phase:  .res 1          ; 0 = none, 1 = sinking into pipe (then enter), 2 = rising out
+pipe_anim:   .res 1          ; animation frame counter
+pipe_room:   .res 1          ; room to enter after the sink finishes
 mario_frame: .res 1          ; current pose index (0 stand, 1/2 walk, 3 jump)
 prev_frame:  .res 1          ; last drawn pose
 pose_tl:     .res 1          ; the 4 tiles of the current pose
@@ -146,6 +156,10 @@ revpix:      .res 256        ; reverse the 4 2bpp pixels in a byte (built at boo
 
     jsr build_revpix             ; pixel-reverse lookup for horizontal sprite flip
     jsr clear_vram
+    lda #<level0_map             ; start on the surface map
+    sta map_base
+    lda #>level0_map
+    sta map_base+1
     jsr render_background        ; draw the World 1-1 scene
     jsr render_status_bar        ; status bar (drawn once; pinned by the NMI/IRQ raster split)
     lda #40                      ; place Mario standing on the ground (pixel X)
@@ -165,14 +179,23 @@ main_loop:
     lda frame_flag
     beq main_loop
     stz frame_flag
+    lda pipe_phase              ; pipe sink/rise animation running? -> just animate
+    beq @normal
+    jsr pipe_animate
+    jmp main_loop
+@normal:
     jsr read_input
     jsr move_player              ; walk (updates spr_x) or scroll the camera (cam_x)
     jsr jump_player              ; A = jump (real arc); updates spr_y while airborne
     jsr animate_player           ; pick the pose
     lda respawn_req              ; fell into a pit -> restart the level (skip normal draw)
-    beq @play
+    beq @chkpipe
     jsr do_respawn
     bra main_loop
+@chkpipe:
+    jsr pipe_check              ; pipe entry/exit -> may re-render and skip the normal draw
+    bcc @play
+    jmp main_loop
 @play:
     ; (The patched core composes the whole frame before rendering, so draw order isn't
     ; timing-critical; stream the incoming columns last as they're off-screen this frame.)
@@ -229,13 +252,12 @@ main_loop:
     rts
 .endproc
 
-; read_solid: A = 1 if level0_map[feet_col][mrow] is SOLID (tile >= $60, per the game's
-; FloorCheck), else 0. (Off-map rows are non-solid.)
-.proc read_solid
+; read_map_tile: A = map_base[feet_col][mrow] (the raw tile), or $00 if the row is off-map.
+.proc read_map_tile
     lda mrow
     cmp #16
-    bcs @no
-    lda feet_col                 ; map_ptr = level0_map + feet_col*16
+    bcs @off
+    lda feet_col                 ; map_ptr = map_base + feet_col*16
     sta map_ptr
     lda feet_col+1
     sta map_ptr+1
@@ -249,13 +271,23 @@ main_loop:
     rol map_ptr+1
     lda map_ptr
     clc
-    adc #<level0_map
+    adc map_base
     sta map_ptr
     lda map_ptr+1
-    adc #>level0_map
+    adc map_base+1
     sta map_ptr+1
     ldy mrow
     lda (map_ptr),y
+    rts
+@off:
+    lda #0
+    rts
+.endproc
+
+; read_solid: A = 1 if the tile at (feet_col, mrow) is SOLID (tile >= $60, per the game's
+; FloorCheck), else 0. (Off-map rows are non-solid.)
+.proc read_solid
+    jsr read_map_tile
     cmp #$60                     ; tiles >= $60 are solid floor
     bcc @no
     lda #1
@@ -410,6 +442,11 @@ main_loop:
 ; yet; TODO: death animation + life count). Reset camera/state and redraw the scene.
 .proc do_respawn
     stz respawn_req
+    stz room_mode                ; always restart on the surface
+    lda #<level0_map
+    sta map_base
+    lda #>level0_map
+    sta map_base+1
     stz cam_x
     stz cam_x+1
     stz fb_col0
@@ -437,6 +474,279 @@ main_loop:
     jsr render_background         ; redraw the level from column 0
     jsr render_status_bar         ; redraw the HUD
     jsr draw_player              ; place Mario at the start
+    rts
+.endproc
+
+; ---------------------------------------------------------------------------
+; pipe_check: handle pipe transitions. On the surface: Down while grounded over a pipe
+; column drops Mario into that underground room. In a room: Up while grounded returns him
+; to the surface. Returns carry SET if a transition happened (re-rendered; skip the normal
+; per-frame draw this frame).
+.proc pipe_check
+    lda room_mode
+    bne @inroom
+    ; --- surface: Down while grounded over a pipe -> enter ---
+    lda jump_state
+    bne @none
+    lda pad_held
+    and #GB_DOWN
+    beq @none
+    jsr find_pipe                ; A = room index, or $FF
+    cmp #$FF
+    beq @none
+    sta pipe_room                ; remember the room, save the surface state for the resume
+    lda cam_x
+    sta save_cam_x
+    lda cam_x+1
+    sta save_cam_x+1
+    lda spr_x
+    sta save_spr_x
+    lda spr_y
+    sta save_spr_y
+    lda #1                       ; begin sinking into the pipe (pipe_animate finishes it)
+    sta pipe_phase
+    lda #16
+    sta pipe_anim
+    sec
+    rts
+@inroom:
+    ; --- room: walk Right into the exit pipe ($74 mouth) -> back to the surface ---
+    lda jump_state               ; grounded, walking into the pipe
+    bne @none
+    lda pad_held
+    and #GB_RIGHT
+    beq @none
+    lda #14                      ; tile just ahead of Mario's right edge...
+    jsr calc_feet_col
+    lda spr_y                    ; ...at his upper body row
+    lsr
+    lsr
+    lsr
+    sec
+    sbc #2
+    sta mrow
+    jsr read_map_tile
+    cmp #$74                     ; horizontal pipe mouth?
+    bne @none
+    jsr exit_room
+    sec
+    rts
+@none:
+    clc
+    rts
+.endproc
+
+; find_pipe: A = room index if Mario's centre column is a pipe entry (within the 2-wide
+; pipe), else $FF.
+.proc find_pipe
+    lda #8
+    jsr calc_feet_col            ; feet_col = centre column
+    ldx #0                       ; byte index into pipe_table (5 bytes/pipe)
+    ldy #0
+@loop:
+    lda pipe_table+1,x           ; entry_col high == feet_col high?
+    cmp feet_col+1
+    bne @next
+    lda feet_col                 ; feet_col - entry_col in {0,1} ?
+    sec
+    sbc pipe_table,x
+    cmp #2
+    bcs @next
+    lda pipe_table+2,x           ; -> room index
+    rts
+@next:
+    txa
+    clc
+    adc #5
+    tax
+    iny
+    cpy #<pipe_count
+    bne @loop
+    lda #$FF
+    rts
+.endproc
+
+; enter_room: A = room index. Switch to the room map and drop Mario in at the top-left.
+; (The surface state was saved when the sink animation began, in pipe_check.)
+.proc enter_room
+    pha
+    lda #1
+    sta room_mode
+    pla
+    asl                          ; map_base = room_ptrs[room*2]
+    tax
+    lda room_ptrs,x
+    sta map_base
+    lda room_ptrs+1,x
+    sta map_base+1
+    stz cam_x
+    stz cam_x+1
+    stz fb_col0
+    stz fb_col0+1
+    stz scroll_s
+    stz prev_scroll_s
+    stz shift_px
+    stz XSCROLL
+    stz mario_facing
+    stz h_hold
+    stz h_idx
+    lda #16                      ; drop in at the room's entry opening (top-left)
+    sta spr_x
+    sta mario_vx
+    sta prev_vx
+    sta spr_y
+    sta prev_y
+    lda #2                       ; falling in
+    sta jump_state
+    lda #1
+    sta fall_v
+    jsr render_background         ; renders the room (map_base = room)
+    jsr render_status_bar
+    jsr draw_player
+    rts
+.endproc
+
+; exit_room: return to the surface at the saved camera, standing.
+.proc exit_room
+    stz room_mode
+    lda #<level0_map
+    sta map_base
+    lda #>level0_map
+    sta map_base+1
+    lda save_cam_x
+    sta cam_x
+    lda save_cam_x+1
+    sta cam_x+1
+    lda save_spr_x
+    sta spr_x
+    lda cam_x                    ; fb_col0 = cam_x >> 3 ; scroll_s = cam_x & 7
+    sta fb_col0
+    lda cam_x+1
+    sta fb_col0+1
+    lsr fb_col0+1
+    ror fb_col0
+    lsr fb_col0+1
+    ror fb_col0
+    lsr fb_col0+1
+    ror fb_col0
+    lda cam_x
+    and #7
+    sta scroll_s
+    stz prev_scroll_s
+    stz shift_px
+    stz jump_state               ; reappear inside the pipe, then rise out (pipe_animate)
+    stz fall_v
+    lda save_spr_y               ; sit 16px (2 tiles) down in the pipe...
+    clc
+    adc #16
+    sta spr_y
+    sta prev_y
+    lda #2                       ; ...and rise back up to save_spr_y
+    sta pipe_phase
+    lda #16
+    sta pipe_anim
+    lda spr_x                    ; mario_vx = spr_x + scroll_s
+    clc
+    adc scroll_s
+    sta mario_vx
+    sta prev_vx
+    jsr render_background         ; surface
+    jsr render_status_bar
+    jsr draw_player
+    rts
+.endproc
+
+; redraw_pipe_front: redraw the pipe's rim tiles (the 2 rows at/below the pipe top, across
+; Mario's footprint) on top of Mario, so his lower half is hidden BEHIND the pipe as he
+; slides in/out. pipe top row = save_spr_y>>3; columns = feet_col-1 .. feet_col+2.
+; redraw_one: blit the bg tile at (wcol, mrow) at its on-screen position (over Mario).
+.proc redraw_one
+    lda wcol                     ; tile = map_base[wcol][mrow]
+    sta feet_col
+    lda wcol+1
+    sta feet_col+1
+    jsr read_map_tile
+    jsr get_tile_src
+    lda wcol                     ; dcol = (wcol - fb_col0) * 2
+    sec
+    sbc fb_col0
+    asl
+    sta dcol
+    lda mrow                     ; dy = (mrow + 2) * 8
+    clc
+    adc #2
+    asl
+    asl
+    asl
+    sta dy
+    jsr set_dst
+    jsr blit_tile
+    rts
+.endproc
+
+.proc redraw_pipe_front
+    lda #8
+    jsr calc_feet_col            ; feet_col = Mario's centre column
+    lda feet_col                 ; wcol = feet_col - 1
+    sec
+    sbc #1
+    sta wcol
+    lda feet_col+1
+    sbc #0
+    sta wcol+1
+    lda #4                       ; 4 columns wide (memory counter; blit_tile clobbers X/Y)
+    sta tcol_cnt
+@col:
+    lda save_spr_y               ; pipe top row
+    lsr
+    lsr
+    lsr
+    sta mrow
+    jsr redraw_one
+    inc mrow                     ; pipe top + 1
+    jsr redraw_one
+    inc wcol
+    bne :+
+    inc wcol+1
+:   dec tcol_cnt
+    bne @col
+    rts
+.endproc
+
+; ---------------------------------------------------------------------------
+; pipe_animate: run the sink-in (phase 1) / rise-out (phase 2) pipe animation. Mario moves
+; 1px/frame; the rest of the loop is suspended. Phase 1 ends by entering the room; phase 2
+; ends back in normal control. Returns with the frame drawn.
+.proc pipe_animate
+    jsr restore_bg               ; erase Mario at his old spot
+    lda pipe_phase
+    cmp #2
+    beq @rise
+    inc spr_y                    ; phase 1: sink down into the pipe
+    bra @draw
+@rise:
+    dec spr_y                    ; phase 2: rise up out of the pipe
+@draw:
+    lda spr_x
+    clc
+    adc scroll_s
+    sta mario_vx
+    jsr draw_player
+    jsr redraw_pipe_front        ; clip his lower half behind the pipe rim
+    lda mario_vx
+    sta prev_vx
+    lda spr_y
+    sta prev_y
+    dec pipe_anim
+    bne @ret
+    lda pipe_phase               ; animation finished
+    cmp #2
+    beq @riseend
+    lda pipe_room                ; sink done -> drop into the room
+    jsr enter_room
+@riseend:
+    stz pipe_phase               ; back to normal control
+@ret:
     rts
 .endproc
 
@@ -487,10 +797,10 @@ main_loop:
     rol map_ptr+1
     lda map_ptr
     clc
-    adc #<level0_map
+    adc map_base
     sta map_ptr
     lda map_ptr+1
-    adc #>level0_map
+    adc map_base+1
     sta map_ptr+1
     ldy map_row                  ; level-map row
     lda (map_ptr),y              ; tile number
@@ -538,10 +848,10 @@ main_loop:
     rol map_ptr+1
     lda map_ptr
     clc
-    adc #<level0_map
+    adc map_base
     sta map_ptr
     lda map_ptr+1
-    adc #>level0_map
+    adc map_base+1
     sta map_ptr+1
     stz bg_row
 @row:
@@ -599,18 +909,10 @@ main_loop:
 .endproc
 
 ; ---------------------------------------------------------------------------
-; render_status_bar: blit the 2x20 status-bar tiles into VRAM rows 0-1. The global
-; XSCROLL shifts the whole frame, so to keep the bar visually fixed we draw it at VRAM
-; pixel X = scroll_s (byte part scroll_s>>2, sub-pixel scroll_s&3) which exactly cancels
-; XSCROLL -> the bar lands pinned at screen X 0. Opaque sub-pixel blit (band + text).
-; The DMA shift only touches lines 16..159, so these HUD rows are never disturbed.
+; render_status_bar: blit the 2x20 status-bar tiles into VRAM rows 0-1, byte-aligned at
+; offset 0. The NMI/IRQ raster split renders these HUD rows at XSCROLL=0, so the bar is
+; pinned at screen X 0 with no per-frame compensation. Drawn once (boot) + on transitions.
 .proc render_status_bar
-    lda #1
-    sta blit_opaque
-    stz do_flip
-    lda scroll_s                 ; sub-pixel X = scroll_s & 3
-    and #3
-    sta spr_subx
     stz bg_row
 @rowloop:
     stz bg_col
@@ -625,14 +927,8 @@ main_loop:
 @r0:
     lda statusbar_tiles,x
     jsr get_tile_src
-    lda scroll_s                 ; dcol = (scroll_s>>2) + bg_col*2  (byte part of the scroll)
-    lsr
-    lsr
-    sta dcol
-    lda bg_col
+    lda bg_col                   ; dcol = bg_col*2 (offset 0)
     asl
-    clc
-    adc dcol
     sta dcol
     lda bg_row                   ; dy = bg_row*8
     asl
@@ -640,7 +936,7 @@ main_loop:
     asl
     sta dy
     jsr set_dst
-    jsr sprite_blit_subpx
+    jsr blit_tile
     inc bg_col
     lda bg_col
     cmp #20
@@ -649,7 +945,6 @@ main_loop:
     lda bg_row
     cmp #2
     bne @rowloop
-    stz blit_opaque
     rts
 .endproc
 
@@ -742,6 +1037,17 @@ CAM_MAX = (level0_cols - 20) * 8 ; max scroll: (level width - 20 visible cols) *
     lda #14                      ; blocked by a wall to the right? (pipe/wall/step-up)
     jsr wall_ahead
     bne @rdone
+    lda room_mode                ; inside a pipe room: move on screen only (no scroll)
+    beq @rsurface
+    lda spr_x
+    clc
+    adc h_step
+    cmp #145
+    bcc :+
+    lda #144
+:   sta spr_x
+    rts
+@rsurface:
     lda spr_x
     clc
     adc h_step

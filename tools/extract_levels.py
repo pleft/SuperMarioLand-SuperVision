@@ -72,19 +72,51 @@ def is_room_segment(d, bank, sp):
     col, _ = decode_column(d, bank, bank_file(bank, sp))
     return len(set(col)) == 1 and col[0] != BLANK_TILE
 
-def decode_level(d, bank, seg_tab_gb):
-    """Surface level = 20 columns decoded from EACH non-room segment pointer in order,
-    until the segment list's $FF terminator. (Segments repeat — reused 20-column blocks;
-    underground pipe rooms are skipped — see is_room_segment.)"""
+PIPE_TABLE = 0x651C               # bank 3: per-level pointer -> pipe entry list
+
+def decode_seg_columns(d, bank, sp):
+    o = bank_file(bank, sp)
     cols = []
-    for sp in walk_segments(d, bank, seg_tab_gb):
-        if is_room_segment(d, bank, sp):
-            continue
-        o = bank_file(bank, sp)
-        for _ in range(COLS_PER_SEG):
-            col, o = decode_column(d, bank, o)
-            cols.append(col)
+    for _ in range(COLS_PER_SEG):
+        col, o = decode_column(d, bank, o)
+        cols.append(col)
     return cols
+
+def decode_level(d, bank, seg_tab_gb):
+    """Returns (surface_cols, rooms, seg_flat, seg_room). The surface = 20 cols from each
+    NON-room segment in order; pipe/underground rooms are pulled out separately. seg_flat
+    maps an original segment index -> its first flattened surface column; seg_room maps a
+    room segment index -> its room number. (See LevelColumnStream $2198 / is_room_segment.)"""
+    surface, rooms, seg_flat, seg_room = [], [], {}, {}
+    for i, sp in enumerate(walk_segments(d, bank, seg_tab_gb)):
+        if is_room_segment(d, bank, sp):
+            seg_room[i] = len(rooms)
+            rooms.append(decode_seg_columns(d, bank, sp))
+        else:
+            seg_flat[i] = len(surface)
+            surface += decode_seg_columns(d, bank, sp)
+    return surface, rooms, seg_flat, seg_room
+
+def decode_pipes(d, level, seg_flat, seg_room):
+    """Pipe list @ bank3 $651C[level]: 6-byte entries [seg, col, downtarget, resume, x, y],
+    $FF-terminated. Map to flattened-surface coords: entry_col (where the pipe is), room
+    (which underground room it drops into), resume_col (where to come back on the surface)."""
+    o = bank_file(3, u16(d, bank_file(3, PIPE_TABLE) + level * 2))
+    pipes = []
+    for _ in range(32):
+        seg = d[o]
+        if seg == 0xFF:
+            break
+        col, dn, res, px, py = d[o + 1], d[o + 2], d[o + 3], d[o + 4], d[o + 5]
+        if seg in seg_flat and dn in seg_room:
+            pipes.append({
+                "entry_col":  seg_flat[seg] + col,
+                "room":       seg_room[dn],
+                "resume_col": seg_flat.get(res, seg_flat[seg]) + col,
+                "px": px, "py": py,
+            })
+        o += 6
+    return pipes
 
 def decode_spawns(d, bank, gb):
     """3-byte entries [col, position, type], ascending by col, until col drops/ends.
@@ -123,13 +155,14 @@ def main():
         spawn_p = u16(d, bank_file(bank, SPAWN_TABLE)  + lvl * 2)
         param   = d[PARAM_TABLE + lvl]
         segs = walk_segments(d, bank, seg_tab)      # segment list, $FF-terminated
-        cols = decode_level(d, bank, seg_tab)       # 20 cols per segment, in order
+        cols, rooms, seg_flat, seg_room = decode_level(d, bank, seg_tab)
+        pipes = decode_pipes(d, lvl, seg_flat, seg_room)
         spawns = decode_spawns(d, bank, spawn_p)
         lvldata = {
             "level": lvl, "world": world, "stage": lvl % 3 + 1, "bank": bank, "param": param,
             "seg_ptr_table": f"${seg_tab:04X}", "segment_ptrs": [f"${x:04X}" for x in segs],
             "columns": cols, "width_cols": len(cols),
-            "spawns": spawns,
+            "rooms": rooms, "pipes": pipes, "spawns": spawns,
         }
         with open(os.path.join(out, f"level_{lvl:02d}.json"), "w") as f:
             json.dump(lvldata, f, indent=1)
@@ -137,12 +170,23 @@ def main():
         with open(os.path.join(out, f"level_{lvl:02d}.bin"), "wb") as f:
             for col in cols:
                 f.write(bytes(col))
-        summary.append((lvl, f"{world}-{lvl%3+1}", bank, f"${seg_tab:04X}", len(cols), len(spawns)))
+        # underground room maps (one 20-col screen each)
+        for ri, room in enumerate(rooms):
+            with open(os.path.join(out, f"level_{lvl:02d}_room{ri}.bin"), "wb") as f:
+                for col in room:
+                    f.write(bytes(col))
+        # pipe table: per pipe -> [entry_col(16), room, resume_col(16)]  (little-endian cols)
+        with open(os.path.join(out, f"level_{lvl:02d}_pipes.bin"), "wb") as f:
+            for p in pipes:
+                f.write(bytes([p["entry_col"] & 0xFF, p["entry_col"] >> 8, p["room"],
+                               p["resume_col"] & 0xFF, p["resume_col"] >> 8]))
+        summary.append((lvl, f"{world}-{lvl%3+1}", bank, f"${seg_tab:04X}",
+                        len(cols), len(rooms), len(pipes), len(spawns)))
 
     print(f"Extracted {NUM_LEVELS} levels -> {out}/ (gitignored)")
-    print(f"{'lvl':>3} {'stage':>5} {'bank':>4} {'segTbl':>7} {'#cols':>6} {'#spawns':>7}")
-    for lvl, st, bk, sg, nc, nsp in summary:
-        print(f"{lvl:>3} {st:>5} {bk:>4} {sg:>7} {nc:>6} {nsp:>7}")
+    print(f"{'lvl':>3} {'stage':>5} {'bank':>4} {'segTbl':>7} {'#cols':>6} {'rooms':>5} {'pipes':>5} {'#spawns':>7}")
+    for lvl, st, bk, sg, nc, nr, npp, nsp in summary:
+        print(f"{lvl:>3} {st:>5} {bk:>4} {sg:>7} {nc:>6} {nr:>5} {npp:>5} {nsp:>7}")
 
 if __name__ == "__main__":
     main()
