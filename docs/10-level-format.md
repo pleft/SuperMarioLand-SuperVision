@@ -55,8 +55,20 @@ A column is a sequence of **(command, tiles…)** groups:
   - high nibble `H` = **starting Y offset** (0–15) within the 16-tile-tall column
   - low nibble `L` = **run length** (1–15; `0` ⇒ 16)
 - followed by `L` **tile bytes**, written down the column from offset `H`.
-- control bytes: **`$FD`** = end of run, **`$FE`** = **end of column**, **`$FF`** = end of level.
+- **`$FD <tile>`** = **RLE fill**: fill the REST of the current run with `<tile>`
+  (NOT "end of run" — corrected 2026-06-28; the old reading left scattered blanks).
+- **`$FE`** = **end of column**; **`$FF`** = segment-table terminator (see below).
 - Cells not written default to tile **`$2C`** (blank).
+
+### Segment model [CORRECTED 2026-06-28 — verified vs `LevelColumnStream` $2198]
+A level is **reusable 20-column blocks**. The decoder advances the segment index
+`$ffe5` **every 20 columns** (`$ffe6` counts to `$14`). Full surface = decode **20
+columns from each segment pointer** in order, until the per-level segment table's
+**`$FF`** low-byte terminator. Segment pointers REPEAT (W1-1 reuses `$62BE` 6×).
+**Pipe/underground rooms** are also segments (columns start with a SOLID WALL — all
+identical non-blank tiles); they are NOT in the surface scroll — entered only via pipes
+(`State_0A`: `$ffe5=$fff4` down; `State_0B`: `$ffe5=$fff5` resume). The extractor skips
+them (TODO: emit as pipe destinations when pipes/collision land).
 
 Worked example (level 0, segment @ `$62BE`):
 ```
