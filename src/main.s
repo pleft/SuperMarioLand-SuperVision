@@ -200,11 +200,11 @@ main_loop:
 .endproc
 
 ; ---------------------------------------------------------------------------
-; calc_feet_col: feet_col = (cam_x + spr_x + 8) >> 3  (world tile column under Mario's centre)
+; calc_feet_col: feet_col = (cam_x + spr_x + A) >> 3.  A = pixel offset of the collision
+; point across Mario's 16px sprite (8 = centre, 1 = left edge, 14 = right edge).
 .proc calc_feet_col
-    lda spr_x
     clc
-    adc #8
+    adc spr_x
     sta tmpL
     lda #0
     adc #0
@@ -265,6 +265,30 @@ main_loop:
     rts
 .endproc
 
+; wall_ahead: A = edge pixel offset (14 = right edge, 1 = left edge). Returns A != 0 if a
+; solid tile blocks Mario's body at that edge (tests both of his body rows). Clobbers
+; feet_col / mrow / tmp.
+.proc wall_ahead
+    jsr calc_feet_col            ; feet_col = column at (cam_x + spr_x + A) >> 3
+    lda spr_y
+    lsr
+    lsr
+    lsr
+    sec
+    sbc #2                       ; body top row = (spr_y >> 3) - 2
+    sta mrow
+    jsr read_solid
+    bne @yes
+    inc mrow                     ; body bottom row
+    jsr read_solid
+    bne @yes
+    lda #0
+    rts
+@yes:
+    lda #1
+    rts
+.endproc
+
 ; ---------------------------------------------------------------------------
 ; jump_player: vertical physics with TILE collision (replaces the fixed ground_y).
 ; A starts a jump (jump-arc up); at apex, descend the arc; when the feet meet a solid
@@ -272,6 +296,7 @@ main_loop:
 ; Mario's feet rest on the tile at level row spr_y/8 (the +16 sprite height and the
 ; +16-scanline playfield offset cancel out).
 .proc jump_player
+    lda #8                        ; collision column = under Mario's centre
     jsr calc_feet_col
     lda jump_state
     cmp #1
@@ -288,19 +313,20 @@ main_loop:
     lsr
     sta mrow
     jsr read_solid
-    bne @done                     ; supported -> stay grounded
-    lda #2                        ; walked off a ledge -> free-fall
+    beq :+                        ; A==0 -> not supported -> fall
+    jmp @done                     ; supported -> stay grounded
+:   lda #2                        ; walked off a ledge -> free-fall
     sta jump_state
     lda #1
     sta fall_v
-    bra @done
+    jmp @done
 @startjump:
     lda #2                        ; seed the arc index at 2 (matches the game)
     sta arc_idx
     lda #1
     sta jump_state
     stz fall_v
-    bra @done
+    jmp @done
 @ascend:
     ldx arc_idx
     lda jumparc,x
@@ -313,15 +339,31 @@ main_loop:
     cmp #16                       ; clamp to the play-area top (HUD = scanlines 0..15)
     bcs :+
     lda #16
-:   sta spr_y
+:   sta tmpH                      ; tentative new spr_y -> head-bonk test first
+    lsr
+    lsr
+    lsr
+    sec
+    sbc #2                        ; head row = (new spr_y >> 3) - 2 (tile at his head)
+    sta mrow
+    jsr read_solid                ; solid ceiling/block above? (centre column)
+    beq @noceil
+    lda #2                        ; bonk: stop rising, start falling (no block-hit yet)
+    sta jump_state
+    lda #1
+    sta fall_v
+    jmp @done
+@noceil:
+    lda tmpH                      ; clear -> apply the upward move
+    sta spr_y
     inc arc_idx
-    bra @done
+    jmp @done
 @apex:
     lda #2
     sta jump_state
     dec arc_idx
     stz fall_v                    ; jump descent follows the arc
-    bra @done
+    jmp @done
 @fall:
     lda fall_v
     bne @freefall                 ; free-fall: constant +3/frame
@@ -697,6 +739,9 @@ CAM_MAX = (level0_cols - 20) * 8 ; max scroll: (level width - 20 visible cols) *
 @right:
     stz mario_facing
     jsr calc_step                ; h_step = px this frame
+    lda #14                      ; blocked by a wall to the right? (pipe/wall/step-up)
+    jsr wall_ahead
+    bne @rdone
     lda spr_x
     clc
     adc h_step
@@ -751,15 +796,19 @@ CAM_MAX = (level0_cols - 20) * 8 ; max scroll: (level width - 20 visible cols) *
     sta spr_x
     rts
 @left:
+    lda #1
+    sta mario_facing
     jsr calc_step
+    lda #1                       ; blocked by a wall to the left?
+    jsr wall_ahead
+    bne @ldone
     lda spr_x
     sec
     sbc h_step
     bcs :+                       ; underflow -> clamp 0
     lda #0
 :   sta spr_x
-    lda #1
-    sta mario_facing
+@ldone:
     rts
 .endproc
 
