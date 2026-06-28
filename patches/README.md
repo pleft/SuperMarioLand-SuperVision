@@ -2,12 +2,16 @@
 
 ## potator-per-scanline-render.patch
 
-Patches **Potator** (libretro Supervision core) to render scanline-by-scanline
-interleaved with CPU execution, sampling the scroll registers (`XPOS`/`YPOS`) **per
-scanline** instead of once per frame. This enables **raster splits** (mid-frame
-`XSCROLL` changes) — which this port uses to keep the status bar pinned at the top
-while the playfield scrolls smoothly (NMI sets `XSCROLL=0`; a timer IRQ at scanline 16
-switches to the playfield scroll).
+Patches **Potator** (libretro Supervision core) to **capture the scroll registers
+(`XPOS`/`YPOS`) per scanline** as the CPU runs, then render the whole frame at the end
+using those captures (instead of sampling the scroll once per frame). This enables
+**raster splits** (mid-frame `XSCROLL` changes) — which this port uses to keep the
+status bar pinned at the top while the playfield scrolls smoothly (NMI sets
+`XSCROLL=0`; a timer IRQ at scanline 16 switches to the playfield scroll).
+
+Rendering at the END (after a full frame of CPU) means the framebuffer is fully
+composed before any scanline is drawn, so software sprites high on the screen are never
+torn — while the per-scanline scroll capture still gives the raster split.
 
 It is **back-compatible**: games that set the scroll once per frame render identically.
 Real Supervision hardware renders per-scanline, so the split also works on hardware

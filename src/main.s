@@ -54,7 +54,11 @@ t_row:       .res 1          ; restore_bg base tile row
 map_row:     .res 1          ; restore_bg level-map row (= VRAM row - 2 playfield offset)
 jump_state:  .res 1          ; 0=on ground, 1=ascending, 2=descending
 arc_idx:     .res 1          ; index into jumparc
-ground_y:    .res 1          ; the scanline Mario stands on
+ground_y:    .res 1          ; (legacy fixed-ground scanline; superseded by tile collision)
+feet_col:    .res 2          ; world tile column under Mario's centre (for collision)
+mrow:        .res 1          ; level row being collision-tested
+fall_v:      .res 1          ; fall mode: 0 = jump-arc descent, nonzero = free-fall (+3)
+respawn_req: .res 1          ; set when Mario falls into a pit -> restart the level
 mario_frame: .res 1          ; current pose index (0 stand, 1/2 walk, 3 jump)
 prev_frame:  .res 1          ; last drawn pose
 pose_tl:     .res 1          ; the 4 tiles of the current pose
@@ -165,11 +169,13 @@ main_loop:
     jsr move_player              ; walk (updates spr_x) or scroll the camera (cam_x)
     jsr jump_player              ; A = jump (real arc); updates spr_y while airborne
     jsr animate_player           ; pick the pose
-    ; Order matters because Potator now renders scanline-by-scanline interleaved with the
-    ; CPU: anything visible must be drawn BEFORE its scanlines render. So shift+erase+draw
-    ; Mario first (he's at scanlines ~112-128), and stream the 4 incoming columns LAST --
-    ; they land in the off-screen right margin and aren't visible until later frames, so
-    ; their ~30k-cycle blit can safely finish after Mario's rows have already scanned out.
+    lda respawn_req              ; fell into a pit -> restart the level (skip normal draw)
+    beq @play
+    jsr do_respawn
+    bra main_loop
+@play:
+    ; (The patched core composes the whole frame before rendering, so draw order isn't
+    ; timing-critical; stream the incoming columns last as they're off-screen this frame.)
     jsr scroll_update            ; advance camera: framebuffer shift (fast) + scroll_s
     lda prev_vx                  ; if the frame shifted, old Mario moved left with it
     sec
@@ -194,56 +200,201 @@ main_loop:
 .endproc
 
 ; ---------------------------------------------------------------------------
-; jump_player: A starts a jump from the ground; while airborne, step the real
-; jump-arc table (ascend: spr_y -= arc; descend: spr_y += arc) until landing.
+; calc_feet_col: feet_col = (cam_x + spr_x + 8) >> 3  (world tile column under Mario's centre)
+.proc calc_feet_col
+    lda spr_x
+    clc
+    adc #8
+    sta tmpL
+    lda #0
+    adc #0
+    sta tmpH
+    lda cam_x
+    clc
+    adc tmpL
+    sta tmpL
+    lda cam_x+1
+    adc tmpH
+    sta tmpH
+    lsr tmpH
+    ror tmpL
+    lsr tmpH
+    ror tmpL
+    lsr tmpH
+    ror tmpL
+    lda tmpL
+    sta feet_col
+    lda tmpH
+    sta feet_col+1
+    rts
+.endproc
+
+; read_solid: A = 1 if level0_map[feet_col][mrow] is SOLID (tile >= $60, per the game's
+; FloorCheck), else 0. (Off-map rows are non-solid.)
+.proc read_solid
+    lda mrow
+    cmp #16
+    bcs @no
+    lda feet_col                 ; map_ptr = level0_map + feet_col*16
+    sta map_ptr
+    lda feet_col+1
+    sta map_ptr+1
+    asl map_ptr
+    rol map_ptr+1
+    asl map_ptr
+    rol map_ptr+1
+    asl map_ptr
+    rol map_ptr+1
+    asl map_ptr
+    rol map_ptr+1
+    lda map_ptr
+    clc
+    adc #<level0_map
+    sta map_ptr
+    lda map_ptr+1
+    adc #>level0_map
+    sta map_ptr+1
+    ldy mrow
+    lda (map_ptr),y
+    cmp #$60                     ; tiles >= $60 are solid floor
+    bcc @no
+    lda #1
+    rts
+@no:
+    lda #0
+    rts
+.endproc
+
+; ---------------------------------------------------------------------------
+; jump_player: vertical physics with TILE collision (replaces the fixed ground_y).
+; A starts a jump (jump-arc up); at apex, descend the arc; when the feet meet a solid
+; tile, snap to its top and land. Grounded but unsupported -> free-fall (+3/frame).
+; Mario's feet rest on the tile at level row spr_y/8 (the +16 sprite height and the
+; +16-scanline playfield offset cancel out).
 .proc jump_player
+    jsr calc_feet_col
     lda jump_state
-    bne @airborne
-    ; on the ground: start a jump on a fresh A press
+    cmp #1
+    beq @ascend
+    cmp #2
+    beq @fall
+    ; ---- grounded ----
     lda pad_pressed
     and #GB_A
-    beq @done
-    lda #2                       ; the game seeds the arc index at 2
-    sta arc_idx
-    lda #1                       ; ascending
+    bne @startjump
+    lda spr_y                     ; still supported? test the tile under the feet
+    lsr
+    lsr
+    lsr
+    sta mrow
+    jsr read_solid
+    bne @done                     ; supported -> stay grounded
+    lda #2                        ; walked off a ledge -> free-fall
     sta jump_state
+    lda #1
+    sta fall_v
     bra @done
-@airborne:
-    cmp #1
-    bne @descend
-    ; ascending
+@startjump:
+    lda #2                        ; seed the arc index at 2 (matches the game)
+    sta arc_idx
+    lda #1
+    sta jump_state
+    stz fall_v
+    bra @done
+@ascend:
     ldx arc_idx
     lda jumparc,x
-    cmp #$7F                     ; apex marker -> switch to descending
+    cmp #$7F                      ; apex marker -> start descending
     beq @apex
     sta tmpL
     lda spr_y
     sec
     sbc tmpL
-    sta spr_y
+    cmp #16                       ; clamp to the play-area top (HUD = scanlines 0..15)
+    bcs :+
+    lda #16
+:   sta spr_y
     inc arc_idx
     bra @done
 @apex:
     lda #2
     sta jump_state
-    dec arc_idx                  ; back off the marker
+    dec arc_idx
+    stz fall_v                    ; jump descent follows the arc
     bra @done
-@descend:
-    ldx arc_idx
+@fall:
+    lda fall_v
+    bne @freefall                 ; free-fall: constant +3/frame
+    ldx arc_idx                   ; jump descent: step the arc, then ramp to +4
     lda jumparc,x
+    sta tmpL
+    lda arc_idx
+    beq @applyfall
+    dec arc_idx
+    bra @applyfall
+@freefall:
+    lda #3
+    sta tmpL
+@applyfall:
+    lda spr_y
     clc
-    adc spr_y
+    adc tmpL
     sta spr_y
-    lda spr_y                    ; landed?
-    cmp ground_y
-    bcc @stepdown
-    lda ground_y
+    cmp #160                      ; fell off the bottom (into a pit) -> request a respawn
+    bcc @checkland                ;   (before spr_y wraps past 255 and reappears at the top)
+    lda #1
+    sta respawn_req
+    rts
+@checkland:
+    lda spr_y                     ; landed? test the tile the feet are entering
+    lsr
+    lsr
+    lsr
+    sta mrow
+    jsr read_solid
+    beq @done                     ; no ground -> keep falling
+    lda mrow                      ; land: snap feet to the tile top (spr_y = mrow*8)
+    asl
+    asl
+    asl
     sta spr_y
     stz jump_state
-    bra @done
-@stepdown:
-    dec arc_idx
 @done:
+    rts
+.endproc
+
+; ---------------------------------------------------------------------------
+; do_respawn: Mario fell into a pit -> restart the level from the beginning (no lives
+; yet; TODO: death animation + life count). Reset camera/state and redraw the scene.
+.proc do_respawn
+    stz respawn_req
+    stz cam_x
+    stz cam_x+1
+    stz fb_col0
+    stz fb_col0+1
+    stz scroll_s
+    stz prev_scroll_s
+    stz XSCROLL
+    stz jump_state
+    stz fall_v
+    stz arc_idx
+    stz h_hold
+    stz h_idx
+    stz h_toggle
+    stz mario_facing
+    stz mario_frame
+    stz prev_frame
+    stz shift_px
+    lda #40
+    sta spr_x
+    sta mario_vx
+    sta prev_vx
+    lda #112
+    sta spr_y
+    sta prev_y
+    jsr render_background         ; redraw the level from column 0
+    jsr render_status_bar         ; redraw the HUD
+    jsr draw_player              ; place Mario at the start
     rts
 .endproc
 
@@ -619,11 +770,15 @@ CAM_MAX = (level0_cols - 20) * 8 ; max scroll: (level width - 20 visible cols) *
     bcs @capped
     inc h_hold
 @capped:
-    ldx #0                       ; idx 0 (slow start, <6 held), then 2 (~1 px/frame walk)
+    ldx #0                       ; idx 0 = slow start (<6 held)
     lda h_hold
     cmp #6
     bcc @gi
-    ldx #2
+    ldx #2                       ; idx 2 = walk (~1 px/frame)
+    lda pad_held                 ; hold B while moving -> idx 4 = run (~1.5 px/frame)
+    and #GB_B
+    beq @gi
+    ldx #4
 @gi:
     stx h_idx
     txa                          ; speedtab[idx + toggle]
