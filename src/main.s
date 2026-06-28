@@ -11,6 +11,7 @@
 .import speedtab            ; horizontal walk speed table (px/frame)
 .import mario_poses          ; 4 poses x 4 tiles (metasprite tiles from ROM $4C37)
 .import statusbar_tiles      ; 2x20 status-bar template (ROM $3F9C)
+.import level0_cols          ; World 1-1 width in columns (from the level binary size)
 
 ; ---------------------------------------------------------------------------
 .segment "ZEROPAGE"
@@ -526,7 +527,7 @@ main_loop:
 ; Camera constants. PIN_X = Mario's screen X (left edge) at which the camera starts
 ; following him; CAM_MAX = max scroll = (level_cols 420 - 20 visible) * 8 px.
 PIN_X   = 64
-CAM_MAX = (420 - 20) * 8         ; = 3200 ($0C80)
+CAM_MAX = (level0_cols - 20) * 8 ; max scroll: (level width - 20 visible cols) * 8 px
 
 ; ---------------------------------------------------------------------------
 ; move_player: walk via the real speed table. Up to PIN_X Mario moves on screen;
@@ -644,7 +645,7 @@ CAM_MAX = (420 - 20) * 8         ; = 3200 ($0C80)
 ; fb_col0 we DMA-shift the framebuffer left 8 bytes (4 cols) and stream 4 fresh
 ; columns into the right margin. Scroll is byte-aligned (4px steps) so the status
 ; bar and Mario stay pixel-exact while reusing the byte-aligned blits.
-FB_MAX_COL = 420 - 24            ; last fb_col0 that keeps cols fb_col0..+23 in the level
+FB_MAX_COL = level0_cols - 24    ; last fb_col0 that keeps cols fb_col0..+23 in the level
 .proc scroll_update
     stz shift_px                 ; track how far the framebuffer shifts this frame
 @loop:

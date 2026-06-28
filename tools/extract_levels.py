@@ -28,29 +28,62 @@ BLANK_TILE     = 0x2C
 
 def u16(d, off): return d[off] | (d[off + 1] << 8)
 
-def decode_segment(d, bank, seg_gb, max_cols=4096):
-    """Decode column data starting at GB addr seg_gb in `bank`. Returns list of
-    columns; each column is a list of COL_HEIGHT tile ids. Stops at $FF."""
-    o = bank_file(bank, seg_gb)
-    cols = []
+COLS_PER_SEG = 0x14                     # 20 — game advances the segment index every 20 columns
+
+def decode_column(d, bank, o):
+    """Decode ONE $FE-terminated column starting at file offset o. Faithful to
+    LevelColumnStream ($2198): cmd byte = (Y-offset<<4)|run; run 0 -> 16; tiles follow;
+    $FD <tile> fills the REST of the run with <tile> (RLE); $FE ends the column."""
     col = [BLANK_TILE] * COL_HEIGHT
-    while len(cols) < max_cols:
+    while True:
         cmd = d[o]; o += 1
-        if cmd == 0xFF:                 # end of level
-            cols.append(col); break
-        if cmd == 0xFE:                 # end of column
-            cols.append(col); col = [BLANK_TILE] * COL_HEIGHT; continue
-        off = (cmd >> 4) & 0x0F         # starting Y
-        cnt = cmd & 0x0F
-        if cnt == 0: cnt = 16
+        if cmd == 0xFE or cmd == 0xFF:  # end of column (or level)
+            return col, o
+        off = (cmd >> 4) & 0x0F
+        cnt = (cmd & 0x0F) or 16
         i = 0
         while i < cnt:
             t = d[o]; o += 1
-            if t == 0xFD:               # end run early
+            if t == 0xFD:               # RLE fill: rest of the run = the next byte
+                fill = d[o]; o += 1
+                while i < cnt:
+                    if 0 <= off + i < COL_HEIGHT:
+                        col[off + i] = fill
+                    i += 1
                 break
             if 0 <= off + i < COL_HEIGHT:
                 col[off + i] = t
             i += 1
+
+def walk_segments(d, bank, seg_tab_gb, limit=256):
+    """Segment-pointer list for a level, terminated by a $FF low byte."""
+    segs, o = [], bank_file(bank, seg_tab_gb)
+    while len(segs) < limit:
+        if d[o] == 0xFF:                # table terminator
+            break
+        segs.append(u16(d, o)); o += 2
+    return segs
+
+def is_room_segment(d, bank, sp):
+    """Pipe/sub-room segments (underground bonus rooms) begin with a SOLID WALL column
+    (all 16 tiles identical and non-blank) — the room border. The surface scroll skips
+    them: the game enters them only via a pipe (State_0A/0B set $ffe5 from $fff4/$fff5),
+    not by walking through. TODO(pipes): extract these separately as pipe destinations."""
+    col, _ = decode_column(d, bank, bank_file(bank, sp))
+    return len(set(col)) == 1 and col[0] != BLANK_TILE
+
+def decode_level(d, bank, seg_tab_gb):
+    """Surface level = 20 columns decoded from EACH non-room segment pointer in order,
+    until the segment list's $FF terminator. (Segments repeat — reused 20-column blocks;
+    underground pipe rooms are skipped — see is_room_segment.)"""
+    cols = []
+    for sp in walk_segments(d, bank, seg_tab_gb):
+        if is_room_segment(d, bank, sp):
+            continue
+        o = bank_file(bank, sp)
+        for _ in range(COLS_PER_SEG):
+            col, o = decode_column(d, bank, o)
+            cols.append(col)
     return cols
 
 def decode_spawns(d, bank, gb):
@@ -89,14 +122,8 @@ def main():
         seg_tab = u16(d, bank_file(bank, SEGPTR_TABLE) + lvl * 2)
         spawn_p = u16(d, bank_file(bank, SPAWN_TABLE)  + lvl * 2)
         param   = d[PARAM_TABLE + lvl]
-        # segment pointer table: read pointers until one leaves bank range
-        segs = []
-        for s in range(16):
-            sp = u16(d, bank_file(bank, seg_tab) + s * 2)
-            if not (0x4000 <= sp < 0x8000):
-                break
-            segs.append(sp)
-        cols = decode_segment(d, bank, segs[0]) if segs else []
+        segs = walk_segments(d, bank, seg_tab)      # segment list, $FF-terminated
+        cols = decode_level(d, bank, seg_tab)       # 20 cols per segment, in order
         spawns = decode_spawns(d, bank, spawn_p)
         lvldata = {
             "level": lvl, "world": world, "stage": lvl % 3 + 1, "bank": bank, "param": param,
