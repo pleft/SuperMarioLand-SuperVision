@@ -25,3 +25,9 @@ pipe_table:                                   ; 5 bytes/pipe: entry_col(16), roo
     .incbin "build/levels/level_00_pipes.bin"
 pipe_table_end:
 pipe_count = (pipe_table_end - pipe_table) / 5
+
+.export block_table, block_count
+block_table:                                  ; 4 bytes/block: col(16), row, content value
+    .incbin "build/levels/level_00_blocks.bin"
+block_table_end:
+block_count = (block_table_end - block_table) / 4

@@ -451,3 +451,50 @@ Final working solution after a long debug (smooth 1px scroll + fixed status bar)
    = potator_libretro.dylib.orig). NOTE: the pinned HUD needs this patched core under Potator;
    on real SV hardware the split works natively. Corrected $2026 bit map: bit0 NMI, bit1
    timer-IRQ, bit2 DMA-IRQ, bit4 prescaler, bits7:5 bank (our docs/inc were wrong; now fixed).
+
+## Blocks/Coins (#2), Power-ups/Big Mario (#4), Dynamic HUD (#3) — DONE (2026-06-28)
+Implemented behaviourally from RE (see docs/14-blocks-powerups-hud.md).
+- **#2 Blocks & coins**: head-bonk dispatch in jump_player by tile VALUE — `$81` coin block
+  (+coin), `$80` item block, `$82` brick. State tracked in a 640-byte RAM bitmap `tile_mod`
+  (level map is ROM); read_map_tile applies the transform on the surface (`$80/$81→$7F` used,
+  `$82→$2C` broken) so collision + redraw agree and blocks can't be re-bumped. redraw_one
+  repaints the hit cell immediately. Cleared on level restart.
+- **#4 Big Mario**: SML big = 16×16 POSE SWAP (not 16×24) — big poses fill the cell, drawn at
+  the same feet so he grows upward. Extracted big metasprites [16,19,17,20,22] (+$20 parallel
+  of small [0,3,1,4]) → build/data/mario_big_poses.bin. Grow on item block (direct, no mushroom
+  entity yet); big-only brick break; duck (Down, grounded) = idx22 pose + no walk; death→small.
+- **#3 Dynamic HUD**: draw_hud pokes live digit tiles over the template — score row1 c0-5,
+  coins row0 c6-7, time row1 c17-19 (font: digit value = tile number). Clock counts down
+  (tick_timer, starts 400). BCD via sed/cld; ISRs do no ADC/SBC so it's interrupt-safe.
+- All three build clean (32768 bytes). Logic-reviewed; needs Potator verification by the user.
+- Deferred (with the object engine / enemies): coin+mushroom bounce animations, mushroom
+  entity, damage-shrink, time-up death, 1-up at 100 coins. Enemies still last.
+
+## ?-block contents table + object engine (mushroom/coin entities) — (2026-06-28)
+Fixes from user testing of the first cut:
+- **Block contents are TABLE-driven** (bank3 $6536), not the tile value. The mushroom is at
+  cols 42/115 (tile $81!), so the old "$80=item/$81=coin" was wrong. extract_levels.py now
+  emits level_NN_blocks.bin [col(16),row,value]; find_block looks it up on hit. Unlisted = coin.
+- **Used blocks no longer revert to ?** when stepped over / re-streamed: the used-tile transform
+  now runs in restore_bg + draw_column too (both routed through read_map_tile), not only collision.
+- **Real mushroom ENTITY** (not an instant grow): a ?-block with $28 spawns a mushroom object
+  that emerges, slides + falls (gravity/floor via read_solid), and grows Mario only when he
+  walks into it. Minimal OBJ_MAX=4 SoA object engine: update/erase/draw, world->VRAM via
+  o_x-cam_x+scroll_s, erase mirrors Mario's DMA-shift compensation. Cleared on death/pipes.
+- **Coin blocks launch a coin** (coin-pop entity, BG tile $5F) on bonk; coin/score still awarded.
+- Lives ($da15) vs coins ($fffa) corrected earlier; coin = +100 score; 100 coins = 1-up.
+- KNOWN GAP: mushroom sprite is placeholder OBJ $74-$77 (exact item tiles need a dynamic trace);
+  no mushroom wall-collision; $2a/$2c/$c0 contents simplified to mushroom. All builds clean.
+
+## Mushroom sprite identified via SameBoy dump; system NEEDS MORE WORK (2026-06-28)
+- Found the real mushroom sprite: ran the original SML in SameBoy, paused with a mushroom on
+  screen, dumped OAM (`x/160 $fe00`) + OBJ tiles (`x/512 $8800`). Only non-Mario sprite = tile
+  $83 (8x8, sprites are 8x8 mode, LCDC $C3). It was already byte-identical in w1_obj_8000.svt —
+  I'd just guessed the wrong index. Mushroom now drawn as OBJ tile $83 at the feet line (o_y+8).
+- STATUS: blocks/coins/mushroom/coin-pop/big-Mario/HUD all build + run, but the user says it
+  "needs more work" — to revisit later. Known gaps / polish TODO:
+  * Mushroom emerge/slide feel + size/offset tuning; no wall collision; optional $83/$80 shimmer.
+  * Coin-pop visual polish (it's a single BG $5F tile up/down).
+  * $2a/$2c/$c0 block contents (star / superball / multi-coin) are stubbed as mushroom.
+  * Other items / object types, and enemies, still to do (enemies remain LAST per the user).
+  * Time-up death, damage-shrink, game-over at 0 lives, 1-up heart — all TODO.

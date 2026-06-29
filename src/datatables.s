@@ -9,6 +9,9 @@ speedtab:
 .export mario_poses
 mario_poses:
     .incbin "build/data/mario_poses.bin"      ; 4 poses x 4 tiles (stand,walkA,walkB,jump)
+.export mario_big_poses
+mario_big_poses:
+    .incbin "build/data/mario_big_poses.bin"  ; 5 poses x 4 tiles (stand,walkA,walkB,jump,duck)
 .export statusbar_tiles
 statusbar_tiles:
     .incbin "build/data/statusbar.bin"        ; 2x20 status-bar template (BG map $9800)

@@ -10,10 +10,12 @@
 .import jumparc              ; Mario's jump arc table (27 bytes; $7F = apex)
 .import speedtab            ; horizontal walk speed table (px/frame)
 .import mario_poses          ; 4 poses x 4 tiles (metasprite tiles from ROM $4C37)
+.import mario_big_poses      ; 5 big-Mario poses x 4 tiles (stand,walkA,walkB,jump,duck)
 .import statusbar_tiles      ; 2x20 status-bar template (ROM $3F9C)
 .import level0_cols          ; World 1-1 width in columns (from the level binary size)
 .import room_ptrs            ; table of underground room map pointers
 .import pipe_table, pipe_count ; pipe entries: entry_col(16), room, resume_col(16)
+.import block_table, block_count ; ?-block contents: col(16), row, value ($28=mushroom)
 
 ; ---------------------------------------------------------------------------
 .segment "ZEROPAGE"
@@ -69,6 +71,23 @@ save_spr_y:  .res 1          ; Mario's height on the pipe (restored on exit)
 pipe_phase:  .res 1          ; 0 = none, 1 = sinking into pipe (then enter), 2 = rising out
 pipe_anim:   .res 1          ; animation frame counter
 pipe_room:   .res 1          ; room to enter after the sink finishes
+coins:       .res 1          ; coin count, BCD (00..99); 100 coins -> 1-up ($fffa in SML)
+lives:       .res 1          ; spare lives, BCD ($da15 in SML; starts at 2)
+score:       .res 3          ; score, BCD, 6 digits (little-endian: score+0 = ones/tens)
+timer:       .res 2          ; level timer, BCD, 3 digits (countdown), timer+1 = hundreds
+timer_sub:   .res 1          ; sub-second counter for the timer (decrements ~every 24 frames)
+hud_dirty:   .res 1          ; nonzero -> HUD values changed, redraw them
+mario_big:   .res 1          ; 0 = small Mario, 1 = big ("Super") Mario
+mario_duck:  .res 1          ; 1 = big Mario ducking (Down held, grounded)
+hud_row:     .res 1          ; put_hud target row (0 or 1)
+htmp:        .res 1          ; put_hud scratch (digit being blitted)
+rb_vx:       .res 1          ; restore_bg: VRAM pixel X of the region to repaint
+rb_y:        .res 1          ; restore_bg: VRAM pixel Y
+rb_cols:     .res 1          ; restore_bg: width in tiles
+rb_rows:     .res 1          ; restore_bg: height in tiles
+oi:          .res 1          ; object loop index
+ovx:         .res 1          ; object draw scratch: VRAM pixel X
+blk_lim:     .res 1          ; find_block loop limit = block_count*4 (set at boot)
 mario_frame: .res 1          ; current pose index (0 stand, 1/2 walk, 3 jump)
 prev_frame:  .res 1          ; last drawn pose
 pose_tl:     .res 1          ; the 4 tiles of the current pose
@@ -106,6 +125,18 @@ shift_px:    .res 1          ; pixels the framebuffer shifted this frame (0 or 3
 
 .segment "BSS"
 revpix:      .res 256        ; reverse the 4 2bpp pixels in a byte (built at boot)
+tile_mod:    .res 640        ; "modified" bitmap, 1 bit per surface (col,row): used ?-block / broken brick
+; --- object slots (mushroom / coin-pop entities). SoA, OBJ_MAX entries. ---
+o_type:      .res 4          ; 0 free, 1 mushroom, 2 coin-pop
+o_xl:        .res 4          ; world pixel X (16-bit)
+o_xh:        .res 4
+o_y:         .res 4          ; world pixel Y (same space as spr_y: feet line)
+o_vx:        .res 4          ; signed velocity X
+o_vy:        .res 4          ; signed velocity Y (gravity)
+o_tmr:       .res 4          ; state timer / lifetime
+o_pvx:       .res 4          ; last drawn VRAM pixel X (for erase)
+o_pvy:       .res 4          ; last drawn VRAM pixel Y
+o_pdr:       .res 4          ; was drawn last frame?
 
 .segment "ZEROPAGE"
 
@@ -162,6 +193,14 @@ revpix:      .res 256        ; reverse the 4 2bpp pixels in a byte (built at boo
     sta map_base+1
     jsr render_background        ; draw the World 1-1 scene
     jsr render_status_bar        ; status bar (drawn once; pinned by the NMI/IRQ raster split)
+    lda #$02                     ; SML starts with 2 spare lives ($da15 init)
+    sta lives
+    lda #<block_count            ; find_block limit = block_count*4 (low byte is enough: < 64)
+    asl
+    asl
+    sta blk_lim
+    jsr hud_init                 ; clock = 400, zero score/coins
+    jsr draw_hud                 ; stamp the live values over the template
     lda #40                      ; place Mario standing on the ground (pixel X)
     sta spr_x
     sta mario_vx                 ; VRAM X = spr_x (cam_x = scroll_s = 0 at boot)
@@ -187,7 +226,9 @@ main_loop:
     jsr read_input
     jsr move_player              ; walk (updates spr_x) or scroll the camera (cam_x)
     jsr jump_player              ; A = jump (real arc); updates spr_y while airborne
+    jsr update_objects           ; mushroom/coin physics + mushroom pickup
     jsr animate_player           ; pick the pose
+    jsr tick_timer               ; count down the level clock
     lda respawn_req              ; fell into a pit -> restart the level (skip normal draw)
     beq @chkpipe
     jsr do_respawn
@@ -197,14 +238,26 @@ main_loop:
     bcc @play
     jmp main_loop
 @play:
-    ; (The patched core composes the whole frame before rendering, so draw order isn't
+    lda hud_dirty                ; refresh score/coins/time tiles if anything changed
+    beq :+
+    jsr draw_hud
+:   ; (The patched core composes the whole frame before rendering, so draw order isn't
     ; timing-critical; stream the incoming columns last as they're off-screen this frame.)
     jsr scroll_update            ; advance camera: framebuffer shift (fast) + scroll_s
     lda prev_vx                  ; if the frame shifted, old Mario moved left with it
     sec
     sbc shift_px
     sta prev_vx
-    jsr restore_bg               ; erase old Mario at his (shifted) spot
+    sta rb_vx                    ; erase old Mario at his (shifted) spot: 4 cols x 3 rows
+    lda prev_y
+    sta rb_y
+    lda #4
+    sta rb_cols
+    lda #3
+    sta rb_rows
+    jsr restore_bg
+    jsr erase_objects            ; erase the mushroom/coins at their old (shifted) spots
+    jsr draw_objects             ; mushroom/coins under Mario
     lda spr_x                    ; mario_vx = spr_x + scroll_s (drawn pinned under the scroll)
     clc
     adc scroll_s
@@ -278,9 +331,233 @@ main_loop:
     sta map_ptr+1
     ldy mrow
     lda (map_ptr),y
+    ; --- apply the used-tile transform (surface only): bumped ?-block -> used block,
+    ;     broken brick -> blank. Rooms have no such tiles, so skip them. ---
+    ldx room_mode
+    bne @raw
+    pha
+    jsr mod_test                 ; A = mod bit for (feet_col, mrow); clobbers map_ptr/tmpL/X
+    bne @mod
+    pla
+@raw:
+    rts
+@mod:
+    pla                          ; recover the raw tile
+    cmp #$82
+    beq @broke                   ; brick -> blank
+    lda #$7F                     ; ?-block ($80/$81) -> used (solid) block
+    rts
+@broke:
+    lda #$2C
     rts
 @off:
     lda #0
+    rts
+.endproc
+
+; mod_ptr: map_ptr = &tile_mod[feet_col*2 + (mrow>>3)] ; tmpL = bit mask (1<<(mrow&7)).
+; The "modified" bitmap is 1 bit per surface (col,row): set = used ?-block / broken brick.
+.proc mod_ptr
+    lda feet_col
+    asl
+    sta map_ptr
+    lda feet_col+1
+    rol
+    sta map_ptr+1                 ; map_ptr = feet_col * 2
+    lda mrow
+    cmp #8
+    bcc @nolo                     ; mrow >= 8 -> +1 byte (the bitmap packs 16 rows = 2 bytes)
+    inc map_ptr
+    bne @nolo
+    inc map_ptr+1
+@nolo:
+    lda map_ptr
+    clc
+    adc #<tile_mod
+    sta map_ptr
+    lda map_ptr+1
+    adc #>tile_mod
+    sta map_ptr+1
+    lda mrow
+    and #7
+    tax
+    lda bit_masks,x
+    sta tmpL
+    rts
+.endproc
+
+; clear_tile_mod: zero the 640-byte modified-tile bitmap (level restart).
+.proc clear_tile_mod
+    lda #<tile_mod
+    sta map_ptr
+    lda #>tile_mod
+    sta map_ptr+1
+    ldx #3                       ; 3 pages (768 bytes) covers the 640-byte bitmap
+    ldy #0
+    lda #0
+@pg:
+    sta (map_ptr),y
+    iny
+    bne @pg
+    inc map_ptr+1
+    dex
+    bne @pg
+    rts
+.endproc
+
+.proc mod_set
+    jsr mod_ptr
+    ldy #0
+    lda (map_ptr),y
+    ora tmpL
+    sta (map_ptr),y
+    rts
+.endproc
+
+.proc mod_test                   ; A = bit value (0 = unmodified) for (feet_col, mrow)
+    jsr mod_ptr
+    ldy #0
+    lda (map_ptr),y
+    and tmpL
+    rts
+.endproc
+
+; hit_qblock: head-bonk reaction for a ?-block at (feet_col, mrow). Mark it used + redraw as a
+; used block, then dispatch by the block-contents table: $28 (Super Mushroom) -> spawn a
+; mushroom entity; everything else (and unlisted blocks) -> launch a coin + award it. The
+; tile value ($80 vs $81) does NOT decide the contents — the table does (Call_000_2321).
+.proc hit_qblock
+    jsr mod_set                  ; flag (feet_col,mrow) used so it can't be re-bumped
+    lda feet_col                 ; redraw the cell -> read_map_tile now returns $7F (used)
+    sta wcol
+    lda feet_col+1
+    sta wcol+1
+    jsr redraw_one
+    jsr find_block               ; C=1,A=value if this block is in the contents table
+    bcc @coin
+    cmp #$28                     ; $28 = Super Mushroom
+    beq @mush
+    cmp #$c0                     ; $c0 = multi-coin block -> treat as a coin (TODO: 10-coin)
+    beq @coin
+                                 ; $2a/$2c (star/superball) -> mushroom for now (TODO: real items)
+@mush:
+    jsr spawn_mushroom
+    rts
+@coin:
+    jsr spawn_coin               ; coin-pop animation
+    jsr award_coin               ; +1 coin, +100 score, 1-up at 100
+    rts
+.endproc
+
+; find_block: search the contents table for (feet_col, mrow). Returns C=1 + A=value if listed,
+; else C=0. (Unlisted ?-blocks hold a single coin.)
+.proc find_block
+    ldx #0
+@loop:
+    lda block_table,x
+    cmp feet_col
+    bne @next
+    lda block_table+1,x
+    cmp feet_col+1
+    bne @next
+    lda block_table+2,x
+    cmp mrow
+    bne @next
+    lda block_table+3,x
+    sec
+    rts
+@next:
+    inx
+    inx
+    inx
+    inx
+    cpx blk_lim
+    bne @loop
+    clc
+    rts
+.endproc
+
+; award_coin: +1 coin (BCD), +100 score, and a 1-up on the 100th coin.
+.proc award_coin
+    lda #$00
+    ldx #$01                     ; a coin is worth +100 points (SML Call_000_1bff)
+    jsr add_score
+    sed
+    lda coins
+    clc
+    adc #1
+    sta coins
+    cld
+    bne @done                    ; rolled 99->00 = 100th coin -> 1-up
+    jsr add_life
+@done:
+    lda #1
+    sta hud_dirty
+    rts
+.endproc
+
+; add_life / lose_life: BCD lives counter, clamped to [0,99]. Lives only grow on a 1-up
+; (100 coins, or a heart power-up once the object engine lands) — never on a plain ?-block.
+.proc add_life
+    sed
+    lda lives
+    cmp #$99
+    bcs @done
+    clc
+    adc #1
+    sta lives
+@done:
+    cld
+    lda #1
+    sta hud_dirty
+    rts
+.endproc
+
+.proc lose_life
+    sed
+    lda lives
+    beq @done                    ; already 0 -> game over (TODO)
+    sec
+    sbc #1
+    sta lives
+@done:
+    cld
+    lda #1
+    sta hud_dirty
+    rts
+.endproc
+
+; break_brick: big Mario head-bonks a brick ($82) -> smash it (mod bit makes read_map_tile
+; return $2C = blank/passable) and score.
+.proc break_brick
+    jsr mod_set
+    lda feet_col
+    sta wcol
+    lda feet_col+1
+    sta wcol+1
+    jsr redraw_one               ; redraw as blank
+    lda #$50                     ; +50 points
+    ldx #$00
+    jsr add_score
+    rts
+.endproc
+
+; add_score: add a BCD amount (A = ones/tens byte, X = hundreds/thousands byte) to the
+; 3-byte BCD score, with carry into the high byte. Sets hud_dirty.
+.proc add_score
+    sed
+    clc
+    adc score
+    sta score
+    txa
+    adc score+1
+    sta score+1
+    lda score+2
+    adc #0
+    sta score+2
+    cld
+    lda #1
+    sta hud_dirty
     rts
 .endproc
 
@@ -334,8 +611,9 @@ main_loop:
     cmp #1
     beq @ascend
     cmp #2
-    beq @fall
-    ; ---- grounded ----
+    bne :+
+    jmp @fall
+:   ; ---- grounded ----
     lda pad_pressed
     and #GB_A
     bne @startjump
@@ -378,9 +656,25 @@ main_loop:
     sec
     sbc #2                        ; head row = (new spr_y >> 3) - 2 (tile at his head)
     sta mrow
-    jsr read_solid                ; solid ceiling/block above? (centre column)
-    beq @noceil
-    lda #2                        ; bonk: stop rising, start falling (no block-hit yet)
+    jsr read_map_tile             ; effective tile above his head (centre column)
+    cmp #$60
+    bcc @noceil                   ; < $60 -> not solid -> keep rising
+    cmp #$80                      ; $80/$81 = ?-block (content decided by the block table)
+    beq @qblock
+    cmp #$81
+    beq @qblock
+    cmp #$82                      ; $82 = breakable brick
+    beq @brick
+    bra @bonk
+@qblock:
+    jsr hit_qblock                ; spawn coin or mushroom per the content table
+    bra @bonk
+@brick:
+    lda mario_big                 ; small Mario can't break bricks -> just bonk
+    beq @bonk
+    jsr break_brick               ; big Mario smashes it
+@bonk:
+    lda #2                        ; bonk: stop rising, start falling
     sta jump_state
     lda #1
     sta fall_v
@@ -442,6 +736,7 @@ main_loop:
 ; yet; TODO: death animation + life count). Reset camera/state and redraw the scene.
 .proc do_respawn
     stz respawn_req
+    jsr lose_life                ; dying costs a spare life (game-over at 0 = TODO)
     stz room_mode                ; always restart on the surface
     lda #<level0_map
     sta map_base
@@ -463,6 +758,10 @@ main_loop:
     stz mario_facing
     stz mario_frame
     stz prev_frame
+    stz mario_big                 ; death -> back to small Mario
+    stz mario_duck
+    jsr clear_objects             ; drop any live mushroom/coins
+    jsr clear_tile_mod            ; reset bumped/broken blocks for the fresh attempt
     stz shift_px
     lda #40
     sta spr_x
@@ -473,6 +772,8 @@ main_loop:
     sta prev_y
     jsr render_background         ; redraw the level from column 0
     jsr render_status_bar         ; redraw the HUD
+    jsr hud_init                  ; level restart: reset the clock to 400
+    jsr draw_hud                  ; restamp score/coins/time over the fresh template
     jsr draw_player              ; place Mario at the start
     rts
 .endproc
@@ -600,8 +901,10 @@ main_loop:
     sta jump_state
     lda #1
     sta fall_v
+    jsr clear_objects             ; mushroom/coins don't follow Mario into a pipe
     jsr render_background         ; renders the room (map_base = room)
     jsr render_status_bar
+    jsr draw_hud                  ; restamp the HUD over the fresh template (clock continues)
     jsr draw_player
     rts
 .endproc
@@ -650,8 +953,10 @@ main_loop:
     adc scroll_s
     sta mario_vx
     sta prev_vx
+    jsr clear_objects             ; fresh surface, no stale entities
     jsr render_background         ; surface
     jsr render_status_bar
+    jsr draw_hud                  ; restamp the HUD over the fresh template (clock continues)
     jsr draw_player
     rts
 .endproc
@@ -754,16 +1059,16 @@ main_loop:
 ; restore_bg: redraw the 3x3 bg tiles covering the 16x16 sprite at (prev_col, prev_y).
 ; (Restores the background where Mario used to be, so he composites over the level.)
 .proc restore_bg
-    lda prev_vx
+    lda rb_vx
     lsr
     lsr
     lsr
-    sta t_col                    ; base VRAM tile col = prev_vx/8
-    lda prev_y
+    sta t_col                    ; base VRAM tile col = rb_vx/8
+    lda rb_y
     lsr
     lsr
     lsr
-    sta t_row                    ; base tile row = prev_y/8
+    sta t_row                    ; base tile row = rb_y/8
     stz ri
 @cloop:
     stz rj
@@ -783,27 +1088,13 @@ main_loop:
     sta dcol                     ; stash VRAM tile col (drives dest byte col)
     clc                          ; world col = fb_col0 + VRAM tile col
     adc fb_col0
-    sta map_ptr
+    sta feet_col
     lda fb_col0+1
     adc #0
-    sta map_ptr+1
-    asl map_ptr                  ; map_ptr = world_col*16 + level0_map
-    rol map_ptr+1
-    asl map_ptr
-    rol map_ptr+1
-    asl map_ptr
-    rol map_ptr+1
-    asl map_ptr
-    rol map_ptr+1
-    lda map_ptr
-    clc
-    adc map_base
-    sta map_ptr
-    lda map_ptr+1
-    adc map_base+1
-    sta map_ptr+1
-    ldy map_row                  ; level-map row
-    lda (map_ptr),y              ; tile number
+    sta feet_col+1
+    lda map_row
+    sta mrow
+    jsr read_map_tile            ; effective tile (used-block transform applied)
     jsr get_tile_src
     lda dcol                     ; dcol = tile_col*2
     asl
@@ -818,12 +1109,12 @@ main_loop:
 @skip:
     inc rj
     lda rj
-    cmp #3
+    cmp rb_rows
     bne @rloop
     inc ri
     lda ri
-    cmp #4                       ; 4 cols wide: covers Mario's 16px + sub-pixel spill into a
-    bne @cloop                   ;   4th tile (else a 1-2px ghost survives on byte-aligned frames)
+    cmp rb_cols
+    bne @cloop
     rts
 .endproc
 
@@ -834,32 +1125,17 @@ main_loop:
 ; 16-17 are solid dirt to fill the SV's 2 extra scanlines below the ground.
 ; Level tile N<$80 -> bg_chardata[N]; N>=$80 -> chardata[N] (the $8800 region).
 .proc draw_column
-    lda wcol                     ; map_ptr = level0_map + wcol*16
-    sta map_ptr
+    lda wcol                     ; read via read_map_tile (applies the used-block transform)
+    sta feet_col
     lda wcol+1
-    sta map_ptr+1
-    asl map_ptr
-    rol map_ptr+1
-    asl map_ptr
-    rol map_ptr+1
-    asl map_ptr
-    rol map_ptr+1
-    asl map_ptr
-    rol map_ptr+1
-    lda map_ptr
-    clc
-    adc map_base
-    sta map_ptr
-    lda map_ptr+1
-    adc map_base+1
-    sta map_ptr+1
+    sta feet_col+1
     stz bg_row
 @row:
     lda bg_row
     cmp #16
     bcs @dirt                    ; rows 16,17 -> solid dirt (extend ground onto SV's 2 extra rows)
-    ldy bg_row
-    lda (map_ptr),y              ; tile number
+    sta mrow
+    jsr read_map_tile            ; effective tile number
     bra @havetile
 @dirt:
     lda #$61                     ; solid dirt fill tile
@@ -948,6 +1224,118 @@ main_loop:
     rts
 .endproc
 
+; ---------------------------------------------------------------------------
+; Dynamic HUD (task #3). The status bar is rendered once (render_status_bar) with blank
+; placeholders; these routines poke the live score/coins/time digit tiles into it. The font
+; maps digit value -> tile number directly ('0' = tile $00 .. '9' = $09). The raster split
+; renders HUD rows 0-1 at XSCROLL=0, so the digits sit pinned regardless of playfield scroll.
+
+TIMER_RATE = 40                  ; frames per clock unit (SML's $da00 sub-counter reload = $28)
+
+; put_hud: blit digit A (0..9) at HUD cell (X = column, hud_row = row). Preserves X.
+.proc put_hud
+    sta htmp                     ; save digit
+    phx
+    txa
+    asl
+    sta dcol                     ; dcol = col*2
+    lda hud_row
+    asl
+    asl
+    asl
+    sta dy                       ; dy = row*8
+    jsr set_dst
+    lda htmp
+    jsr get_tile_src
+    jsr blit_tile
+    plx
+    rts
+.endproc
+
+; put_hud_byte: blit BCD byte A as two digits at columns X (high nibble) and X+1 (low).
+.proc put_hud_byte
+    pha
+    lsr
+    lsr
+    lsr
+    lsr
+    jsr put_hud
+    inx
+    pla
+    and #$0f
+    jsr put_hud
+    rts
+.endproc
+
+; draw_hud: refresh score (row1 cols 0-5), coins (row0 cols 6-7), time (row1 cols 17-19).
+.proc draw_hud
+    stz hud_row                  ; lives -> row 0 cols 6-7 (after the Mario-head icon)
+    lda lives
+    ldx #6
+    jsr put_hud_byte
+    lda #1                       ; score, coins, time -> row 1
+    sta hud_row
+    lda score+2                  ; score -> cols 0-5
+    ldx #0
+    jsr put_hud_byte
+    lda score+1
+    ldx #2
+    jsr put_hud_byte
+    lda score
+    ldx #4
+    jsr put_hud_byte
+    lda coins                    ; coins -> cols 9-10 (after the coin icon)
+    ldx #9
+    jsr put_hud_byte
+    lda timer+1                  ; time: hundreds digit (low nibble of timer+1) -> col 17
+    and #$0f
+    ldx #17
+    jsr put_hud
+    lda timer                    ; tens/ones -> cols 18-19
+    ldx #18
+    jsr put_hud_byte
+    stz hud_dirty
+    rts
+.endproc
+
+; tick_timer: count down the level clock; dirties the HUD when the displayed value changes.
+.proc tick_timer
+    dec timer_sub
+    beq :+
+    rts
+:   lda #TIMER_RATE
+    sta timer_sub
+    lda timer                    ; already 000? clamp (time-up death TODO)
+    ora timer+1
+    bne :+
+    rts
+:   sed                          ; time -= 1 (BCD: timer+1 = hundreds, timer = tens/ones)
+    lda timer
+    sec
+    sbc #1
+    sta timer
+    lda timer+1
+    sbc #0
+    sta timer+1
+    cld
+    lda #1
+    sta hud_dirty
+    rts
+.endproc
+
+; hud_init: set the clock to 400 and a fresh sub-counter (boot + level restart).
+.proc hud_init
+    lda #$00
+    sta timer
+    lda #$04
+    sta timer+1
+    lda #TIMER_RATE
+    sta timer_sub
+    lda #1
+    sta hud_dirty
+    rts
+.endproc
+
 ; get_tile_src: A = level tile number -> src_ptr = tile graphics.
 .proc get_tile_src
     tax                          ; save tile
@@ -1022,6 +1410,19 @@ CAM_MAX = (level0_cols - 20) * 8 ; max scroll: (level width - 20 visible cols) *
 ; past it his rightward motion scrolls the camera (cam_x) instead, until the level
 ; end (CAM_MAX) where he walks to the right screen edge. The level never scrolls back.
 .proc move_player                ; accelerating walk via the real speed table (px-precise)
+    stz mario_duck               ; big Mario, grounded, holding Down -> duck (no walk)
+    lda mario_big
+    beq @walk
+    lda jump_state
+    bne @walk
+    lda pad_held
+    and #GB_DOWN
+    beq @walk
+    inc mario_duck
+    stz h_hold
+    stz h_idx
+    rts
+@walk:
     lda pad_held
     and #GB_RIGHT
     bne @right
@@ -1290,8 +1691,24 @@ FB_MAX_COL = level0_cols - 24    ; last fb_col0 that keeps cols fb_col0..+23 in 
     sta spr_col                  ; VRAM byte column
     lda mario_frame              ; load the 4 tiles for the current pose
     asl
-    asl                          ; *4
+    asl                          ; *4 = byte offset into the pose table
     tax
+    lda mario_big                ; small or big ("Super") Mario pose set?
+    beq @small
+    lda mario_duck               ; big + ducking -> force the duck pose (index 4 -> offset 16)
+    beq @big
+    ldx #16
+@big:
+    lda mario_big_poses,x
+    sta pose_tl
+    lda mario_big_poses+1,x
+    sta pose_tr
+    lda mario_big_poses+2,x
+    sta pose_bl
+    lda mario_big_poses+3,x
+    sta pose_br
+    bra @haveposes
+@small:
     lda mario_poses,x
     sta pose_tl
     lda mario_poses+1,x
@@ -1300,6 +1717,7 @@ FB_MAX_COL = level0_cols - 24    ; last fb_col0 that keeps cols fb_col0..+23 in 
     sta pose_bl
     lda mario_poses+3,x
     sta pose_br
+@haveposes:
     lda mario_facing             ; facing -> do_flip; mirror the metasprite if left
     sta do_flip
     beq @draw
@@ -1344,6 +1762,366 @@ FB_MAX_COL = level0_cols - 24    ; last fb_col0 that keeps cols fb_col0..+23 in 
     sta dy
     ldx pose_br
     jsr draw_quad
+    rts
+.endproc
+
+; ===========================================================================
+; Object engine (mushroom / coin-pop entities). Minimal SoA slots, OBJ_MAX=4.
+; A ?-block that holds a Super Mushroom spawns a mushroom that slides out and moves; Mario
+; touching it grows him to big. A coin block launches a coin that pops up and falls away.
+; (The mushroom sprite uses placeholder OBJ tiles $74-$77 — the exact ROM item tiles weren't
+; identifiable statically; the coin is the real BG coin tile $5F.)
+; ===========================================================================
+OBJ_MUSH   = 1
+OBJ_COIN   = 2
+MUSH_TILE  = $83                 ; SML Super Mushroom = a single 8x8 OBJ sprite (verified via
+                                 ; SameBoy OAM/VRAM dump: the only on-screen item sprite)
+COIN_TILE  = $5F
+
+; clear_objects: free all slots (level restart / pipe transition).
+.proc clear_objects
+    ldx #3
+:   stz o_type,x
+    stz o_pdr,x
+    dex
+    bpl :-
+    rts
+.endproc
+
+; find_free_obj: X = a free slot, C=0; C=1 if all full.
+.proc find_free_obj
+    ldx #0
+@l:
+    lda o_type,x
+    beq @ok
+    inx
+    cpx #4
+    bne @l
+    sec
+    rts
+@ok:
+    clc
+    rts
+.endproc
+
+; obj_set_x8: o_x[X] = feet_col * 8 (left pixel of the block column).
+.proc obj_set_x8
+    lda feet_col
+    sta o_xl,x
+    lda feet_col+1
+    sta o_xh,x
+    asl o_xl,x
+    rol o_xh,x
+    asl o_xl,x
+    rol o_xh,x
+    asl o_xl,x
+    rol o_xh,x
+    rts
+.endproc
+
+; spawn_mushroom: appear on top of the block at (feet_col,mrow), sliding right.
+.proc spawn_mushroom
+    jsr find_free_obj
+    bcs @full
+    lda #OBJ_MUSH
+    sta o_type,x
+    jsr obj_set_x8
+    lda mrow                     ; o_y = mrow*8 (feet rest on the block top)
+    asl
+    asl
+    asl
+    sta o_y,x
+    lda #1                       ; slide right
+    sta o_vx,x
+    stz o_vy,x
+    lda #12                      ; emerge pause: sit on the block, not yet consumable
+    sta o_tmr,x
+    stz o_pdr,x
+@full:
+    rts
+.endproc
+
+; spawn_coin: a coin pops straight up from the block and falls away (~24 frames).
+.proc spawn_coin
+    jsr find_free_obj
+    bcs @full
+    lda #OBJ_COIN
+    sta o_type,x
+    jsr obj_set_x8
+    lda mrow
+    asl
+    asl
+    asl
+    sta o_y,x
+    stz o_vx,x
+    lda #$FA                     ; vy = -6 (launch up)
+    sta o_vy,x
+    lda #24
+    sta o_tmr,x
+    stz o_pdr,x
+@full:
+    rts
+.endproc
+
+; update_objects: per-frame physics for every active slot.
+.proc update_objects
+    stz oi
+@loop:
+    ldx oi
+    lda o_type,x
+    beq @next
+    cmp #OBJ_COIN
+    beq @coin
+    jsr upd_mush
+    bra @next
+@coin:
+    jsr upd_coin
+@next:
+    inc oi
+    lda oi
+    cmp #4
+    bne @loop
+    rts
+.endproc
+
+; upd_coin (X=slot): y += vy ; vy += gravity ; expire after o_tmr frames.
+.proc upd_coin
+    clc
+    lda o_y,x
+    adc o_vy,x                   ; vy is signed 8-bit
+    sta o_y,x
+    inc o_vy,x                   ; gravity
+    dec o_tmr,x
+    bne @done
+    stz o_type,x                 ; lifetime over -> free
+@done:
+    rts
+.endproc
+
+; upd_mush (X=slot): slide horizontally, fall under gravity onto the floor, and grow Mario
+; when he overlaps it. (No wall collision — the mushroom is short-lived; documented.)
+.proc upd_mush
+    lda o_tmr,x                  ; emerge pause: hold still on the block, not yet consumable
+    beq @active
+    dec o_tmr,x
+    rts
+@active:
+    ; --- horizontal: o_x += vx (sign-extended) ---
+    lda o_vx,x
+    ldy #0
+    bpl :+
+    ldy #$FF
+:   sty tmpH
+    clc
+    lda o_xl,x
+    adc o_vx,x
+    sta o_xl,x
+    lda o_xh,x
+    adc tmpH
+    sta o_xh,x
+    ; --- gravity: vy += 1 (cap 4); o_y += vy ---
+    ldx oi
+    lda o_vy,x
+    cmp #4
+    bcs :+
+    inc o_vy,x
+:   clc
+    lda o_y,x
+    adc o_vy,x
+    sta o_y,x
+    ; --- floor: feet_col=(o_x+4)>>3, mrow=o_y>>3 ; snap if solid ---
+    lda o_xl,x
+    clc
+    adc #4
+    sta feet_col
+    lda o_xh,x
+    adc #0
+    sta feet_col+1
+    lsr feet_col+1
+    ror feet_col
+    lsr feet_col+1
+    ror feet_col
+    lsr feet_col+1
+    ror feet_col
+    lda o_y,x
+    lsr
+    lsr
+    lsr
+    sta mrow
+    jsr read_solid
+    beq @air
+    ldx oi                       ; landed: snap o_y to the tile top, vy=0
+    lda mrow
+    asl
+    asl
+    asl
+    sta o_y,x
+    stz o_vy,x
+@air:
+    ; --- consume: Mario overlaps the mushroom? ---
+    ldx oi
+    lda cam_x                    ; Mario world X = cam_x + spr_x
+    clc
+    adc spr_x
+    sta tmpL
+    lda cam_x+1
+    adc #0
+    sta tmpH
+    sec                          ; dx = mario_wx - o_x
+    lda tmpL
+    sbc o_xl,x
+    sta tmpL
+    lda tmpH
+    sbc o_xh,x
+    sta tmpH
+    bpl @posdx                   ; abs(dx)
+    sec
+    lda #0
+    sbc tmpL
+    sta tmpL
+    lda #0
+    sbc tmpH
+    sta tmpH
+@posdx:
+    lda tmpH
+    bne @done                    ; |dx| >= 256 -> far
+    lda tmpL
+    cmp #14
+    bcs @done
+    lda spr_y                    ; dy = |spr_y - o_y| < 16 ?
+    sec
+    sbc o_y,x
+    bpl :+
+    eor #$FF
+    ina
+:   cmp #16
+    bcs @done
+    ; --- eat it ---
+    lda mario_big
+    bne @score
+    lda #1
+    sta mario_big                ; grow to Super Mario!
+@score:
+    lda #$00
+    ldx #$10                     ; +1000
+    jsr add_score
+    ldx oi
+    stz o_type,x                 ; remove the mushroom
+@done:
+    rts
+.endproc
+
+; erase_objects: repaint the background where each object was drawn last frame (shifted with
+; the DMA scroll like Mario). Always 3x3 tiles (covers the 16px sprite + sub-pixel spill).
+.proc erase_objects
+    stz oi
+@loop:
+    ldx oi
+    lda o_pdr,x
+    beq @next
+    lda o_pvx,x
+    sec
+    sbc shift_px
+    sta rb_vx
+    lda o_pvy,x
+    sta rb_y
+    lda #3
+    sta rb_cols
+    sta rb_rows
+    jsr restore_bg
+@next:
+    inc oi
+    lda oi
+    cmp #4
+    bne @loop
+    rts
+.endproc
+
+; draw_objects: draw every active slot at its on-screen position; record it for next erase.
+.proc draw_objects
+    stz oi
+@loop:
+    ldx oi
+    lda o_type,x
+    beq @off
+    sec                          ; VRAM pixel X = o_x - cam_x + scroll_s
+    lda o_xl,x
+    sbc cam_x
+    sta tmpL
+    lda o_xh,x
+    sbc cam_x+1
+    sta tmpH
+    lda tmpL
+    clc
+    adc scroll_s
+    sta tmpL
+    bcc :+
+    inc tmpH
+:   lda tmpH
+    bne @off                     ; off-screen (negative or > 255)
+    lda tmpL
+    cmp #168
+    bcs @off
+    sta ovx
+    jsr draw_obj_sprite
+    ldx oi
+    lda ovx
+    sta o_pvx,x
+    lda o_y,x
+    sta o_pvy,x
+    lda #1
+    sta o_pdr,x
+    bra @next
+@off:
+    ldx oi
+    stz o_pdr,x
+@next:
+    inc oi
+    lda oi
+    cmp #4
+    bne @loop
+    rts
+.endproc
+
+; draw_obj_sprite: draw object oi at (ovx, o_y) — mushroom = 4 OBJ tiles, coin = 1 BG tile.
+.proc draw_obj_sprite
+    stz do_flip
+    lda ovx
+    and #3
+    sta spr_subx
+    lda ovx
+    lsr
+    lsr
+    lsr
+    sta spr_col
+    ldx oi
+    lda o_type,x
+    cmp #OBJ_COIN
+    beq @coin
+    ; --- mushroom: one 8x8 OBJ tile, drawn at the feet line (o_y + 8) ---
+    lda spr_col
+    sta dcol
+    ldx oi
+    lda o_y,x
+    clc
+    adc #8                       ; o_y is the 16px-sprite convention; an 8px item sits +8 lower
+    sta dy
+    ldx #MUSH_TILE
+    jsr draw_quad
+    rts
+@coin:
+    lda spr_col
+    sta dcol
+    ldx oi
+    lda o_y,x
+    clc
+    adc #8
+    sta dy
+    jsr set_dst
+    lda #COIN_TILE               ; BG coin tile -> bg_chardata, drawn transparent
+    jsr get_tile_src
+    stz blit_opaque
+    jsr sprite_blit_subpx
     rts
 .endproc
 

@@ -22,6 +22,10 @@ SPEEDTAB_LEN  = 6
 # port uses, in its order: stand, walkA, walkB, jump = metasprite indices 0, 3, 1, 4.
 META_TABLE   = 0x4C37     # bank 3
 POSE_INDICES = [0, 3, 1, 4]
+# Big ("Super") Mario uses a parallel pose set (same 16x16 metasprite shape, +$20 tile
+# offset, filling the full cell vs small Mario's ~12px). Same order as small, plus a duck:
+# stand, walkA, walkB, jump, duck = metasprite indices 16, 19, 17, 20, 22.
+BIG_POSE_INDICES = [16, 19, 17, 20, 22]
 
 # Status-bar template: 2 rows x 20 tiles at bank 0 $3F9C (the HUD-init at $060F copies it
 # to BG map $9800). Static labels + zero/blank placeholders for the dynamic values.
@@ -58,6 +62,16 @@ def main():
     with open(os.path.join(out, "mario_poses.bin"), "wb") as f:
         f.write(poses)
     print(f"mario_poses.bin: {len(poses)} bytes -> {out}/  ({' '.join(f'{b:02X}' for b in poses)})")
+
+    big = bytearray()
+    for idx in BIG_POSE_INDICES:
+        struct_ptr = u16(d, bank_off(3, META_TABLE) + idx * 2)
+        tiledata   = u16(d, bank_off(3, struct_ptr))
+        tdo        = bank_off(3, tiledata)
+        big += d[tdo + 2:tdo + 6]
+    with open(os.path.join(out, "mario_big_poses.bin"), "wb") as f:
+        f.write(big)
+    print(f"mario_big_poses.bin: {len(big)} bytes -> {out}/  ({' '.join(f'{b:02X}' for b in big)})")
 
     sb = d[STATUSBAR_ADDR:STATUSBAR_ADDR + STATUSBAR_LEN]
     with open(os.path.join(out, "statusbar.bin"), "wb") as f:

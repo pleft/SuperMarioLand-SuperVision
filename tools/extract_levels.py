@@ -118,6 +118,31 @@ def decode_pipes(d, level, seg_flat, seg_room):
         o += 6
     return pipes
 
+BLOCK_TABLE = 0x6536              # bank 3: per-level pointer -> ?-block contents list
+
+def decode_blocks(d, level, seg_flat, cols):
+    """?-block contents @ bank3 $6536[level]: 3-byte entries [segment, col-in-seg, value],
+    $FF-terminated (Call_000_2321). The value ($c0cd) is what the block holds: $28 = Super
+    Mushroom (-> $2d superball if Mario is already big); others = star/superball/multi-coin.
+    Blocks NOT listed default to a single coin. Maps (seg,col) -> the flattened surface column
+    and the row of its $80/$81/$5F special tile."""
+    o = bank_file(3, u16(d, bank_file(3, BLOCK_TABLE) + level * 2))
+    out = []
+    for _ in range(64):
+        seg = d[o]
+        if seg == 0xFF:
+            break
+        col, val = d[o + 1], d[o + 2]; o += 3
+        if seg not in seg_flat:
+            continue
+        fc = seg_flat[seg] + col
+        if fc >= len(cols):
+            continue
+        rows = [r for r in range(COL_HEIGHT) if cols[fc][r] in (0x80, 0x81, 0x5F)]
+        row = rows[0] if rows else 0
+        out.append({"col": fc, "row": row, "value": val})
+    return out
+
 def decode_spawns(d, bank, gb):
     """3-byte entries [col, position, type], ascending by col, until col drops/ends.
     position: Y = (pos&0x1F)*8+0x10 ; X screen-offset = (pos>>6)&3."""
@@ -157,12 +182,13 @@ def main():
         segs = walk_segments(d, bank, seg_tab)      # segment list, $FF-terminated
         cols, rooms, seg_flat, seg_room = decode_level(d, bank, seg_tab)
         pipes = decode_pipes(d, lvl, seg_flat, seg_room)
+        blocks = decode_blocks(d, lvl, seg_flat, cols)
         spawns = decode_spawns(d, bank, spawn_p)
         lvldata = {
             "level": lvl, "world": world, "stage": lvl % 3 + 1, "bank": bank, "param": param,
             "seg_ptr_table": f"${seg_tab:04X}", "segment_ptrs": [f"${x:04X}" for x in segs],
             "columns": cols, "width_cols": len(cols),
-            "rooms": rooms, "pipes": pipes, "spawns": spawns,
+            "rooms": rooms, "pipes": pipes, "blocks": blocks, "spawns": spawns,
         }
         with open(os.path.join(out, f"level_{lvl:02d}.json"), "w") as f:
             json.dump(lvldata, f, indent=1)
@@ -180,6 +206,10 @@ def main():
             for p in pipes:
                 f.write(bytes([p["entry_col"] & 0xFF, p["entry_col"] >> 8, p["room"],
                                p["resume_col"] & 0xFF, p["resume_col"] >> 8]))
+        # ?-block contents: per block -> [col(16), row, value]
+        with open(os.path.join(out, f"level_{lvl:02d}_blocks.bin"), "wb") as f:
+            for b in blocks:
+                f.write(bytes([b["col"] & 0xFF, b["col"] >> 8, b["row"], b["value"]]))
         summary.append((lvl, f"{world}-{lvl%3+1}", bank, f"${seg_tab:04X}",
                         len(cols), len(rooms), len(pipes), len(spawns)))
 

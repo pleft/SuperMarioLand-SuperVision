@@ -11,7 +11,7 @@ ROM_IN  = super-mario-land-gb.gb
 SVT     = build/gfx/w1_obj_8000.svt
 LVL     = build/levels/level_00.bin
 ARC     = build/data/jumparc.bin
-TABLES  = build/data/jumparc.bin build/data/speedtab.bin build/data/mario_poses.bin build/data/statusbar.bin
+TABLES  = build/data/jumparc.bin build/data/speedtab.bin build/data/mario_poses.bin build/data/mario_big_poses.bin build/data/statusbar.bin
 OBJS    = build/main.o build/gfxdata.o build/leveldata.o build/datatables.o
 ROM     = build/super-mario-land.sv
 
