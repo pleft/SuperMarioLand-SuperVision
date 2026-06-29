@@ -30,10 +30,18 @@ A minimal SoA slot system (`OBJ_MAX=4`) in `src/main.s`: `update_objects` (physi
 `erase_objects`+`draw_objects` (repaint bg at the old spot — shifted with the DMA scroll like
 Mario — then draw at the new spot). World-X coordinates convert to VRAM-X via
 `o_x - cam_x + scroll_s` (same mapping as Mario's `mario_vx`).
-- **Mushroom**: emerges on the block (12-frame pause so Mario's bonk doesn't insta-grab it),
-  slides right `1px/frame`, falls under gravity onto the floor (`read_solid`), and when Mario's
-  box overlaps it (`|dx|<14`, `|dy|<16`) he grows to big (`+1000`). No wall collision yet
-  (short-lived; TODO). Consuming it — not the block hit — is what makes Super Mario.
+- **Mushroom** — physics RE'd from the real object engine (type `$28`): PhysicsParam table
+  `$3375` (3 bytes/type, `type*3`) entry `24 11 00` → `$ffc7=$24`, and `$24 & $0c = $04` =
+  **reverse direction on a horizontal wall hit**. AI script `$349E[$28]` @ `$387F` =
+  `F4 01 F8 16 F0 31 70 11 E5 01 11 01…`: `70` = velocity hi-nibble 7 (the upward **pop** out
+  of the block), settling to `$01`/`$11` = **X speed 1 px/frame**. The integrator
+  (`ObjectPhysics_Integrate $2975` + horizontal `$2879`): velocity hi-nibble=Y speed,
+  lo-nibble=X speed; `$ffc5` bit0/1 = X/Y direction; on a wall, `$ffc7 & $0c == $04` reverses.
+  Port (`upd_mush`): emerge = rise up ~12 px (pure-up, matching the script's `$70`-then-`$01`),
+  then walk 1 px/frame, **reverse at walls** (check the tile ahead at the body row), fall under
+  gravity (cap 3) onto the floor. Mario overlap (`|dx|<14`,`|dy|<16`) → grow big (`+1000`).
+  Consuming it — not the block hit — is what makes Super Mario. (Full script VM + integrator
+  port deferred to the enemies task; this replicates type `$28`'s behaviour faithfully.)
 - **Coin-pop**: launches up (`vy=-6`) + gravity, lives ~24 frames, cosmetic (coin/score are
   awarded on the hit). Drawn with the real BG coin tile `$5F`.
 - Objects are cleared on death and on every pipe transition.

@@ -35,10 +35,17 @@ interactive objects.
 - `type` = object type id (→ `$349E`/`$3375`)
 (Correction: an earlier note labeled byte2 "param"; it is the **type**, byte1 is position.)
 
-## Type tables (indexed by `$FFC0` object type, ~28 types `$00–$1B`)
+## Type tables (indexed by `$FFC0` object type)
+Types run past the `$00–$1B` enemies — ITEMS live higher: **`$28` = Super Mushroom**, **`$2D`
+= the big-Mario power-up** (superball flower). Block-content values (bank3 `$6536`) are spawned
+as these object types (`Jump_000_1888` → `Call_000_254d`).
 - **`AIScriptPtrTable` @ `$349E`** — per-type pointer to a **movement-script** (below).
-- **`PhysicsParamTable` @ `$3375`** — per-type 2 bytes: `[accel, param]` loaded into the
-  ballistic engine (`$FFC7` etc.). Same engine as `ObjectPhysics_Integrate` ($2975).
+- **`PhysicsParamTable` @ `$3375`** — **3 bytes/type** (`Call_000_2cbb` indexes `type*3`):
+  byte0 → `$FFC7` (collision/accel flags; `&$0c==$04` = reverse-X-on-wall, `&$30`/`&$c0` =
+  Y-collision response), byte1 → slot+10, byte2 → slot+12. (Earlier "2 bytes" was wrong.)
+  Mushroom `$28` = `24 11 00`. Same ballistic engine as `ObjectPhysics_Integrate` ($2975) +
+  horizontal mover (`$2879`): velocity `$FFC1` hi-nibble = Y speed, lo-nibble = X speed;
+  `$FFC5` bit0/bit1 = X/Y direction.
 
 ## AI = a data-driven script bytecode
 `ObjectPhysicsAndScript` ($2676) applies physics, then steps a **per-type script**:

@@ -1901,12 +1901,56 @@ COIN_TILE  = $5F
 ; upd_mush (X=slot): slide horizontally, fall under gravity onto the floor, and grow Mario
 ; when he overlaps it. (No wall collision — the mushroom is short-lived; documented.)
 .proc upd_mush
-    lda o_tmr,x                  ; emerge pause: hold still on the block, not yet consumable
+    lda o_tmr,x                  ; emerge: rise up out of the block (not yet consumable)
     beq @active
     dec o_tmr,x
+    dec o_y,x                    ; move up 1px/frame; then gravity + vx curve it clockwise
     rts
 @active:
-    ; --- horizontal: o_x += vx (sign-extended) ---
+    ; --- wall check: tile AHEAD (direction of motion) at body row -> reverse (RE: type $28
+    ;     PhysicsParam $ffc7=$24, &$0c=$04 = reverse on a horizontal collision) ---
+    lda o_vx,x
+    bmi @aleft
+    lda o_xl,x                   ; moving right: ahead col = (o_x + 8) >> 3
+    clc
+    adc #8
+    sta feet_col
+    lda o_xh,x
+    adc #0
+    sta feet_col+1
+    bra @ahead
+@aleft:
+    lda o_xl,x                   ; moving left: ahead col = (o_x - 1) >> 3
+    sec
+    sbc #1
+    sta feet_col
+    lda o_xh,x
+    sbc #0
+    sta feet_col+1
+@ahead:
+    lsr feet_col+1
+    ror feet_col
+    lsr feet_col+1
+    ror feet_col
+    lsr feet_col+1
+    ror feet_col
+    lda o_y,x                    ; body row = (o_y >> 3) - 1
+    lsr
+    lsr
+    lsr
+    sec
+    sbc #1
+    sta mrow
+    jsr read_solid
+    beq @nowall
+    ldx oi                       ; wall ahead -> reverse direction, don't step into it
+    lda o_vx,x
+    eor #$FF
+    ina
+    sta o_vx,x
+    bra @vert
+@nowall:
+    ldx oi                       ; --- horizontal: o_x += vx (sign-extended), 1 px/frame ---
     lda o_vx,x
     ldy #0
     bpl :+
@@ -1919,10 +1963,11 @@ COIN_TILE  = $5F
     lda o_xh,x
     adc tmpH
     sta o_xh,x
-    ; --- gravity: vy += 1 (cap 4); o_y += vy ---
+@vert:
+    ; --- gravity: vy += 1 (cap 3); o_y += vy ---
     ldx oi
     lda o_vy,x
-    cmp #4
+    cmp #3
     bcs :+
     inc o_vy,x
 :   clc
@@ -2083,16 +2128,15 @@ COIN_TILE  = $5F
     rts
 .endproc
 
-; draw_obj_sprite: draw object oi at (ovx, o_y) — mushroom = 4 OBJ tiles, coin = 1 BG tile.
+; draw_obj_sprite: draw object oi at (ovx, o_y) — mushroom = 1 OBJ tile, coin = 1 BG tile.
 .proc draw_obj_sprite
     stz do_flip
     lda ovx
     and #3
-    sta spr_subx
+    sta spr_subx                 ; sub-pixel within the byte (SV = 4 px/byte)
     lda ovx
     lsr
-    lsr
-    lsr
+    lsr                          ; byte column = ovx / 4 (NOT /8 — 4 px per byte)
     sta spr_col
     ldx oi
     lda o_type,x
