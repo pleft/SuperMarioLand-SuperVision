@@ -24,8 +24,9 @@ META_TABLE   = 0x4C37     # bank 3
 POSE_INDICES = [0, 3, 1, 4]
 # Big ("Super") Mario uses a parallel pose set (same 16x16 metasprite shape, +$20 tile
 # offset, filling the full cell vs small Mario's ~12px). Same order as small, plus a duck:
-# stand, walkA, walkB, jump, duck = metasprite indices 16, 19, 17, 20, 22.
-BIG_POSE_INDICES = [16, 19, 17, 20, 22]
+# stand, walkA, walkB, jump, duck = metasprite indices 16, 19, 17, 20, 24 (idx 24 = the
+# real big-Mario crouch, tiles $40-$43; verified by rendering vs the original).
+BIG_POSE_INDICES = [16, 19, 17, 20, 24]
 
 # Status-bar template: 2 rows x 20 tiles at bank 0 $3F9C (the HUD-init at $060F copies it
 # to BG map $9800). Static labels + zero/blank placeholders for the dynamic values.
