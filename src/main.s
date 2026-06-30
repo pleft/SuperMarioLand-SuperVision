@@ -1833,9 +1833,9 @@ COIN_TILE  = $5F
     sta o_y,x
     lda #1                       ; walk right
     sta o_vx,x
-    lda #$FB                     ; vy = -5/update: the upward "pop" (~15px rise, matches trace)
+    lda #$FB                     ; vy = -5/update: the upward "pop"
     sta o_vy,x
-    lda #6                       ; consume delay (updates) so the bonk can't insta-grab it
+    lda #25                      ; HOP duration (updates) ~= the original's $28 stage (~50 frames)
     sta o_tmr,x
     stz o_pdr,x
 @full:
@@ -1902,87 +1902,37 @@ COIN_TILE  = $5F
 ; upd_mush (X=slot): slide horizontally, fall under gravity onto the floor, and grow Mario
 ; when he overlaps it. (No wall collision — the mushroom is short-lived; documented.)
 .proc upd_mush
-    ; The original's object AI runs every OTHER frame (~30Hz): the mushroom moves 1px per
-    ; update = 0.5 px/frame (verified via an mGBA trace of the real game). So skip odd frames.
+    ; The original mushroom is a 2-stage object (RE'd from an mGBA per-frame trace): type $28
+    ; "hop" -> morphs to $29 "walker". It hops up-and-right (~0.5px/frame for ~25 updates),
+    ; then the walker DROPS STRAIGHT DOWN (x frozen, ~1px/frame) to the floor, then walks
+    ; 0.5px/frame and reverses at walls. Object AI runs every OTHER frame (~30Hz) -> 1px/update
+    ; = 0.5px/frame. o_tmr counts down the hop (and doubles as the no-insta-grab window).
     lda frame_count
     lsr
     bcc :+
-    rts                          ; odd frame -> skip (object AI runs every other frame)
-:   ; Ballistic from spawn: an initial upward velocity (the "pop") + gentle gravity, walking
-    ; right the whole time. o_tmr is now just a consume delay so Mario's bonk can't insta-grab.
-    ; --- wall check: tile AHEAD (direction of motion) at body row -> reverse (RE: type $28
-    ;     PhysicsParam $ffc7=$24, &$0c=$04 = reverse on a horizontal collision) ---
-    lda o_vx,x
-    bmi @aleft
-    lda o_xl,x                   ; moving right: ahead col = (o_x + 8) >> 3
-    clc
-    adc #8
-    sta feet_col
-    lda o_xh,x
-    adc #0
-    sta feet_col+1
-    bra @ahead
-@aleft:
-    lda o_xl,x                   ; moving left: ahead col = (o_x - 1) >> 3
-    sec
-    sbc #1
-    sta feet_col
-    lda o_xh,x
-    sbc #0
-    sta feet_col+1
-@ahead:
-    lsr feet_col+1
-    ror feet_col
-    lsr feet_col+1
-    ror feet_col
-    lsr feet_col+1
-    ror feet_col
-    lda o_y,x                    ; body row = (o_y >> 3) - 1
-    lsr
-    lsr
-    lsr
-    sec
-    sbc #1
-    sta mrow
-    jsr read_solid
-    beq @nowall
-    ldx oi                       ; wall ahead -> reverse direction, don't step into it
-    lda o_vx,x
-    eor #$FF
-    ina
-    sta o_vx,x
-    bra @vert
-@nowall:
-    ldx oi                       ; --- horizontal: o_x += vx (sign-extended), 1 px/frame ---
-    ldy #0                       ; (set Y BEFORE lda so the lda's N flag survives to bpl)
-    lda o_vx,x
-    bpl :+
-    ldy #$FF                     ; vx negative -> high byte = $FF (sign-extend), else $00
-:   sty tmpH
-    clc
-    lda o_xl,x
-    adc o_vx,x
-    sta o_xl,x
-    lda o_xh,x
-    adc tmpH
-    sta o_xh,x
-@vert:
-    ; --- gentle ballistic: apply the current (signed) vy, THEN accelerate it toward a +1
-    ;     terminal. Apply-first so the spawn -5 gives a full -5 first step (~15px rise). ---
-    ldx oi
+    rts                          ; odd frame -> skip (every-other-frame ~30Hz)
+:   lda o_tmr,x
+    beq @walker
+    ; ===== HOP: arc up + right (gentle), no floor/consume while airborne =====
+    dec o_tmr,x
+    jsr mush_xmove               ; x += vx
+    ldx oi                       ; y += vy ; gentle gravity toward a +1 terminal
     clc
     lda o_y,x
-    adc o_vy,x                   ; o_y += vy (negative = the upward pop)
+    adc o_vy,x
     sta o_y,x
     lda o_vy,x
-    bmi @grav                    ; still rising -> keep accelerating toward fall
+    bmi @hgrav
     cmp #1
-    bcs @gdone                   ; terminal = +1 px/update (= 0.5 px/frame fall)
-@grav:
+    bcs @hdone
+@hgrav:
     inc o_vy,x
-@gdone:
-    ; --- floor: feet_col=(o_x+4)>>3, mrow=o_y>>3 ; snap if solid ---
-    lda o_xl,x
+@hdone:
+    rts
+@walker:
+    ; ===== WALKER: floor check -> DROP (airborne) or WALK (grounded) =====
+    ldx oi
+    lda o_xl,x                   ; feet_col = (o_x + 4) >> 3
     clc
     adc #4
     sta feet_col
@@ -2001,21 +1951,65 @@ COIN_TILE  = $5F
     lsr
     sta mrow
     jsr read_solid
-    beq @air
-    ldx oi                       ; landed: snap o_y to the tile top, vy=0
+    bne @grounded
+    ; --- DROP: x stays frozen, fall ~1px/frame (2px/update) ---
+    ldx oi
+    clc
+    lda o_y,x
+    adc #2
+    sta o_y,x
+    jmp @consume
+@grounded:
+    ldx oi                       ; snap to the floor tile top
     lda mrow
     asl
     asl
     asl
     sta o_y,x
-    stz o_vy,x
-@air:
-    ldx oi                       ; consume only after the spawn delay (no insta-grab on bonk)
-    lda o_tmr,x
-    beq @cons
-    dec o_tmr,x
-    rts
-@cons:
+    ; --- WALK: wall ahead (body row) -> reverse, else x += vx ---
+    lda o_vx,x
+    bmi @wleft
+    lda o_xl,x                   ; right: ahead = (o_x + 8) >> 3
+    clc
+    adc #8
+    sta feet_col
+    lda o_xh,x
+    adc #0
+    sta feet_col+1
+    bra @wchk
+@wleft:
+    lda o_xl,x                   ; left: ahead = (o_x - 1) >> 3
+    sec
+    sbc #1
+    sta feet_col
+    lda o_xh,x
+    sbc #0
+    sta feet_col+1
+@wchk:
+    lsr feet_col+1
+    ror feet_col
+    lsr feet_col+1
+    ror feet_col
+    lsr feet_col+1
+    ror feet_col
+    lda o_y,x                    ; body row = (o_y >> 3) - 1
+    lsr
+    lsr
+    lsr
+    sec
+    sbc #1
+    sta mrow
+    jsr read_solid
+    beq @wmove
+    ldx oi                       ; wall -> reverse direction
+    lda o_vx,x
+    eor #$FF
+    ina
+    sta o_vx,x
+    jmp @consume
+@wmove:
+    jsr mush_xmove
+@consume:
     ; --- consume: Mario overlaps the mushroom? ---
     ldx oi
     lda cam_x                    ; Mario world X = cam_x + spr_x
@@ -2032,7 +2026,7 @@ COIN_TILE  = $5F
     lda tmpH
     sbc o_xh,x
     sta tmpH
-    bpl @posdx                   ; abs(dx)
+    bpl @posdx
     sec
     lda #0
     sbc tmpL
@@ -2042,11 +2036,11 @@ COIN_TILE  = $5F
     sta tmpH
 @posdx:
     lda tmpH
-    bne @done                    ; |dx| >= 256 -> far
+    bne @done
     lda tmpL
     cmp #14
     bcs @done
-    lda spr_y                    ; dy = |spr_y - o_y| < 16 ?
+    lda spr_y
     sec
     sbc o_y,x
     bpl :+
@@ -2054,18 +2048,35 @@ COIN_TILE  = $5F
     ina
 :   cmp #16
     bcs @done
-    ; --- eat it ---
     lda mario_big
     bne @score
     lda #1
     sta mario_big                ; grow to Super Mario!
 @score:
     lda #$00
-    ldx #$10                     ; +1000
+    ldx #$10
     jsr add_score
     ldx oi
-    stz o_type,x                 ; remove the mushroom
+    stz o_type,x
 @done:
+    rts
+.endproc
+
+; mush_xmove: o_x += o_vx (sign-extended). Uses oi for the slot.
+.proc mush_xmove
+    ldx oi
+    ldy #0
+    lda o_vx,x
+    bpl :+
+    ldy #$FF
+:   sty tmpH
+    clc
+    lda o_xl,x
+    adc o_vx,x
+    sta o_xl,x
+    lda o_xh,x
+    adc tmpH
+    sta o_xh,x
     rts
 .endproc
 
