@@ -74,6 +74,14 @@ def is_room_segment(d, bank, sp):
 
 PIPE_TABLE = 0x651C               # bank 3: per-level pointer -> pipe entry list
 
+# Play-start segment: the level loader seeds $ffe5 (segment index) at level start, so the
+# playable surface begins partway into the segment list — the leading segments are a lead-in
+# behind the start (incl. the pipe-rooms) that the camera never reaches (no left-scroll).
+# Verified for 1-1 from the start routine $0DD3 (`ld a,$03; ldh [$ffe5],a`) AND from a live
+# mGBA trace (tools/trace_level.lua): at marioX=50 the surface is already at seg>=3, never <3.
+# Other levels: TODO RE each loader's $ffe5 seed; default 0 until then.
+LEVEL_START_SEG = {0: 3}
+
 def decode_seg_columns(d, bank, sp):
     o = bank_file(bank, sp)
     cols = []
@@ -82,16 +90,19 @@ def decode_seg_columns(d, bank, sp):
         cols.append(col)
     return cols
 
-def decode_level(d, bank, seg_tab_gb):
+def decode_level(d, bank, seg_tab_gb, start_seg=0):
     """Returns (surface_cols, rooms, seg_flat, seg_room). The surface = 20 cols from each
-    NON-room segment in order; pipe/underground rooms are pulled out separately. seg_flat
-    maps an original segment index -> its first flattened surface column; seg_room maps a
-    room segment index -> its room number. (See LevelColumnStream $2198 / is_room_segment.)"""
+    NON-room segment from start_seg onward; pipe/underground rooms (any index) are pulled out
+    separately, and lead-in surface segments before start_seg are dropped (behind the play
+    start, unreachable). seg_flat maps an original segment index -> its first flattened surface
+    column; seg_room maps a room segment index -> its room number. (LevelColumnStream $2198.)"""
     surface, rooms, seg_flat, seg_room = [], [], {}, {}
     for i, sp in enumerate(walk_segments(d, bank, seg_tab_gb)):
         if is_room_segment(d, bank, sp):
             seg_room[i] = len(rooms)
             rooms.append(decode_seg_columns(d, bank, sp))
+        elif i < start_seg:
+            continue                       # lead-in before the play start; not on the surface
         else:
             seg_flat[i] = len(surface)
             surface += decode_seg_columns(d, bank, sp)
@@ -180,7 +191,7 @@ def main():
         spawn_p = u16(d, bank_file(bank, SPAWN_TABLE)  + lvl * 2)
         param   = d[PARAM_TABLE + lvl]
         segs = walk_segments(d, bank, seg_tab)      # segment list, $FF-terminated
-        cols, rooms, seg_flat, seg_room = decode_level(d, bank, seg_tab)
+        cols, rooms, seg_flat, seg_room = decode_level(d, bank, seg_tab, LEVEL_START_SEG.get(lvl, 0))
         pipes = decode_pipes(d, lvl, seg_flat, seg_room)
         blocks = decode_blocks(d, lvl, seg_flat, cols)
         spawns = decode_spawns(d, bank, spawn_p)
