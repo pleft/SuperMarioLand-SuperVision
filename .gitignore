@@ -39,3 +39,9 @@ snap/
 
 # Local Claude Code settings (machine-specific)
 .claude/
+
+# Emulator save files (battery SRAM / states) — runtime artifacts, ROM-adjacent
+*.sav
+*.srm
+*.ss0
+*.s0

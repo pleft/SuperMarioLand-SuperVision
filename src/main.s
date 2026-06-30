@@ -1831,10 +1831,11 @@ COIN_TILE  = $5F
     asl
     asl
     sta o_y,x
-    lda #1                       ; slide right
+    lda #1                       ; walk right
     sta o_vx,x
-    stz o_vy,x
-    lda #12                      ; emerge pause: sit on the block, not yet consumable
+    lda #$FB                     ; vy = -5/update: the upward "pop" (~15px rise, matches trace)
+    sta o_vy,x
+    lda #6                       ; consume delay (updates) so the bonk can't insta-grab it
     sta o_tmr,x
     stz o_pdr,x
 @full:
@@ -1901,12 +1902,14 @@ COIN_TILE  = $5F
 ; upd_mush (X=slot): slide horizontally, fall under gravity onto the floor, and grow Mario
 ; when he overlaps it. (No wall collision — the mushroom is short-lived; documented.)
 .proc upd_mush
-    lda o_tmr,x                  ; emerge: rise up out of the block (not yet consumable)
-    beq @active
-    dec o_tmr,x
-    dec o_y,x                    ; move up 1px/frame; then gravity + vx curve it clockwise
-    rts
-@active:
+    ; The original's object AI runs every OTHER frame (~30Hz): the mushroom moves 1px per
+    ; update = 0.5 px/frame (verified via an mGBA trace of the real game). So skip odd frames.
+    lda frame_count
+    lsr
+    bcc :+
+    rts                          ; odd frame -> skip (object AI runs every other frame)
+:   ; Ballistic from spawn: an initial upward velocity (the "pop") + gentle gravity, walking
+    ; right the whole time. o_tmr is now just a consume delay so Mario's bonk can't insta-grab.
     ; --- wall check: tile AHEAD (direction of motion) at body row -> reverse (RE: type $28
     ;     PhysicsParam $ffc7=$24, &$0c=$04 = reverse on a horizontal collision) ---
     lda o_vx,x
@@ -1964,16 +1967,20 @@ COIN_TILE  = $5F
     adc tmpH
     sta o_xh,x
 @vert:
-    ; --- gravity: vy += 1 (cap 3); o_y += vy ---
+    ; --- gentle ballistic: apply the current (signed) vy, THEN accelerate it toward a +1
+    ;     terminal. Apply-first so the spawn -5 gives a full -5 first step (~15px rise). ---
     ldx oi
-    lda o_vy,x
-    cmp #3
-    bcs :+
-    inc o_vy,x
-:   clc
+    clc
     lda o_y,x
-    adc o_vy,x
+    adc o_vy,x                   ; o_y += vy (negative = the upward pop)
     sta o_y,x
+    lda o_vy,x
+    bmi @grav                    ; still rising -> keep accelerating toward fall
+    cmp #1
+    bcs @gdone                   ; terminal = +1 px/update (= 0.5 px/frame fall)
+@grav:
+    inc o_vy,x
+@gdone:
     ; --- floor: feet_col=(o_x+4)>>3, mrow=o_y>>3 ; snap if solid ---
     lda o_xl,x
     clc
@@ -2003,6 +2010,12 @@ COIN_TILE  = $5F
     sta o_y,x
     stz o_vy,x
 @air:
+    ldx oi                       ; consume only after the spawn delay (no insta-grab on bonk)
+    lda o_tmr,x
+    beq @cons
+    dec o_tmr,x
+    rts
+@cons:
     ; --- consume: Mario overlaps the mushroom? ---
     ldx oi
     lda cam_x                    ; Mario world X = cam_x + spr_x
