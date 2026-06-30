@@ -79,6 +79,7 @@ timer_sub:   .res 1          ; sub-second counter for the timer (decrements ~eve
 hud_dirty:   .res 1          ; nonzero -> HUD values changed, redraw them
 mario_big:   .res 1          ; 0 = small Mario, 1 = big ("Super") Mario
 mario_duck:  .res 1          ; 1 = big Mario ducking (Down held, grounded)
+mario_grow:  .res 1          ; >0 = small->big grow animation running (counts 80->0, game frozen)
 hud_row:     .res 1          ; put_hud target row (0 or 1)
 htmp:        .res 1          ; put_hud scratch (digit being blitted)
 rb_vx:       .res 1          ; restore_bg: VRAM pixel X of the region to repaint
@@ -224,6 +225,8 @@ main_loop:
     jmp main_loop
 @normal:
     jsr read_input
+    lda mario_grow               ; small->big grow running? freeze the action, just flash
+    bne @growing
     jsr move_player              ; walk (updates spr_x) or scroll the camera (cam_x)
     jsr jump_player              ; A = jump (real arc); updates spr_y while airborne
     jsr update_objects           ; mushroom/coin physics + mushroom pickup
@@ -233,6 +236,11 @@ main_loop:
     beq @chkpipe
     jsr do_respawn
     bra main_loop
+@growing:
+    dec mario_grow               ; count down the 80-frame grow (draw_player flashes on bit2)
+    bne @play
+    inc mario_big                ; grow complete -> big ("Super") Mario from here on
+    bra @play
 @chkpipe:
     jsr pipe_check              ; pipe entry/exit -> may re-render and skip the normal draw
     bcc @play
@@ -270,9 +278,11 @@ main_loop:
     lda mario_frame
     sta prev_frame
     lda shift_px                 ; if we shifted this frame, refill the right margin LAST
-    beq main_loop
+    bne @stream
+    jmp main_loop
+@stream:
     jsr stream_cols
-    bra main_loop
+    jmp main_loop
 .endproc
 
 ; ---------------------------------------------------------------------------
@@ -760,6 +770,7 @@ main_loop:
     stz prev_frame
     stz mario_big                 ; death -> back to small Mario
     stz mario_duck
+    stz mario_grow                ; cancel any in-progress grow
     jsr clear_objects             ; drop any live mushroom/coins
     jsr clear_tile_mod            ; reset bumped/broken blocks for the fresh attempt
     stz shift_px
@@ -1693,6 +1704,12 @@ FB_MAX_COL = level0_cols - 24    ; last fb_col0 that keeps cols fb_col0..+23 in 
     asl
     asl                          ; *4 = byte offset into the pose table
     tax
+    lda mario_grow               ; growing? flash big<->small every 4 frames (RE: $ffa6 bit2)
+    beq @sizesel
+    and #$04
+    bne @big                     ; timer bit2 set -> big tiles this frame
+    bra @small                   ; else small tiles
+@sizesel:
     lda mario_big                ; small or big ("Super") Mario pose set?
     beq @small
     lda mario_duck               ; big + ducking -> force the duck pose (index 4 -> offset 16)
@@ -2049,9 +2066,10 @@ COIN_TILE  = $5F
 :   cmp #16
     bcs @done
     lda mario_big
-    bne @score
-    lda #1
-    sta mario_big                ; grow to Super Mario!
+    bne @score                   ; already big -> just score, no grow
+    lda #$50
+    sta mario_grow               ; start the 80-frame small->big grow (RE: original sets $ffa6=$50)
+    stz mario_duck
 @score:
     lda #$00
     ldx #$10
