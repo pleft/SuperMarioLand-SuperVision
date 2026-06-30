@@ -1951,10 +1951,10 @@ COIN_TILE  = $5F
     bra @vert
 @nowall:
     ldx oi                       ; --- horizontal: o_x += vx (sign-extended), 1 px/frame ---
+    ldy #0                       ; (set Y BEFORE lda so the lda's N flag survives to bpl)
     lda o_vx,x
-    ldy #0
     bpl :+
-    ldy #$FF
+    ldy #$FF                     ; vx negative -> high byte = $FF (sign-extend), else $00
 :   sty tmpH
     clc
     lda o_xl,x
