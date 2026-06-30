@@ -70,6 +70,18 @@ identical non-blank tiles); they are NOT in the surface scroll — entered only 
 (`State_0A`: `$ffe5=$fff4` down; `State_0B`: `$ffe5=$fff5` resume). The extractor skips
 them (TODO: emit as pipe destinations when pipes/collision land).
 
+**Play-start segment [added 2026-06-30 — trace-verified].** The surface does NOT begin at
+segment 0. The level loader seeds `$ffe5` at level start, so the playable area begins partway
+into the segment list; the leading segments are a lead-in *behind* the start (incl. the
+pipe-rooms) that the camera never reaches (no left-scroll). For **1-1 the start routine `$0DD3`
+does `ld a,$03; ldh [$ffe5],a` → play starts at segment 3.** seg0 (`$62BE`) + seg1/seg2
+(pipe-rooms) sit behind the start. Confirmed live with `tools/trace_level.lua`: at `marioX=50`
+(level start) the surface index is already ≥3 and never < 3 walking right. Symptom if ignored:
+the opening `$62BE` (seg0) and the identical seg3 `$62BE` render as two near-duplicate first
+screens. The extractor honours this via `LEVEL_START_SEG` (drops lead-in surface segments;
+spawns/blocks auto-align because the game's column counter `$c0ab` starts at 0 == the start
+segment). Other levels: their loaders' `$ffe5` seeds are still TODO (default 0).
+
 Worked example (level 0, segment @ `$62BE`):
 ```
 02 53 40 | D3 36 60 61 | FE     -> column: off0 ×2 = $53,$40 ; off13 ×3 = $36,$60,$61

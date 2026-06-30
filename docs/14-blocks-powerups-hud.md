@@ -9,8 +9,9 @@ and the bank-3 metasprite table `$4C37`. Implemented in `src/main.s`; data via
 The tile value (`$80`/`$81`) does **not** decide coin-vs-mushroom. During level decode
 `Call_000_2321` looks each special tile up in a per-level table (**bank3 `$6536`**, 3-byte
 `[segment, col-in-seg, value]` entries) and stores the content `value`. Blocks NOT listed hold
-a single **coin**. World 1-1 lists 5: cols 42 & 115 = `$28` **Super Mushroom**; cols 103/194/279
-= `$2a`/`$2c`/`$c0` (star / superball / multi-coin). Extracted to `level_NN_blocks.bin`
+a single **coin**. World 1-1 lists 5: cols 22 & 95 = `$28` **Super Mushroom**; cols 83/174/259
+= `$2a`/`$2c`/`$c0` (star / superball / multi-coin). (Columns are −20 vs the pre-2026-06-30
+values, after the seg-3 play-start fix in `docs/10`.) Extracted to `level_NN_blocks.bin`
 (`decode_blocks`), looked up at hit time by `find_block (col,row)`.
 
 | Hit tile | Content (table) | Reaction (head-bonk from below) |
@@ -102,9 +103,24 @@ The clock counts down (`tick_timer`, `TIMER_RATE`=40 frames/unit = SML's `$da00`
 starts at 400) and clamps at 000 (time-up death = TODO). All counters use 65C02 decimal mode (`sed`/`cld`); the ISRs do
 no ADC/SBC, so the BCD blocks are interrupt-safe.
 
+## Big Mario: grow animation + duck sprite [added 2026-06-30 — trace-verified]
+**Grow (small→big).** Triggered when small Mario eats a `$28` mushroom (`jr_000_09ba`:
+`$ff99=1` growing, `$ffa6=$50`=80 timer; states `$ff99` 0=small/1=growing/2=big/3=star). The
+grow is an **80-frame FROZEN animation** — `tools/trace_grow.lua` shows Mario's `y` constant
+the whole time and his sprite **alternating big↔small every 4 frames: big when `$ffa6 & $04`,
+small otherwise**, then settling big when the timer hits 0 (`$ff99` 1→2). Port: a `mario_grow`
+timer (80→0) freezes the main loop (skips movement/objects/clock/scroll, just counts down +
+redraws); `draw_player` picks the big tileset on `(mario_grow & $04)`, small otherwise; sets
+`mario_big` at 0. Reset on death.
+
+**Duck sprite.** Big-Mario crouch = metasprite **idx 24** (`$40-$43`), verified by rendering
+the table vs the original. (An earlier guess of idx 22 / `$2C,$2D,$3C,$3D` rendered as garbage.)
+`extract_tables.py:BIG_POSE_INDICES = [16,19,17,20,24]` (stand,walkA,walkB,jump,duck).
+
 ## TODO / not-yet-faithful
-- Coin/mushroom **bounce animations** and the mushroom **entity** (need the object engine).
+- Coin/mushroom **bounce animations** (mushroom entity + grow are done & trace-faithful).
 - Floating coins / coin rooms (W1-1 surface has none; coins come from blocks).
 - Persisting block state across pipe-trip re-renders.
 - Time-up and damage-shrink (need death sequence / enemies).
 - 1-up at 100 coins.
+- `$2a`/`$2c`/`$c0` block contents (star / superball / multi-coin) still stubbed as mushroom.
