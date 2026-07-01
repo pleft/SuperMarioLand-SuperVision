@@ -80,6 +80,7 @@ hud_dirty:   .res 1          ; nonzero -> HUD values changed, redraw them
 mario_big:   .res 1          ; 0 = small Mario, 1 = big ("Super") Mario
 mario_duck:  .res 1          ; 1 = big Mario ducking (Down held, grounded)
 mario_grow:  .res 1          ; >0 = small->big grow animation running (counts 80->0, game frozen)
+mario_superball: .res 1      ; 1 = Superball Mario (got a flower) -> B fires a bouncing superball
 hud_row:     .res 1          ; put_hud target row (0 or 1)
 htmp:        .res 1          ; put_hud scratch (digit being blitted)
 rb_vx:       .res 1          ; restore_bg: VRAM pixel X of the region to repaint
@@ -138,6 +139,7 @@ o_tmr:       .res 4          ; state timer / lifetime
 o_pvx:       .res 4          ; last drawn VRAM pixel X (for erase)
 o_pvy:       .res 4          ; last drawn VRAM pixel Y
 o_pdr:       .res 4          ; was drawn last frame?
+o_st:        .res 4          ; sub-state (superball: rise-budget counter for the fixed bounce)
 
 .segment "ZEROPAGE"
 
@@ -227,6 +229,7 @@ main_loop:
     jsr read_input
     lda mario_grow               ; small->big grow running? freeze the action, just flash
     bne @growing
+    jsr try_fire                 ; B + Superball Mario -> fire a superball
     jsr move_player              ; walk (updates spr_x) or scroll the camera (cam_x)
     jsr jump_player              ; A = jump (real arc); updates spr_y while airborne
     jsr update_objects           ; mushroom/coin physics + mushroom pickup
@@ -776,6 +779,7 @@ main_loop:
     stz mario_big                 ; death -> back to small Mario
     stz mario_duck
     stz mario_grow                ; cancel any in-progress grow
+    stz mario_superball           ; lose the superball ability
     jsr clear_objects             ; drop any live mushroom/coins
     jsr clear_tile_mod            ; reset bumped/broken blocks for the fresh attempt
     stz shift_px
@@ -1797,6 +1801,11 @@ FB_MAX_COL = level0_cols - 24    ; last fb_col0 that keeps cols fb_col0..+23 in 
 OBJ_MUSH   = 1
 OBJ_COIN   = 2
 OBJ_FLOWER = 3
+OBJ_BALL   = 4
+BALL_TILE  = $60                 ; superball = 1 OBJ tile (mGBA OAM trace)
+BALL_SPD   = 2                   ; 2 px/frame, both axes (45 deg diagonal, from the trace)
+BALL_BOUNCE = 10                 ; rise budget in frames -> 20px fixed bounce height (trace)
+BALL_LIFE  = 90                  ; max lifetime (frames); also expires off-screen
 MUSH_TILE  = $83                 ; SML Super Mushroom = a single 8x8 OBJ sprite (verified via
                                  ; SameBoy OAM/VRAM dump: the only on-screen item sprite)
 COIN_TILE  = $5F
@@ -1894,6 +1903,197 @@ FLOWER_RISE = 7                  ; emerge: rise 7px out of the block, then sit (
     rts
 .endproc
 
+; ball_active: C=1 if a superball is already live (only one at a time, per the original).
+.proc ball_active
+    ldx #3
+:   lda o_type,x
+    cmp #OBJ_BALL
+    beq @yes
+    dex
+    bpl :-
+    clc
+    rts
+@yes:
+    sec
+    rts
+.endproc
+
+; try_fire: B newly pressed + Superball Mario + no ball live -> fire a superball.
+.proc try_fire
+    lda mario_superball
+    beq @no
+    lda pad_pressed
+    and #$02                     ; B = GB bit 1
+    beq @no
+    jsr ball_active
+    bcs @no
+    jsr spawn_ball
+@no:
+    rts
+.endproc
+
+; spawn_ball: launch a superball from Mario's nose, 45-deg down-and-forward. RE'd from an mGBA
+; OAM trace: vx = +/-2 by facing, vy = +2 (down), tile $60.
+.proc spawn_ball
+    jsr find_free_obj
+    bcs @full
+    lda #OBJ_BALL
+    sta o_type,x
+    lda cam_x                    ; o_x = Mario world X (cam_x + spr_x)
+    clc
+    adc spr_x
+    sta o_xl,x
+    lda cam_x+1
+    adc #0
+    sta o_xh,x
+    lda mario_facing
+    bne @left
+    lda o_xl,x                   ; facing right: nose +8, vx = +2
+    clc
+    adc #8
+    sta o_xl,x
+    lda o_xh,x
+    adc #0
+    sta o_xh,x
+    lda #BALL_SPD
+    sta o_vx,x
+    bra @common
+@left:
+    lda o_xl,x                   ; facing left: nose -8, vx = -2
+    sec
+    sbc #8
+    sta o_xl,x
+    lda o_xh,x
+    sbc #0
+    sta o_xh,x
+    lda #<(256 - BALL_SPD)       ; -2
+    sta o_vx,x
+@common:
+    lda spr_y                    ; o_y = Mario's Y; the ball drops to the floor then bounces
+    sta o_y,x
+    lda #BALL_SPD                ; vy = +2 (falling)
+    sta o_vy,x
+    stz o_st,x
+    lda #BALL_LIFE
+    sta o_tmr,x
+    stz o_pdr,x
+@full:
+    rts
+.endproc
+
+; upd_ball (oi=slot): move 2px/frame diagonally; bounce off the floor (reverse vy up + arm a
+; fixed ~20px rise budget in o_st) and off walls (reverse vx); expire on timer or off-screen.
+; Runs EVERY frame -- the ball is fast (2px/frame in the trace), not the every-other object rate.
+.proc upd_ball
+    ldx oi
+    dec o_tmr,x
+    bne @move
+    jmp @expire
+@move:
+    jsr mush_xmove               ; o_x += o_vx (sign-extended)
+    ldx oi
+    lda o_vx,x
+    bmi @wleft
+    lda o_xl,x                   ; moving right: test (o_x + 6) >> 3
+    clc
+    adc #6
+    bra @wstore
+@wleft:
+    lda o_xl,x                   ; moving left: test (o_x + 1) >> 3
+    clc
+    adc #1
+@wstore:
+    sta feet_col
+    lda o_xh,x
+    adc #0
+    sta feet_col+1
+    lsr feet_col+1
+    ror feet_col
+    lsr feet_col+1
+    ror feet_col
+    lsr feet_col+1
+    ror feet_col
+    ldx oi
+    lda o_y,x
+    lsr
+    lsr
+    lsr
+    sta mrow
+    jsr read_solid
+    beq @vert
+    ldx oi                       ; wall -> reverse vx
+    lda o_vx,x
+    eor #$FF
+    ina
+    sta o_vx,x
+@vert:
+    ldx oi
+    clc
+    lda o_y,x
+    adc o_vy,x
+    sta o_y,x
+    lda o_vy,x
+    bmi @rising
+    lda o_xl,x                   ; falling: floor at feet_col = (o_x + 4) >> 3 ?
+    clc
+    adc #4
+    sta feet_col
+    lda o_xh,x
+    adc #0
+    sta feet_col+1
+    lsr feet_col+1
+    ror feet_col
+    lsr feet_col+1
+    ror feet_col
+    lsr feet_col+1
+    ror feet_col
+    ldx oi
+    lda o_y,x
+    lsr
+    lsr
+    lsr
+    sta mrow
+    jsr read_solid
+    beq @edge
+    ldx oi                       ; floor -> snap up, bounce, arm the fixed rise budget
+    lda mrow
+    asl
+    asl
+    asl
+    sta o_y,x
+    lda #<(256 - BALL_SPD)       ; vy = -2 (up)
+    sta o_vy,x
+    lda #BALL_BOUNCE
+    sta o_st,x
+    bra @edge
+@rising:
+    ldx oi
+    lda o_st,x
+    beq @apex
+    dec o_st,x
+    bra @edge
+@apex:
+    lda #BALL_SPD                ; rise budget spent -> fall again
+    sta o_vy,x
+@edge:
+    ldx oi                       ; off-screen (X)? expire
+    sec
+    lda o_xl,x
+    sbc cam_x
+    sta tmpL
+    lda o_xh,x
+    sbc cam_x+1
+    bne @expire
+    lda tmpL
+    cmp #168
+    bcs @expire
+    rts
+@expire:
+    ldx oi
+    stz o_type,x
+    rts
+.endproc
+
 ; spawn_coin: a coin pops straight up from the block and falls away (~24 frames).
 .proc spawn_coin
     jsr find_free_obj
@@ -1927,6 +2127,8 @@ FLOWER_RISE = 7                  ; emerge: rise 7px out of the block, then sit (
     beq @coin
     cmp #OBJ_FLOWER
     beq @flower
+    cmp #OBJ_BALL
+    beq @ball
     jsr upd_mush
     bra @next
 @coin:
@@ -1934,6 +2136,9 @@ FLOWER_RISE = 7                  ; emerge: rise 7px out of the block, then sit (
     bra @next
 @flower:
     jsr upd_flower
+    bra @next
+@ball:
+    jsr upd_ball
 @next:
     inc oi
     lda oi
@@ -2006,7 +2211,9 @@ FLOWER_RISE = 7                  ; emerge: rise 7px out of the block, then sit (
     ina
 :   cmp #16
     bcs @done
-    lda #$00                     ; picked up: +1000 (already big -> Superball Mario)
+    lda #1
+    sta mario_superball          ; picked up: grant the Superball ability (B fires superballs)
+    lda #$00                     ; +1000
     ldx #$10
     jsr add_score
     ldx oi
@@ -2285,6 +2492,8 @@ FLOWER_RISE = 7                  ; emerge: rise 7px out of the block, then sit (
     beq @coin
     cmp #OBJ_FLOWER
     beq @flower
+    cmp #OBJ_BALL
+    beq @ball
     ; --- mushroom: one 8x8 OBJ tile, drawn at the feet line (o_y + 8) ---
     lda spr_col
     sta dcol
@@ -2294,6 +2503,17 @@ FLOWER_RISE = 7                  ; emerge: rise 7px out of the block, then sit (
     adc #8                       ; o_y is the 16px-sprite convention; an 8px item sits +8 lower
     sta dy
     ldx #MUSH_TILE
+    jsr draw_quad
+    rts
+@ball:
+    lda spr_col
+    sta dcol
+    ldx oi
+    lda o_y,x
+    clc
+    adc #8
+    sta dy
+    ldx #BALL_TILE
     jsr draw_quad
     rts
 @flower:
