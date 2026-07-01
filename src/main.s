@@ -1878,14 +1878,16 @@ FLOWER_RISE = 7                  ; emerge: rise 7px out of the block, then sit (
     lda #OBJ_FLOWER
     sta o_type,x
     jsr obj_set_x8
-    lda mrow                     ; same spawn point as the mushroom (on the bonked block)
+    lda mrow                     ; start at the block, then rise UP to o_y=mrow*8 (= one tile on
+    asl                          ; top of the block: block draws at dy=mrow*8+16, the flower at
+    asl                          ; dy=o_y+8, so o_y=mrow*8 sits it exactly on the block's top)
     asl
-    asl
-    asl
+    clc
+    adc #FLOWER_RISE
     sta o_y,x
     stz o_vx,x                   ; the flower never moves horizontally or falls
     stz o_vy,x
-    lda #FLOWER_RISE             ; emerge counter: rise this many px (1/update), then sit
+    lda #FLOWER_RISE             ; emerge counter: rise this many px (1/update) up to the block top
     sta o_tmr,x
     stz o_pdr,x
 @full:
