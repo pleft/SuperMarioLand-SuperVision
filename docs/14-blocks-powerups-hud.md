@@ -140,8 +140,11 @@ launches from Mario's nose at **45°** (`vx=±2` by facing, `vy=+2` down), **2 p
 **ceiling/wall** (reverse vy down / vx), then **climbs off-screen** — there is NO fixed bounce
 height (an early guess; the trace's mid-air turnaround was really a block/ceiling hit). Expires on
 lifetime or off-screen (X or Y). Gotcha fixed: the wall test must be **one row above the feet**,
-else the flat floor reads as a wall and the ball yo-yos in place. Lost on death.
-**TODO: superball kills enemies (needs enemies) + collects coins / hits blocks.**
+else the flat floor reads as a wall and the ball yo-yos in place. Lost on death. It bounces off `?`-blocks as solid geometry but does **not** activate them —
+correct: `?`-blocks are bonked only by Mario's head (`hit_qblock`), never by the superball, in
+the original too. The superball region in bank 3 touches no tilemap/coin/block routine.
+**TODO: superball kills enemies (needs enemies); collects floating coins (real SML feature but
+1-1 has none). NOT `?`-blocks.**
 
 ## TODO / not-yet-faithful
 - Coin/mushroom **bounce animations** (mushroom entity + grow are done & trace-faithful).
