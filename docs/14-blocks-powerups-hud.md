@@ -117,6 +117,19 @@ redraws); `draw_player` picks the big tileset on `(mario_grow & $04)`, small oth
 the table vs the original. (An earlier guess of idx 22 / `$2C,$2D,$3C,$3D` rendered as garbage.)
 `extract_tables.py:BIG_POSE_INDICES = [16,19,17,20,24]` (stand,walkA,walkB,jump,duck).
 
+## Power-up size branch + Superball Flower [added 2026-07-01 — trace-verified]
+A power-up block spawns **mushroom if Mario is small, Superball Flower (`$2D`) if he is already
+big** (`Jump_000_1888`; the port checks `mario_big` at `hit_qblock`). The flower **item** RE'd
+from `tools/trace_flower.lua`: object type `$2D` morphs to `$2E`; physics params `00 11 00` —
+byte0 `$00` = **no gravity, no wall-collision**, so it never moves. It **rises ~7px out of the
+block over ~20 frames** while flashing, then **sits animating in place**, cycling two frames
+(`$1A`/`$1B`) every ~8 frames. Its tiles are **`$E0`/`$E5`**, already in the obj set at
+`$4E32`/`$4E82` (they SV-decode as the flower; an earlier GB-planar mis-decode made them look
+like garbage). Port: `OBJ_FLOWER` (spawn_flower/upd_flower), draw flashes `$E0`↔`$E5`. Object
+Y vs map Y: a map tile row `r` renders at `dy=(r+2)*8` but an object at `o_y` renders at
+`dy=o_y+8`, so "sitting one tile on top of a block at row `mrow`" is **`o_y = mrow*8`**. Pickup
+scores +1000 and despawns (Mario already big). **Superball projectile ability = still TODO.**
+
 ## TODO / not-yet-faithful
 - Coin/mushroom **bounce animations** (mushroom entity + grow are done & trace-faithful).
 - Floating coins / coin rooms (W1-1 surface has none; coins come from blocks).
