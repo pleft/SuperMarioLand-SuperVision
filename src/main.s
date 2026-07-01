@@ -445,13 +445,18 @@ main_loop:
     jsr redraw_one
     jsr find_block               ; C=1,A=value if this block is in the contents table
     bcc @coin
-    cmp #$28                     ; $28 = Super Mushroom
-    beq @mush
+    cmp #$28                     ; $28 = Super Mushroom power-up block
+    beq @powerup
     cmp #$c0                     ; $c0 = multi-coin block -> treat as a coin (TODO: 10-coin)
     beq @coin
-                                 ; $2a/$2c (star/superball) -> mushroom for now (TODO: real items)
-@mush:
+                                 ; $2a/$2c (star/superball) -> power-up too, for now
+@powerup:                        ; SML size rule: big Mario gets a Superball Flower, small a Mushroom
+    lda mario_big
+    bne @flower
     jsr spawn_mushroom
+    rts
+@flower:
+    jsr spawn_flower
     rts
 @coin:
     jsr spawn_coin               ; coin-pop animation
@@ -1791,9 +1796,13 @@ FB_MAX_COL = level0_cols - 24    ; last fb_col0 that keeps cols fb_col0..+23 in 
 ; ===========================================================================
 OBJ_MUSH   = 1
 OBJ_COIN   = 2
+OBJ_FLOWER = 3
 MUSH_TILE  = $83                 ; SML Super Mushroom = a single 8x8 OBJ sprite (verified via
                                  ; SameBoy OAM/VRAM dump: the only on-screen item sprite)
 COIN_TILE  = $5F
+FLOWER_TA  = $E0                 ; Superball Flower: 8x8 OBJ sprite, 2-frame flash $E0<->$E5
+FLOWER_TB  = $E5                 ; (both verified in the obj set via mGBA VRAM dump)
+FLOWER_RISE = 7                  ; emerge: rise 7px out of the block, then sit (trace: y 79->72)
 
 ; clear_objects: free all slots (level restart / pipe transition).
 .proc clear_objects
@@ -1859,6 +1868,30 @@ COIN_TILE  = $5F
     rts
 .endproc
 
+; spawn_flower: Superball Flower — emerges from the block then sits still (no movement).
+; Only spawned when Mario is ALREADY big (small Mario gets a mushroom instead). RE'd from an
+; mGBA trace (tools/trace_flower.lua): type $2D rises ~7px over ~20 frames while flashing, then
+; morphs to $2E and sits animating in place; physics byte0=$00 => no gravity, no wall bounce.
+.proc spawn_flower
+    jsr find_free_obj
+    bcs @full
+    lda #OBJ_FLOWER
+    sta o_type,x
+    jsr obj_set_x8
+    lda mrow                     ; same spawn point as the mushroom (on the bonked block)
+    asl
+    asl
+    asl
+    sta o_y,x
+    stz o_vx,x                   ; the flower never moves horizontally or falls
+    stz o_vy,x
+    lda #FLOWER_RISE             ; emerge counter: rise this many px (1/update), then sit
+    sta o_tmr,x
+    stz o_pdr,x
+@full:
+    rts
+.endproc
+
 ; spawn_coin: a coin pops straight up from the block and falls away (~24 frames).
 .proc spawn_coin
     jsr find_free_obj
@@ -1890,10 +1923,15 @@ COIN_TILE  = $5F
     beq @next
     cmp #OBJ_COIN
     beq @coin
+    cmp #OBJ_FLOWER
+    beq @flower
     jsr upd_mush
     bra @next
 @coin:
     jsr upd_coin
+    bra @next
+@flower:
+    jsr upd_flower
 @next:
     inc oi
     lda oi
@@ -1912,6 +1950,65 @@ COIN_TILE  = $5F
     dec o_tmr,x
     bne @done
     stz o_type,x                 ; lifetime over -> free
+@done:
+    rts
+.endproc
+
+; upd_flower (X=slot): emerge (rise FLOWER_RISE px, then sit still), and let Mario pick it up.
+; Runs every other frame like the other objects. The flower only exists when Mario is already
+; big, so pickup just scores +1000 and despawns (Superball projectile ability = TODO).
+.proc upd_flower
+    lda frame_count              ; object AI runs every other frame (~30 Hz)
+    lsr
+    bcc :+
+    rts
+:   ldx oi
+    lda o_tmr,x                  ; still emerging? rise 1px/update out of the block
+    beq @sit
+    dec o_tmr,x
+    dec o_y,x
+@sit:
+    lda cam_x                    ; --- pickup test: Mario world X = cam_x + spr_x ---
+    clc
+    adc spr_x
+    sta tmpL
+    lda cam_x+1
+    adc #0
+    sta tmpH
+    sec                          ; dx = mario_wx - o_x  (abs)
+    lda tmpL
+    sbc o_xl,x
+    sta tmpL
+    lda tmpH
+    sbc o_xh,x
+    sta tmpH
+    bpl @posdx
+    sec
+    lda #0
+    sbc tmpL
+    sta tmpL
+    lda #0
+    sbc tmpH
+    sta tmpH
+@posdx:
+    lda tmpH
+    bne @done
+    lda tmpL
+    cmp #14
+    bcs @done
+    lda spr_y                    ; dy = |mario_y - o_y| < 16 ?
+    sec
+    sbc o_y,x
+    bpl :+
+    eor #$FF
+    ina
+:   cmp #16
+    bcs @done
+    lda #$00                     ; picked up: +1000 (already big -> Superball Mario)
+    ldx #$10
+    jsr add_score
+    ldx oi
+    stz o_type,x                 ; despawn the flower
 @done:
     rts
 .endproc
@@ -2184,6 +2281,8 @@ COIN_TILE  = $5F
     lda o_type,x
     cmp #OBJ_COIN
     beq @coin
+    cmp #OBJ_FLOWER
+    beq @flower
     ; --- mushroom: one 8x8 OBJ tile, drawn at the feet line (o_y + 8) ---
     lda spr_col
     sta dcol
@@ -2194,6 +2293,21 @@ COIN_TILE  = $5F
     sta dy
     ldx #MUSH_TILE
     jsr draw_quad
+    rts
+@flower:
+    lda spr_col
+    sta dcol
+    ldx oi
+    lda o_y,x
+    clc
+    adc #8
+    sta dy
+    ldx #FLOWER_TA               ; 2-frame flash A<->B (~every 8 frames), like the original
+    lda frame_count
+    and #8
+    beq :+
+    ldx #FLOWER_TB
+:   jsr draw_quad
     rts
 @coin:
     lda spr_col
