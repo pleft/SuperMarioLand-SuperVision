@@ -2018,7 +2018,9 @@ FLOWER_RISE = 7                  ; emerge: rise 7px out of the block, then sit (
     lsr
     lsr
     lsr
-    sta mrow
+    sec
+    sbc #1                       ; test the wall one row ABOVE the feet, so the flat floor the
+    sta mrow                     ; ball bounces on is never mistaken for a wall (the yo-yo bug)
     jsr read_solid
     beq @vert
     ldx oi                       ; wall -> reverse vx
