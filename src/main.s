@@ -2156,8 +2156,8 @@ FLOWER_RISE = 7                  ; emerge: rise 7px out of the block, then sit (
     stz o_vx,x
     lda #$FA                     ; vy = -6 (launch up)
     sta o_vy,x
-    lda #24
-    sta o_tmr,x
+    lda #12                      ; short life: pop up ~2 tiles and vanish (was 24 -> plummeted
+    sta o_tmr,x                  ; to the bottom of the screen under gravity before expiring)
     stz o_pdr,x
 @full:
     rts
