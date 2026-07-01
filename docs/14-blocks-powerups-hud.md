@@ -128,7 +128,20 @@ block over ~20 frames** while flashing, then **sits animating in place**, cyclin
 like garbage). Port: `OBJ_FLOWER` (spawn_flower/upd_flower), draw flashes `$E0`↔`$E5`. Object
 Y vs map Y: a map tile row `r` renders at `dy=(r+2)*8` but an object at `o_y` renders at
 `dy=o_y+8`, so "sitting one tile on top of a block at row `mrow`" is **`o_y = mrow*8`**. Pickup
-scores +1000 and despawns (Mario already big). **Superball projectile ability = still TODO.**
+scores +1000 and despawns, and sets **`mario_superball`** (the fire ability; original's `$ffb5`).
+
+## Superball projectiles [added 2026-07-01 — trace-verified]
+Superball Mario fires with **B** (`pad_pressed & $02`), gated on `mario_superball` + **one ball
+on-screen at a time** (matches bank3's `b=$01` at `$4a0c`). The ball is NOT a `$d100`-style level
+object in the original (it's a dedicated OAM/`$ffa9` list), but the port models it as an
+`OBJ_BALL` slot. RE'd from `tools/trace_superball.lua` (OAM tile@x,y each frame): tile **`$60`**,
+launches from Mario's nose at **45°** (`vx=±2` by facing, `vy=+2` down), **2 px/frame every frame**
+(not the every-other-frame object rate). It bounces off the **floor** (reverse vy up) and
+**ceiling/wall** (reverse vy down / vx), then **climbs off-screen** — there is NO fixed bounce
+height (an early guess; the trace's mid-air turnaround was really a block/ceiling hit). Expires on
+lifetime or off-screen (X or Y). Gotcha fixed: the wall test must be **one row above the feet**,
+else the flat floor reads as a wall and the ball yo-yos in place. Lost on death.
+**TODO: superball kills enemies (needs enemies) + collects coins / hits blocks.**
 
 ## TODO / not-yet-faithful
 - Coin/mushroom **bounce animations** (mushroom entity + grow are done & trace-faithful).
