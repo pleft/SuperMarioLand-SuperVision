@@ -1804,7 +1804,6 @@ OBJ_FLOWER = 3
 OBJ_BALL   = 4
 BALL_TILE  = $60                 ; superball = 1 OBJ tile (mGBA OAM trace)
 BALL_SPD   = 2                   ; 2 px/frame, both axes (45 deg diagonal, from the trace)
-BALL_BOUNCE = 10                 ; rise budget in frames -> 20px fixed bounce height (trace)
 BALL_LIFE  = 90                  ; max lifetime (frames); also expires off-screen
 MUSH_TILE  = $83                 ; SML Super Mushroom = a single 8x8 OBJ sprite (verified via
                                  ; SameBoy OAM/VRAM dump: the only on-screen item sprite)
@@ -2034,9 +2033,7 @@ FLOWER_RISE = 7                  ; emerge: rise 7px out of the block, then sit (
     lda o_y,x
     adc o_vy,x
     sta o_y,x
-    lda o_vy,x
-    bmi @rising
-    lda o_xl,x                   ; falling: floor at feet_col = (o_x + 4) >> 3 ?
+    lda o_xl,x                   ; ball centre column = (o_x + 4) >> 3 (for floor/ceiling test)
     clc
     adc #4
     sta feet_col
@@ -2050,35 +2047,42 @@ FLOWER_RISE = 7                  ; emerge: rise 7px out of the block, then sit (
     lsr feet_col+1
     ror feet_col
     ldx oi
-    lda o_y,x
+    lda o_vy,x
+    bmi @rising
+    lda o_y,x                    ; falling: solid floor at the feet row?
     lsr
     lsr
     lsr
     sta mrow
     jsr read_solid
     beq @edge
-    ldx oi                       ; floor -> snap up, bounce, arm the fixed rise budget
-    lda mrow
+    ldx oi                       ; floor -> snap onto it and bounce up. NO fixed height: it
+    lda mrow                     ; climbs away at 45 deg until a real ceiling/wall or off-screen
     asl
     asl
     asl
     sta o_y,x
     lda #<(256 - BALL_SPD)       ; vy = -2 (up)
     sta o_vy,x
-    lda #BALL_BOUNCE
-    sta o_st,x
     bra @edge
 @rising:
-    ldx oi
-    lda o_st,x
-    beq @apex
-    dec o_st,x
-    bra @edge
-@apex:
-    lda #BALL_SPD                ; rise budget spent -> fall again
+    lda o_y,x                    ; rising: solid ceiling one row above the feet?
+    lsr
+    lsr
+    lsr
+    sec
+    sbc #1
+    sta mrow
+    jsr read_solid
+    beq @edge
+    ldx oi                       ; ceiling -> bounce back down
+    lda #BALL_SPD
     sta o_vy,x
 @edge:
-    ldx oi                       ; off-screen (X)? expire
+    ldx oi                       ; off-screen? expire (Y off top/bottom, or X out of view)
+    lda o_y,x
+    cmp #160
+    bcs @expire
     sec
     lda o_xl,x
     sbc cam_x
