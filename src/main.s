@@ -354,17 +354,12 @@ main_loop:
     pla
     rts
 @mod:
-    pla                          ; recover the raw tile (preserved across the compares)
-    cmp #$82
+    pla                          ; recover the raw tile. Mod bits are only ever set on $80/$81
+    cmp #$82                     ; (?-block), $82 (brick) and $f4 (coin), so the else = ?-block.
     beq @broke                   ; broken brick -> blank
     cmp #$F4
     beq @broke                   ; collected coin -> blank
-    cmp #$80                     ; $80/$81 ?-block -> used block; anything else -> leave raw
-    bcc @keep
-    cmp #$82
-    bcs @keep
-    lda #$7F
-@keep:
+    lda #$7F                     ; $80/$81 ?-block -> used (solid) block
     rts
 @broke:
     lda #$2C
@@ -721,6 +716,8 @@ main_loop:
     jsr read_map_tile             ; effective tile above his head (centre column)
     cmp #$60
     bcc @noceil                   ; < $60 -> not solid -> keep rising
+    cmp #$F4
+    beq @noceil                   ; coin -> walk-through (grabbed by coin_collect), not a ceiling
     cmp #$80                      ; $80/$81 = ?-block (content decided by the block table)
     beq @qblock
     cmp #$81
@@ -1851,7 +1848,7 @@ BALL_SPD   = 2                   ; 2 px/frame, both axes (45 deg diagonal, from 
 BALL_LIFE  = 90                  ; max lifetime (frames); also expires off-screen
 MUSH_TILE  = $83                 ; SML Super Mushroom = a single 8x8 OBJ sprite (verified via
                                  ; SameBoy OAM/VRAM dump: the only on-screen item sprite)
-COIN_TILE  = $5F
+COIN_TILE  = $F4                 ; spinning-coin tile (same as floating coins; $5F was garbage)
 FLOWER_TA  = $E0                 ; Superball Flower: 8x8 OBJ sprite, 2-frame flash $E0<->$E5
 FLOWER_TB  = $E5                 ; (both verified in the obj set via mGBA VRAM dump)
 FLOWER_RISE = 7                  ; emerge: rise 7px out of the block, then sit (trace: y 79->72)
