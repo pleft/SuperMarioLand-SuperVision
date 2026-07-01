@@ -232,6 +232,7 @@ main_loop:
     jsr try_fire                 ; B + Superball Mario -> fire a superball
     jsr move_player              ; walk (updates spr_x) or scroll the camera (cam_x)
     jsr jump_player              ; A = jump (real arc); updates spr_y while airborne
+    jsr coin_collect             ; grab floating coins Mario walked/jumped into
     jsr update_objects           ; mushroom/coin physics + mushroom pickup
     jsr animate_player           ; pick the pose
     jsr tick_timer               ; count down the level clock
@@ -344,21 +345,26 @@ main_loop:
     sta map_ptr+1
     ldy mrow
     lda (map_ptr),y
-    ; --- apply the used-tile transform (surface only): bumped ?-block -> used block,
-    ;     broken brick -> blank. Rooms have no such tiles, so skip them. ---
-    ldx room_mode
-    bne @raw
+    ; --- used-tile transform (surface AND rooms): bonked ?-block -> used block, broken brick
+    ;     -> blank, collected coin -> blank. Tile-specific, so a coin/brick mark never turns an
+    ;     unrelated tile solid (lets the mod bitmap be shared without corruption). ---
     pha
     jsr mod_test                 ; A = mod bit for (feet_col, mrow); clobbers map_ptr/tmpL/X
     bne @mod
     pla
-@raw:
     rts
 @mod:
-    pla                          ; recover the raw tile
+    pla                          ; recover the raw tile (preserved across the compares)
     cmp #$82
-    beq @broke                   ; brick -> blank
-    lda #$7F                     ; ?-block ($80/$81) -> used (solid) block
+    beq @broke                   ; broken brick -> blank
+    cmp #$F4
+    beq @broke                   ; collected coin -> blank
+    cmp #$80                     ; $80/$81 ?-block -> used block; anything else -> leave raw
+    bcc @keep
+    cmp #$82
+    bcs @keep
+    lda #$7F
+@keep:
     rts
 @broke:
     lda #$2C
@@ -514,6 +520,42 @@ main_loop:
     rts
 .endproc
 
+; coin_collect: grab any floating $f4 coin Mario overlaps (his centre column at his two body
+; rows). A collected coin is marked in the mod bitmap (read_map_tile then transforms $f4 ->
+; blank), blanked on-screen, and awarded. Runs every frame, surface and rooms.
+.proc coin_collect
+    lda spr_y                    ; body top row (same convention as wall_ahead)
+    lsr
+    lsr
+    lsr
+    sec
+    sbc #2
+    sta mrow
+    jsr try_coin
+    inc mrow                     ; body bottom row
+    jsr try_coin
+    rts
+.endproc
+
+.proc try_coin                   ; caller sets mrow; tests Mario's centre column at that row
+    lda #7
+    jsr calc_feet_col            ; feet_col = (cam_x + spr_x + 7) >> 3
+    jsr read_map_tile
+    cmp #$F4
+    bne @no
+    jsr mod_test                 ; already collected this cell?
+    bne @no
+    jsr mod_set                  ; mark it -> read_map_tile now transforms this cell to blank
+    lda feet_col
+    sta wcol
+    lda feet_col+1
+    sta wcol+1
+    jsr redraw_one               ; blank the coin cell on screen
+    jsr award_coin               ; +1 coin, +100, 1-up at 100
+@no:
+    rts
+.endproc
+
 ; add_life / lose_life: BCD lives counter, clamped to [0,99]. Lives only grow on a 1-up
 ; (100 coins, or a heart power-up once the object engine lands) — never on a plain ?-block.
 .proc add_life
@@ -583,6 +625,8 @@ main_loop:
 ; FloorCheck), else 0. (Off-map rows are non-solid.)
 .proc read_solid
     jsr read_map_tile
+    cmp #$F4                     ; coins are walk-through (collectible), not floor
+    beq @no
     cmp #$60                     ; tiles >= $60 are solid floor
     bcc @no
     lda #1
