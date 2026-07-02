@@ -2176,12 +2176,12 @@ OBJ_PLATV  = 10                  ; end-area moving platform, vertical (SML type 
 OBJ_PLATH  = 11                  ; end-area moving platform, horizontal (SML type $0B)
 PLAT_TILE  = $EF                 ; platform = 3x tile $EF (24px; metasprite param $12)
 ; patrol geometry from the goal trace at cam-max (GB OAM coords -8/-16 -> world):
-PLATV_X    = 2280                ; vertical platform: fixed world x (screen 40 @ cam 2240)
-PLATV_YT   = 60 + 8              ; o_y bounds (o_y = world top + 8): top of patrol...
-PLATV_YB   = 116 + 8             ; ...bottom (trace: OAM y 76..132)
+PLATV_X    = 2280                ; vertical platform: fixed world x (dedicated trace: OAM x 48)
+PLATV_YT   = 56 + 8              ; o_y bounds (o_y = world top + 8); patrol top..bottom exact
+PLATV_YB   = 116 + 8             ;   from the standing-still trace: OAM y 72..132, 120f half-period
 PLATH_Y    = 32 + 8              ; horizontal platform: fixed o_y (OAM y 48)
-PLATH_X0   = 2306                ; patrol left..right world x (trace: OAM x 74..112 @ cam 2240)
-PLATH_X1   = 2344
+PLATH_X0   = 2291                ; patrol left..right world x, exact (trace: OAM x 59..112,
+PLATH_X1   = 2344                ;   106-frame half-period; both at 0.5px/frame)
 PLATS_AT   = 2120                ; spawn both once the camera reaches this (they enter view)
 DEBRIS_TILE = $62                ; all 4 shards are OBJ tile $62 (mGBA OAM trace)
 DEBRIS_HI  = 7                   ; jump-arc start index: high pair rises 21px (trace: 21px)
@@ -2754,7 +2754,7 @@ bounce_dy: .byte $FE,$FE,$01,$02
     jsr carry_y_up
     ldx oi
     lda o_y,x
-    cmp #PLATV_YT
+    cmp #PLATV_YT+1              ; turn exactly AT the traced top endpoint (inclusive)
     bcs @done
     stz o_st,x
     rts
