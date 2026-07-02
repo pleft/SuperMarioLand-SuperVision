@@ -147,6 +147,7 @@ o_pvx:       .res 8          ; last drawn VRAM pixel X (for erase)
 o_pvy:       .res 8          ; last drawn VRAM pixel Y
 o_pdr:       .res 8          ; was drawn last frame?
 o_st:        .res 8          ; sub-state (star: vy ramp index; debris: jump-arc index)
+o_pw:        .res 8          ; last drawn width in tile cols (2 = one quad, 3 = popup pair)
 
 .segment "ZEROPAGE"
 
@@ -288,13 +289,17 @@ main_loop:
 :   sec
     sbc shift_px
     sta prev_vx
-    sta rb_vx                    ; erase old Mario at his (shifted) spot: 4 cols x 3 rows
-    lda prev_y
-    sta rb_y
-    lda #4
-    sta rb_cols
+    sta rb_vx                    ; erase old Mario at his (shifted) spot -- exact bounds:
+    lda prev_y                   ; a 4px-aligned 16px sprite spans at most 3 tile cols,
+    sta rb_y                     ; and 2 tile rows when row-aligned (standing), 3 in the air
     lda #3
-    sta rb_rows
+    sta rb_cols
+    ldy #2
+    lda prev_y
+    and #7
+    beq :+
+    iny
+:   sty rb_rows
     jsr restore_bg
     jsr erase_objects            ; erase the mushroom/coins at their old (shifted) spots
     jsr draw_objects             ; mushroom/coins under Mario
@@ -3051,10 +3056,14 @@ bounce_dy: .byte $FE,$FE,$01,$02
     sta rb_vx
     lda o_pvy,x                  ; = the drawn dy (o_y+8)
     sta rb_y
-    lda #3
+    lda o_pw,x                   ; exact drawn width: 2 tile cols (one quad) or 3 (popup)
     sta rb_cols
-    lda #2                       ; an 8px quad spans at most 2 tile rows
-    sta rb_rows
+    ldy #1                       ; and 1 tile row when row-aligned, 2 otherwise
+    lda o_pvy,x
+    and #7
+    beq :+
+    iny
+:   sty rb_rows
     jsr restore_bg
 @next:
     inc oi
@@ -3102,10 +3111,16 @@ bounce_dy: .byte $FE,$FE,$01,$02
     ldx oi
     lda ovx
     sta o_pvx,x
-    lda o_y,x                    ; store the DRAWN top line (dy = o_y+8), so the erase can
-    clc                          ; cover exactly 2 tile rows instead of 3 (8px quad spans at
-    adc #8                       ; most 2 rows) -- a third of the per-object erase cost
+    lda o_y,x                    ; store the DRAWN top line (dy = o_y+8): the erase covers
+    clc                          ; the exact tile rows the quad touched (1 aligned, 2 not)
+    adc #8
     sta o_pvy,x
+    lda #2                       ; drawn width in tile cols: 2, or 3 for the 2-glyph popup
+    ldy o_type,x
+    cpy #OBJ_POPUP
+    bne :+
+    lda #3
+:   sta o_pw,x
     lda #1
     sta o_pdr,x
     bra @next
