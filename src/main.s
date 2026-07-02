@@ -1259,6 +1259,9 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
 
 ; bonus_start: draw the whole bonus screen + place Mario. (RE: State_12/$13/$14.)
 .proc bonus_start
+    stz scroll_s                 ; the level end leaves XSCROLL=32 (sub-shift): the bonus
+    stz prev_scroll_s            ; draws at fb cols 0-19, so the window must start at 0
+    stz XSCROLL
     jsr clear_vram               ; blank the full framebuffer (incl. the HUD rows)
     stz b_row                    ; --- border: top row ---
     stz b_col
@@ -1377,6 +1380,52 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
 @txt: .byte $0B,$18,$17,$1E,$1C,$2C,$10,$0A,$16,$0E   ; "BONUS GAME" (font; $2C = space)
 .endproc
 
+; b_fixfloor: repaint the 3 cells of Mario's floor row (and any pedestal cells on the
+; row above) that b_erase just blanked.
+.proc b_fixfloor
+    lda spr_y                    ; floor row = (spr_y + 16) >> 3
+    clc
+    adc #16
+    lsr
+    lsr
+    lsr
+    sta b_row
+    lda spr_x
+    lsr
+    lsr
+    lsr
+    sta b_col
+    stz b_i
+@f:
+    lda b_col
+    cmp #19                      ; inside the walls only
+    bcs @next
+    lda #$2D
+    jsr bput
+    dec b_row                    ; pedestal row: restore the "x" and the prize if touched
+    lda b_col
+    cmp #17
+    bne @nored
+    lda #$2B
+    jsr bput
+    bra @nored2
+@nored:
+    cmp #18
+    bne @nored2
+    ldx b_floor
+    lda b_prz,x
+    jsr bput
+@nored2:
+    inc b_row
+@next:
+    inc b_col
+    inc b_i
+    lda b_i
+    cmp #3
+    bne @f
+    rts
+.endproc
+
 ; bonus_frame: one frame of the bonus game (called instead of the normal play loop).
 .proc bonus_frame
     lda bonus_phase
@@ -1433,6 +1482,7 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
     jsr b_ladder_cell
 @mario:
     jsr b_erase                  ; Mario cycles DOWN a floor per tick (wraps to the top)
+    jsr b_fixfloor               ; (the erase blanks floor cells under him -- repaint)
     lda b_floor
     ina
     and #3
@@ -1442,6 +1492,7 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
     rts
 @walk:
     jsr b_erase                  ; walk right 1px/frame to the pedestal (x=128)
+    jsr b_fixfloor               ; repaint the floor bricks he just passed over
     inc spr_x
     lda spr_x
     sta mario_vx
