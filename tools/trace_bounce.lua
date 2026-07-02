@@ -3,13 +3,14 @@
 -- Mario, and the full OAM (tile@x,y) so the debris pieces' tiles + trajectories are captured.
 --
 -- Usage:  dofile("/Users/pleft/Dev/SuperMarioLand/tools/trace_bounce.lua")
--- Then within ~12s: (1) bonk a ?-block, wait a beat, (2) as BIG Mario break a brick.
--- Send me /tmp/sml_bounce.txt
+-- ~30s window. In one relaxed run: (1) bonk a ?-block cleanly (the block-bounce anim),
+-- (2) collect the mushroom (the "1000" score popup), (3) if reachable, the 1-up heart
+-- (the "1UP" popup). Send me /tmp/sml_bounce.txt
 local out = io.open("/tmp/sml_bounce.txt", "w")
 local frame, cbid = 0, nil
 local function onFrame()
   frame = frame + 1
-  if frame > 720 then if cbid then callbacks:remove(cbid) end return end
+  if frame > 1800 then if cbid then callbacks:remove(cbid) end return end
   local ee = emu:read8(0xFFEE)
   local line = string.format("f%-4d ee=%02X blk(y=%d x=%d t=%02X) M(%d,%d)",
     frame, ee, emu:read8(0xC02C), emu:read8(0xC02D), emu:read8(0xC02E),

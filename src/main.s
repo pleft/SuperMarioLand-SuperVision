@@ -134,18 +134,19 @@ shift_px:    .res 1          ; pixels the framebuffer shifted this frame (0 or 3
 .segment "BSS"
 revpix:      .res 256        ; reverse the 4 2bpp pixels in a byte (built at boot)
 tile_mod:    .res 640        ; "modified" bitmap, 1 bit per surface (col,row): used ?-block / broken brick
-; --- object slots (mushroom / coin-pop entities). SoA, OBJ_MAX entries. ---
-o_type:      .res 4          ; 0 free, 1 mushroom, 2 coin-pop
-o_xl:        .res 4          ; world pixel X (16-bit)
-o_xh:        .res 4
-o_y:         .res 4          ; world pixel Y (same space as spr_y: feet line)
-o_vx:        .res 4          ; signed velocity X
-o_vy:        .res 4          ; signed velocity Y (gravity)
-o_tmr:       .res 4          ; state timer / lifetime
-o_pvx:       .res 4          ; last drawn VRAM pixel X (for erase)
-o_pvy:       .res 4          ; last drawn VRAM pixel Y
-o_pdr:       .res 4          ; was drawn last frame?
-o_st:        .res 4          ; sub-state (superball: rise-budget counter for the fixed bounce)
+; --- object slots (items / coin-pop / brick debris). SoA, 8 entries (a brick break spawns
+;     4 debris pieces on top of whatever item is live). ---
+o_type:      .res 8          ; 0 free, else OBJ_*
+o_xl:        .res 8          ; world pixel X (16-bit)
+o_xh:        .res 8
+o_y:         .res 8          ; world pixel Y (same space as spr_y: feet line)
+o_vx:        .res 8          ; signed velocity X
+o_vy:        .res 8          ; signed velocity Y (gravity / phase)
+o_tmr:       .res 8          ; state timer / lifetime
+o_pvx:       .res 8          ; last drawn VRAM pixel X (for erase)
+o_pvy:       .res 8          ; last drawn VRAM pixel Y
+o_pdr:       .res 8          ; was drawn last frame?
+o_st:        .res 8          ; sub-state (star: vy ramp index; debris: jump-arc index)
 
 .segment "ZEROPAGE"
 
@@ -686,6 +687,7 @@ main_loop:
     lda feet_col+1
     sta wcol+1
     jsr redraw_one               ; redraw as blank
+    jsr spawn_debris4            ; burst into 4 shards (2 arcs x 2 directions)
     lda #$50                     ; +50 points
     ldx #$00
     jsr add_score
@@ -1960,6 +1962,10 @@ OBJ_FLOWER = 3
 OBJ_BALL   = 4
 OBJ_HEART  = 5                   ; 1-up heart ($2a): same hop->walk engine as the mushroom
 OBJ_STAR   = 6                   ; star ($2c): rises, then bounces forward in small arcs
+OBJ_DEBRIS = 7                   ; brick-break shard: flies along the jump arc (trace-verified)
+DEBRIS_TILE = $62                ; all 4 shards are OBJ tile $62 (mGBA OAM trace)
+DEBRIS_HI  = 7                   ; jump-arc start index: high pair rises 21px (trace: 21px)
+DEBRIS_LO  = 11                  ; low pair rises 13px (trace: 13px)
 HEART_TILE = $84                 ; heart = 1 OBJ tile (metasprite param $17)
 STAR_TA    = $86                 ; star twinkles between $86 and $85 (param $19 list)
 STAR_TB    = $85
@@ -1975,7 +1981,7 @@ FLOWER_RISE = 7                  ; emerge: rise 7px out of the block, then sit (
 
 ; clear_objects: free all slots (level restart / pipe transition).
 .proc clear_objects
-    ldx #3
+    ldx #7
 :   stz o_type,x
     stz o_pdr,x
     dex
@@ -1990,7 +1996,7 @@ FLOWER_RISE = 7                  ; emerge: rise 7px out of the block, then sit (
     lda o_type,x
     beq @ok
     inx
-    cpx #4
+    cpx #8
     bne @l
     sec
     rts
@@ -2250,9 +2256,115 @@ STAR_VY_END = 8                                       ; last index (held until f
     rts
 .endproc
 
+; --- brick debris (trace: tools/trace_bounce.lua) --- 4 shards, all tile $62, x = +/-1 px
+; EVERY frame, y follows Mario's own jump-arc table: the high pair from index 7 (21px rise),
+; the low pair from index 11 (13px), hold at the $7F apex, then fall back down the mirrored
+; table. Exactly how the original steps $c218/28/38/48 along JumpArcTable each frame.
+.proc spawn_debris4
+    lda #$FF                     ; left, high arc
+    ldy #DEBRIS_HI
+    jsr spawn_debris1
+    lda #$FF                     ; left, low arc
+    ldy #DEBRIS_LO
+    jsr spawn_debris1
+    lda #1                       ; right, high arc
+    ldy #DEBRIS_HI
+    jsr spawn_debris1
+    lda #1                       ; right, low arc
+    ldy #DEBRIS_LO
+    jsr spawn_debris1
+    rts
+.endproc
+
+.proc spawn_debris1              ; A = vx (+1/-1), Y = jump-arc start index
+    sta tmpL
+    sty tmpH
+    jsr find_free_obj
+    bcs @full
+    lda #OBJ_DEBRIS
+    sta o_type,x
+    jsr obj_set_x8               ; o_x = the brick cell's left edge
+    lda tmpL
+    sta o_vx,x
+    bpl @right
+    lda o_xl,x                   ; left shard: 4px left of the cell
+    sec
+    sbc #4
+    sta o_xl,x
+    lda o_xh,x
+    sbc #0
+    sta o_xh,x
+    bra @sety
+@right:
+    lda o_xl,x                   ; right shard: 4px right
+    clc
+    adc #4
+    sta o_xl,x
+    lda o_xh,x
+    adc #0
+    sta o_xh,x
+@sety:
+    lda mrow                     ; start inside the brick cell (obj space: dy = o_y + 8)
+    asl
+    asl
+    asl
+    clc
+    adc #8
+    sta o_y,x
+    lda tmpH
+    sta o_st,x                   ; jump-arc index
+    stz o_vy,x                   ; phase 0 = rising
+    stz o_pdr,x
+@full:
+    rts
+.endproc
+
+; upd_debris: runs EVERY frame (shards are fast). Rise along the arc, hold at the $7F apex,
+; then walk the same table backwards for the fall; free the slot below the screen.
+.proc upd_debris
+    jsr mush_xmove               ; o_x += o_vx (+/-1, sign-extended)
+    ldx oi
+    lda o_vy,x                   ; phase: 0 = rising, 1 = falling
+    bne @fall
+    ldy o_st,x
+    lda jumparc,y
+    cmp #$7F                     ; apex marker -> fall from next frame
+    beq @apex
+    sta tmpL
+    lda o_y,x
+    sec
+    sbc tmpL
+    sta o_y,x
+    inc o_st,x
+    bra @cull
+@apex:
+    lda #1
+    sta o_vy,x
+    bra @cull
+@fall:
+    lda o_st,x                   ; mirror: walk the arc back down; hold at entry 0 (2px/f)
+    beq :+
+    dec o_st,x
+:   ldy o_st,x
+    lda jumparc,y
+    clc
+    adc o_y,x
+    sta o_y,x
+@cull:
+    ldx oi
+    lda o_y,x                    ; fell below the screen -> free
+    cmp #160
+    bcc @done
+    cmp #240                     ; (a wrap above the top while rising is not "below")
+    bcs @done
+    stz o_type,x
+@done:
+    rts
+.endproc
+
 ; ball_active: C=1 if a superball is already live (only one at a time, per the original).
 .proc ball_active
-    ldx #3
+    ldx #7
 :   lda o_type,x
     cmp #OBJ_BALL
     beq @yes
@@ -2485,6 +2597,8 @@ STAR_VY_END = 8                                       ; last index (held until f
     beq @ball
     cmp #OBJ_STAR
     beq @star
+    cmp #OBJ_DEBRIS
+    beq @debris
     jsr upd_mush                 ; OBJ_MUSH and OBJ_HEART (identical walker engine)
     bra @next
 @coin:
@@ -2498,10 +2612,13 @@ STAR_VY_END = 8                                       ; last index (held until f
     bra @next
 @star:
     jsr upd_star
+    bra @next
+@debris:
+    jsr upd_debris
 @next:
     inc oi
     lda oi
-    cmp #4
+    cmp #8
     bne @loop
     rts
 .endproc
@@ -2792,7 +2909,7 @@ STAR_VY_END = 8                                       ; last index (held until f
 @next:
     inc oi
     lda oi
-    cmp #4
+    cmp #8
     bne @loop
     rts
 .endproc
@@ -2844,7 +2961,7 @@ STAR_VY_END = 8                                       ; last index (held until f
 @next:
     inc oi
     lda oi
-    cmp #4
+    cmp #8
     bne @loop
     rts
 .endproc
@@ -2874,6 +2991,8 @@ STAR_VY_END = 8                                       ; last index (held until f
     beq @heart
     cmp #OBJ_STAR
     beq @stard
+    cmp #OBJ_DEBRIS
+    beq @shard
     ; --- mushroom: one 8x8 OBJ tile, drawn at the feet line (o_y + 8) ---
     lda spr_col
     sta dcol
@@ -2910,6 +3029,17 @@ STAR_VY_END = 8                                       ; last index (held until f
     beq :+
     ldx #STAR_TB
 :   jsr draw_quad
+    rts
+@shard:
+    lda spr_col
+    sta dcol
+    ldx oi
+    lda o_y,x
+    clc
+    adc #8
+    sta dy
+    ldx #DEBRIS_TILE
+    jsr draw_quad
     rts
 @ball:
     lda spr_col
