@@ -146,10 +146,39 @@ the original too. The superball region in bank 3 touches no tilemap/coin/block r
 **TODO: superball kills enemies (needs enemies); collects floating coins (real SML feature but
 1-1 has none). NOT `?`-blocks.**
 
+## Coins: pop + collectible floating coins [added 2026-07-02]
+**Coin tile is `$F4`** (round with a hole), for BOTH the `?`-block pop and floating coins.
+`$5F` was a wrong guess (garbage in the BG set → invisible pop). The **pop** (`OBJ_COIN`,
+`spawn_coin`/`upd_coin`) launches up (`vy=-6`) under gravity with a **12-frame** life so it
+arcs up ~2 tiles and vanishes near the block (was 24 → gravity dragged it off the screen
+bottom into the HUD strip).
+
+**Floating coins** (`$F4`) exist on the 1-1 surface (col-87 stack rows 3-9; cols 266-277) and
+18 per pipe-room. They're now **walk-through + collectible**:
+- `read_solid` excludes `$F4` (not floor); the jump ceiling check in `jump_player` also excludes
+  it (was a raw `cmp #$60`, so a coin above Mario blocked his jump).
+- `coin_collect` (main loop, every frame): at Mario's centre column × his two body rows, any
+  `$F4` → `mod_set` the cell + blank it on screen + `award_coin` (+100, 1-up at 100).
+
+**Used-tile transform (`read_map_tile`)** now runs on the surface AND in rooms, and is
+**tile-specific**: `$80/$81`→`$7F` (used block), `$82`→blank, `$F4`→blank (collected), and
+**anything `<$80` is left RAW**. The last clause is critical — the earlier `else→$7F` turned any
+room cell carrying a stray mod bit into a solid block (the "coins became blocks in the pipe
+rooms" bug). Now only a genuine `?`-block can ever become a used block.
+
+## ROM layout / banking [added 2026-07-02]
+The fixed bank (`$C000-$FFFF`) filled up (CODE+CHARS+LEVELS), overflowing by a byte. The 16K
+**selectable bank 0 (`$8000-$BFFF`) was empty**, so `cfg/supervision.cfg` now loads the `LEVELS`
+segment there. Boot already selects `SYSCTRL_BANK0` (`$2026` bits7:5), so bank 0 is mapped at
+`$8000` and the level-data labels resolve normally — no bank-switching code needed for a 32K cart.
+Result: **~5.6K free in the fixed bank** for code. To scale further (enemies), page more data
+through `$8000` (up to 128K / 8 banks).
+
 ## TODO / not-yet-faithful
 - Coin/mushroom **bounce animations** (mushroom entity + grow are done & trace-faithful).
-- Floating coins / coin rooms (W1-1 surface has none; coins come from blocks).
-- Persisting block state across pipe-trip re-renders.
+- Persisting block state across pipe-trip re-renders (mod bitmap is shared surface/room; fine for
+  1-1 since there's no col/row collision, but not general).
 - Time-up and damage-shrink (need death sequence / enemies).
-- 1-up at 100 coins.
-- `$2a`/`$2c`/`$c0` block contents (star / superball / multi-coin) still stubbed as mushroom.
+- **`$2a` star (invincibility) + `$c0` multi-coin blocks** — still stubbed through the power-up/coin
+  path. NEXT task. (`$2c` superball-flower also stubbed.)
+- Superball: kills enemies (needs enemies) + collects floating coins.
