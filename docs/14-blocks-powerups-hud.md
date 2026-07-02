@@ -334,3 +334,14 @@ BANK 2 via jump stubs at `$5832+` → `$5A72/$5ABB/$5B65/$5BEB/$5C44/$5CDE`. Sta
 - **$1A** (b2 `$5CDE`): prize award (~213 frames in the trace) — 1/2/3-UP or flower — then
   `$1B/$08` → next level. (Award internals not yet read.)
 Trace (top-door run): $12,$13,$14 ≈1 frame each; $15/$16 alternate ~140f; $17 ~112f; $1A ~213f.
+
+**$18/$19 (walk-anim + climb)**: anim table @ b2 `$5C9D`: walk = tile pairs `02 03 12 13`…,
+then `04 05 14 15`×4, then CLIMB tiles `00 01 16 17`×4 ($FF-terminated ring, +$20 when big).
+$18 = climb DOWN (inc Y), $19 = climb UP (dec Y, 1px/frame), both stop at a floor Y
+($38/$50/$68/$80) → back to $17 (walk).
+
+**$1A (award, `$5CDE`)**: blanks the other floors' prizes; reads the tile at Mario's reach
+(`$ffad/$ffae` = his x+8/y+24 → `Call_000_0153`); dispatch → `$da17`: tile `$01`→2, `$02`→3,
+`$03`→4 (= award N-1 lives, paced by `$da1b=$40`-frame delays with a jingle per 1-UP);
+`$E5` flower → `$da17=$10` = the flower grant (superball power), or if already superball
+(`$ffb5`) just a sound and exit. Cleanup zeroes the bonus vars → `$1B` → next level.
