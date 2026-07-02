@@ -290,3 +290,13 @@ support while riding = still x-overlapping; walking off falls), jump releases, a
 platform's per-update delta carries Mario (y or x). Verified in py65: land → carried through
 a full patrol turnaround → jump off → re-land. Platforms respawn with the camera (cleared by
 clear_objects like everything else).
+
+### Superball vs ?-blocks — settled [2026-07-03, user-tested + RE]
+The user verified in the original: the superball does **NOT** activate `?`-blocks (it just
+bounces). The code agrees once read correctly: the ball's tile test (`Call_000_1fd2`) gates its
+two special behaviors on the state: `Call_000_2097` (bounce-anim + item spawn on `$80/$82`)
+runs **only in state `$0D`**, while the coin collect is **skipped** in `$0D` and active
+otherwise. Normal gameplay is **state `$00`** (every trace confirms), so in play the ball
+collects coins and never bonks blocks — which is what the port does. (An earlier note here
+claimed the opposite by wrongly assuming `$0D` = the gameplay state; `$0D` is a special mode,
+likely the demo.)
