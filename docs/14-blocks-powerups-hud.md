@@ -280,16 +280,24 @@ The route to the TOP goal door: two flying platforms near the level end, SML obj
 last two non-terminator entries; they were visible as the "two live objects" throughout the
 goal traces). Both: physics `00 B1 00` (script-driven, no gravity), speed **1px per object
 update = 0.5px/frame**, ping-pong via the `F0` direction commands; sprite = **3× tile `$EF`**
-(24px, metasprite param `$12`). Patrol from the goal trace at cam-max (GB OAM −8/−16 → world):
-vertical at world x **2280**, top **60↔116**; horizontal at top **32**, x **2306↔2344**.
+(24px, metasprite param `$12`). Patrol EXACT from a dedicated ~2900-frame standing-still trace
+(6 turnarounds each; GB OAM −8/−16 → world): **vertical at world x 2280, top 56↔116, 120-frame
+half-period; horizontal at top 32, x 2291↔2344, 106-frame half-period** — both 0.5px/frame.
+(The first cut from the goal traces had the V-top 4px low and the H-left 15px short;
+user-confirmed correct after tuning.)
 
 Port: `OBJ_PLATV/OBJ_PLATH` spawned once the camera reaches world 2120 (`plats_check`);
-`upd_platv/upd_plath` ping-pong; **ride physics**: `plat_land` (falling feet crossing the
-platform top + x-overlap ±16 of centre → snap + `ride=slot+1`), `ride_support` (grounded
-support while riding = still x-overlapping; walking off falls), jump releases, and the
-platform's per-update delta carries Mario (y or x). Verified in py65: land → carried through
-a full patrol turnaround → jump off → re-land. Platforms respawn with the camera (cleared by
-clear_objects like everything else).
+`upd_platv/upd_plath` ping-pong (turnarounds inclusive of the endpoints); **ride physics**:
+`plat_land` (falling feet crossing the platform top + x-overlap ±16 of centre → snap +
+`ride=slot+1`), `ride_support` (grounded support while riding = still x-overlapping; walking
+off falls), jump releases, and the platform's per-update delta carries Mario (y or x).
+Verified in py65: land → carried through a full patrol turnaround → jump off → re-land.
+
+**Objects stay live through the goal sequence** (trace: the original's platforms keep
+patrolling during the jingle/tally). The first port cut called `clear_objects` at the door,
+which dropped the platforms WITHOUT a final erase — their last images froze in the framebuffer
+("4 platforms" artifact). Rule of thumb: never despawn a drawn object without either its erase
+running (`o_pdr` intact) or a full re-render following.
 
 ### Superball vs ?-blocks — settled [2026-07-03, user-tested + RE]
 The user verified in the original: the superball does **NOT** activate `?`-blocks (it just
