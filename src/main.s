@@ -354,12 +354,15 @@ main_loop:
     pla
     rts
 @mod:
-    pla                          ; recover the raw tile. Mod bits are only ever set on $80/$81
-    cmp #$82                     ; (?-block), $82 (brick) and $f4 (coin), so the else = ?-block.
+    pla                          ; recover the raw tile
+    cmp #$82
     beq @broke                   ; broken brick -> blank
     cmp #$F4
     beq @broke                   ; collected coin -> blank
-    lda #$7F                     ; $80/$81 ?-block -> used (solid) block
+    cmp #$80                     ; only $80/$81 ?-blocks become the used block; anything else
+    bcc @keep                    ; (a mod bit that bled onto a blank/wall/coin-row tile in a
+    lda #$7F                     ; room) is left RAW, so it can never turn into a solid block
+@keep:
     rts
 @broke:
     lda #$2C
