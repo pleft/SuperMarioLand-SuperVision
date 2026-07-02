@@ -106,6 +106,7 @@ b_awn:       .res 1          ; lives left to award
 b_awt:       .res 1          ; award pacing timer
 b_row:       .res 1          ; bput cursor: BG row
 b_col:       .res 1          ; bput cursor: BG col
+b_i:         .res 1          ; loop counter safe across bput (set_dst clobbers X!)
 hud_row:     .res 1          ; put_hud target row (0 or 1)
 htmp:        .res 1          ; put_hud scratch (digit being blitted)
 rb_vx:       .res 1          ; restore_bg: VRAM pixel X of the region to repaint
@@ -261,9 +262,12 @@ main_loop:
     jsr bonus_frame
     jmp main_loop
 :   lda goal_phase               ; level-clear running? jingle -> tally -> next level
-    beq :+
+    beq :++
     jsr goal_seq
-    jsr update_objects           ; platforms keep patrolling during the clear (trace-verified)
+    lda bonus_phase              ; just switched to the bonus screen? nothing else may draw
+    beq :++
+    jmp main_loop
+:   jsr update_objects           ; platforms keep patrolling during the clear (trace-verified)
     jmp @play
 :   lda mario_grow               ; small->big grow running? freeze the action, just flash
     bne @growing
@@ -1233,8 +1237,9 @@ main_loop:
     sta b_row                    ; row = 7 + 3*gap
     lda #10
     sta b_col
-    ldx #0
+    stz b_i
 @loop:
+    ldx b_i
     ldy tmpH3
     beq :+
     lda b_erasetab,x
@@ -1243,8 +1248,9 @@ main_loop:
 @put:
     jsr bput
     inc b_row
-    inx
-    cpx #4
+    inc b_i
+    lda b_i
+    cmp #4
     bne @loop
     rts
 b_ladtab:   .byte $2E,$2F,$2F,$30
@@ -1293,12 +1299,14 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
     sta b_row
     lda #5
     sta b_col
-    ldx #0
-:   lda @txt,x
+    stz b_i
+:   ldx b_i
+    lda @txt,x
     jsr bput
     inc b_col
-    inx
-    cpx #10
+    inc b_i
+    lda b_i
+    cmp #10
     bne :-
     lda #4                       ; --- lives: head icon + count at row 4 ---
     sta b_row
@@ -1318,13 +1326,12 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
     lda lives
     and #$0F
     jsr bput
-    ldx #0                       ; --- 4 floors (rows 7/10/13/16, cols 1..18) + pedestals ---
-    stx b_floor
+    stz b_i                      ; --- 4 floors (rows 7/10/13/16, cols 1..18) + pedestals ---
 @floors:
-    txa
+    lda b_i
     asl
     sta tmpL3
-    txa
+    lda b_i
     clc
     adc tmpL3
     clc
@@ -1332,21 +1339,21 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
     sta b_row                    ; floor row = 7+3n
     lda #1
     sta b_col
-    phx
     lda #$2D
     ldx #18
     jsr bput_run
-    plx
     dec b_row                    ; pedestal row = floor row - 1
     lda #17
     sta b_col
     lda #$2B
     jsr bput
     inc b_col
+    ldx b_i
     lda b_prz,x
     jsr bput
-    inx
-    cpx #4
+    inc b_i
+    lda b_i
+    cmp #4
     bne @floors
     lda frame_count              ; Mario's random start floor
     lsr
