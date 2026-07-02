@@ -492,6 +492,24 @@ main_loop:
 ;   block stays live (drawn as a brick $82) for a hard 255-frame window from the FIRST bonk,
 ;   coins per bonk, then converts to used on the first bonk after expiry (RE: Jump_000_1888).
 .proc hit_qblock
+    jsr find_block               ; multi-coin? register the cell FIRST, so the hop below
+    bcc @reg_done                ; already shows the brick ($82) even on the very first bonk
+    cmp #$c0
+    bne @reg_done
+    lda mc_colh
+    cmp #$FF
+    bne @reg_done                ; already the registered one
+    lda feet_col
+    sta mc_coll
+    lda feet_col+1
+    sta mc_colh
+    lda mrow
+    sta mc_row
+    lda #$FF                     ; hard 255-frame window from this first bonk ($c0ce)
+    sta mc_tmr
+@reg_done:
+    jsr read_map_tile            ; pre-bonk display tile ($80/$81; $82 for a multi-coin)
+    jsr spawn_bounce             ; the block hops as a sprite while the outcome resolves
     jsr find_block               ; C=1,A=value if this block is in the contents table
     bcc @coin
     cmp #$c0                     ; multi-coin: special lifecycle, NOT marked used yet
@@ -529,22 +547,11 @@ main_loop:
     jsr award_coin               ; +1 coin, +100 score, 1-up at 100
     rts
 @multicoin:
-    lda mc_colh                  ; first bonk? (only one multi-coin block exists per level)
-    cmp #$FF
-    bne @mc_again
-    lda feet_col                 ; record the cell + start the hard window ($c0ce = $ff);
-    sta mc_coll                  ; the block now READS as $82 (read_map_tile) -> redraw it
-    lda feet_col+1
-    sta mc_colh
-    lda mrow
-    sta mc_row
-    lda #$FF
-    sta mc_tmr
-    jsr redraw_cell
+    lda mc_tmr                   ; window open (incl. the first bonk) -> another coin
+    beq @mc_conv
+    jsr redraw_cell              ; cell shows the brick look ($82 via the mc registration)
     bra @coinspawn
-@mc_again:
-    lda mc_tmr                   ; window still open -> just another coin
-    bne @coinspawn
+@mc_conv:
     jsr mark_used                ; expired: final coin + convert to a used block
     lda #$FF
     sta mc_colh
@@ -837,8 +844,12 @@ main_loop:
     bne @realbrick
     bra @qblock
 @realbrick:
-    lda mario_big                 ; small Mario can't break bricks -> just bonk
-    beq @bonk
+    lda mario_big                 ; small Mario can't break bricks -> the brick just hops
+    bne @smash
+    lda #$82
+    jsr spawn_bounce
+    bra @bonk
+@smash:
     jsr break_brick               ; big Mario smashes it
 @bonk:
     lda #2                        ; bonk: stop rising, start falling
@@ -1963,9 +1974,16 @@ OBJ_BALL   = 4
 OBJ_HEART  = 5                   ; 1-up heart ($2a): same hop->walk engine as the mushroom
 OBJ_STAR   = 6                   ; star ($2c): rises, then bounces forward in small arcs
 OBJ_DEBRIS = 7                   ; brick-break shard: flies along the jump arc (trace-verified)
+OBJ_POPUP  = 8                   ; floating score text ("1000"/"1UP"): 2 glyph tiles side by side
+OBJ_BOUNCE = 9                   ; bonked-block hop: the block tile as a sprite, cell blank under it
 DEBRIS_TILE = $62                ; all 4 shards are OBJ tile $62 (mGBA OAM trace)
 DEBRIS_HI  = 7                   ; jump-arc start index: high pair rises 21px (trace: 21px)
 DEBRIS_LO  = 11                  ; low pair rises 13px (trace: 13px)
+COINSPIN   = $F6                 ; coin-pop spin: $F6->$F7->$F8->$F7 ping-pong, 1 tile/frame
+POP_1000_L = $59                 ; "10" glyph  (popup value $10 -> tiles $59,$57 in bank2 $5892)
+POP_1000_R = $57                 ; "00"
+POP_1UP_L  = $5E                 ; "1U"        (popup value $ff -> tiles $5E,$5F)
+POP_1UP_R  = $5F                 ; "P."
 HEART_TILE = $84                 ; heart = 1 OBJ tile (metasprite param $17)
 STAR_TA    = $86                 ; star twinkles between $86 and $85 (param $19 list)
 STAR_TB    = $85
@@ -2250,6 +2268,9 @@ STAR_VY_END = 8                                       ; last index (held until f
     lda #$00                     ; +1000
     ldx #$10
     jsr add_score
+    lda #POP_1000_L              ; floating "1000"
+    ldy #POP_1000_R
+    jsr spawn_popup
     ldx oi
     stz o_type,x
 @done:
@@ -2358,6 +2379,101 @@ STAR_VY_END = 8                                       ; last index (held until f
     cmp #240                     ; (a wrap above the top while rising is not "below")
     bcs @done
     stz o_type,x
+@done:
+    rts
+.endproc
+
+; --- floating score popup ("1000"/"1UP") --- RE bank2 $5892/$59a5: 2 glyph sprites at the
+; pickup point, rising 1px every 2 frames, 32 ticks (= 64 frames) then gone.
+.proc spawn_popup                ; A = left glyph tile, Y = right glyph tile
+    sta tmpL
+    sty tmpH
+    jsr find_free_obj
+    bcs @full
+    lda #OBJ_POPUP
+    sta o_type,x
+    lda cam_x                    ; x = Mario world X - 4 (original: $ffeb = $c202 + $fc)
+    clc
+    adc spr_x
+    sta o_xl,x
+    lda cam_x+1
+    adc #0
+    sta o_xh,x
+    lda o_xl,x
+    sec
+    sbc #4
+    sta o_xl,x
+    lda o_xh,x
+    sbc #0
+    sta o_xh,x
+    lda spr_y                    ; y = Mario Y - 16 (original: $ffec = $c201 - $10)
+    sec
+    sbc #16
+    sta o_y,x
+    lda tmpL
+    sta o_vx,x                   ; left glyph rides in o_vx (a popup never moves in X)
+    lda tmpH
+    sta o_st,x                   ; right glyph in o_st
+    lda #32                      ; 32 ticks (one tick per 2 frames)
+    sta o_tmr,x
+    stz o_pdr,x
+@full:
+    rts
+.endproc
+
+.proc upd_popup
+    lda frame_count              ; 1px up every 2nd frame
+    lsr
+    bcc :+
+    rts
+:   ldx oi
+    dec o_y,x
+    dec o_tmr,x
+    bne @done
+    stz o_type,x
+@done:
+    rts
+.endproc
+
+; --- bonked-block hop --- trace: the block's own tile rises -2,-2 then falls +1,+2 (~5
+; frames) as a sprite, then the cell's final tile is stamped. The final tile is stamped
+; immediately underneath (the hop sprite covers it), so scrolling stays consistent.
+bounce_dy: .byte $FE,$FE,$01,$02
+
+.proc spawn_bounce               ; A = the pre-bonk display tile ($80/$81, $82 for bricks/mc)
+    sta tmpL
+    jsr find_free_obj
+    bcs @full
+    lda #OBJ_BOUNCE
+    sta o_type,x
+    jsr obj_set_x8
+    lda mrow                     ; the block cell in object space (dy = o_y+8 = (mrow+2)*8)
+    asl
+    asl
+    asl
+    clc
+    adc #8
+    sta o_y,x
+    lda tmpL
+    sta o_vx,x                   ; the tile it shows
+    stz o_st,x
+    stz o_pdr,x
+@full:
+    rts
+.endproc
+
+.proc upd_bounce
+    ldx oi
+    ldy o_st,x
+    lda bounce_dy,y
+    clc
+    adc o_y,x
+    sta o_y,x
+    inc o_st,x
+    lda o_st,x
+    cmp #4
+    bne @done
+    stz o_type,x                 ; anim over (the final tile is already stamped in the BG)
 @done:
     rts
 .endproc
@@ -2573,10 +2689,9 @@ STAR_VY_END = 8                                       ; last index (held until f
     asl
     sta o_y,x
     stz o_vx,x
-    lda #$FA                     ; vy = -6 (launch up)
-    sta o_vy,x
-    lda #12                      ; short life: pop up ~2 tiles and vanish (was 24 -> plummeted
-    sta o_tmr,x                  ; to the bottom of the screen under gravity before expiring)
+    lda #32                      ; RE (bank2 $5892): block coins are $c0-marked popups -- they
+    sta o_tmr,x                  ; rise 1px EVERY frame for 32 ticks, spinning $F6/$F7/$F8
+    stz o_st,x                   ; spin phase 0..3
     stz o_pdr,x
 @full:
     rts
@@ -2599,6 +2714,10 @@ STAR_VY_END = 8                                       ; last index (held until f
     beq @star
     cmp #OBJ_DEBRIS
     beq @debris
+    cmp #OBJ_POPUP
+    beq @popup
+    cmp #OBJ_BOUNCE
+    beq @bounce
     jsr upd_mush                 ; OBJ_MUSH and OBJ_HEART (identical walker engine)
     bra @next
 @coin:
@@ -2615,6 +2734,12 @@ STAR_VY_END = 8                                       ; last index (held until f
     bra @next
 @debris:
     jsr upd_debris
+    bra @next
+@popup:
+    jsr upd_popup
+    bra @next
+@bounce:
+    jsr upd_bounce
 @next:
     inc oi
     lda oi
@@ -2623,13 +2748,14 @@ STAR_VY_END = 8                                       ; last index (held until f
     rts
 .endproc
 
-; upd_coin (X=slot): y += vy ; vy += gravity ; expire after o_tmr frames.
+; upd_coin (X=slot): the block coin-pop -- rises 1px/frame, spin phase advances 1/frame,
+; expires after 32 frames (the original's $c0-marked popup path, moved every frame).
 .proc upd_coin
-    clc
-    lda o_y,x
-    adc o_vy,x                   ; vy is signed 8-bit
-    sta o_y,x
-    inc o_vy,x                   ; gravity
+    dec o_y,x                    ; straight up, 1px/frame (no gravity arc -- trace-verified)
+    lda o_st,x                   ; spin phase 0,1,2,3 -> tiles $F6,$F7,$F8,$F7
+    ina
+    and #3
+    sta o_st,x
     dec o_tmr,x
     bne @done
     stz o_type,x                 ; lifetime over -> free
@@ -2692,6 +2818,9 @@ STAR_VY_END = 8                                       ; last index (held until f
     lda #$00                     ; +1000
     ldx #$10
     jsr add_score
+    lda #POP_1000_L              ; floating "1000"
+    ldy #POP_1000_R
+    jsr spawn_popup
     ldx oi
     stz o_type,x                 ; despawn the flower
 @done:
@@ -2860,9 +2989,15 @@ STAR_VY_END = 8                                       ; last index (held until f
     lda #$00
     ldx #$10
     jsr add_score
+    lda #POP_1000_L              ; floating "1000"
+    ldy #POP_1000_R
+    jsr spawn_popup
     bra @take
 @heart:
     jsr add_life                 ; 1-up heart ($2b pickup -> $c0a3 in the original)
+    lda #POP_1UP_L               ; floating "1UP"
+    ldy #POP_1UP_R
+    jsr spawn_popup
 @take:
     ldx oi
     stz o_type,x
@@ -2987,6 +3122,12 @@ STAR_VY_END = 8                                       ; last index (held until f
 :   cmp #OBJ_BALL
     bne :+
     jmp @ball
+:   cmp #OBJ_POPUP
+    bne :+
+    jmp @popup
+:   cmp #OBJ_BOUNCE
+    bne :+
+    jmp @bounce
 :   cmp #OBJ_HEART
     beq @heart
     cmp #OBJ_STAR
@@ -3075,11 +3216,51 @@ STAR_VY_END = 8                                       ; last index (held until f
     clc
     adc #8
     sta dy
-    jsr set_dst
-    lda #COIN_TILE               ; BG coin tile -> bg_chardata, drawn transparent
-    jsr get_tile_src
-    stz blit_opaque
-    jsr sprite_blit_subpx
+    ldx oi                       ; spin phase -> tile $F6,$F7,$F8,$F7
+    lda o_st,x
+    cmp #3
+    bne :+
+    lda #1
+:   clc
+    adc #COINSPIN
+    tax
+    jsr draw_quad
+    rts
+@popup:
+    lda spr_col                  ; two glyph tiles side by side (left in o_vx, right in o_st)
+    sta dcol
+    ldx oi
+    lda o_y,x
+    clc
+    adc #8
+    sta dy
+    lda o_vx,x
+    tax
+    jsr draw_quad
+    lda spr_col                  ; right glyph 8px (= 2 byte-columns) over
+    clc
+    adc #2
+    sta dcol
+    ldx oi
+    lda o_y,x
+    clc
+    adc #8
+    sta dy
+    lda o_st,x
+    tax
+    jsr draw_quad
+    rts
+@bounce:
+    lda spr_col                  ; the hopping block: its pre-bonk tile rides in o_vx
+    sta dcol
+    ldx oi
+    lda o_y,x
+    clc
+    adc #8
+    sta dy
+    lda o_vx,x
+    tax
+    jsr draw_quad
     rts
 .endproc
 
