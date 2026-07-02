@@ -1264,8 +1264,8 @@ main_loop:
     sta dy                       ; stash VRAM tile row (drives the destination scanline)
     sec                          ; map_row = VRAM row - 2 (playfield sits below status bar)
     sbc #2
-    cmp #16                      ; keep only map_row 0..15; <0 wraps to >=$FE so bcs catches it
-    bcs @skip                    ;   (status-bar rows 0-1 and below-ground rows are not in map)
+    cmp #18                      ; rows 0..17 are restorable (16,17 = the dirt band; <0 wraps
+    bcs @skip                    ;   to >=$FE so bcs also skips the status-bar rows)
     sta map_row
     lda t_col                    ; VRAM tile col = t_col + ri
     clc
@@ -1278,8 +1278,14 @@ main_loop:
     adc #0
     sta feet_col+1
     lda map_row
+    cmp #16
+    bcc @maptile
+    lda #$61                     ; dirt band (rows 16,17): solid fill, same as draw_column --
+    bra @havetile                ; previously SKIPPED, so sprites falling through the ground
+@maptile:                        ; (brick shards) left permanent imprints in the dirt
     sta mrow
     jsr read_map_tile            ; effective tile (used-block transform applied)
+@havetile:
     jsr get_tile_src
     lda dcol                     ; dcol = tile_col*2
     asl
@@ -3035,10 +3041,11 @@ bounce_dy: .byte $FE,$FE,$01,$02
     sec
     sbc shift_px
     sta rb_vx
-    lda o_pvy,x
+    lda o_pvy,x                  ; = the drawn dy (o_y+8)
     sta rb_y
     lda #3
     sta rb_cols
+    lda #2                       ; an 8px quad spans at most 2 tile rows
     sta rb_rows
     jsr restore_bg
 @next:
@@ -3059,6 +3066,8 @@ bounce_dy: .byte $FE,$FE,$01,$02
     adc #8                       ; is skipped so a high coin-pop can't stamp the HUD
     cmp #16
     bcc @off
+    cmp #153                     ; bottom clip: a quad at dy>152 would spill past line 160
+    bcs @off
     ldx oi
     lda o_type,x
     beq @off
@@ -3085,7 +3094,9 @@ bounce_dy: .byte $FE,$FE,$01,$02
     ldx oi
     lda ovx
     sta o_pvx,x
-    lda o_y,x
+    lda o_y,x                    ; store the DRAWN top line (dy = o_y+8), so the erase can
+    clc                          ; cover exactly 2 tile rows instead of 3 (8px quad spans at
+    adc #8                       ; most 2 rows) -- a third of the per-object erase cost
     sta o_pvy,x
     lda #1
     sta o_pdr,x

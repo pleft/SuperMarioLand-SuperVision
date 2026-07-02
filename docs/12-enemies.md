@@ -36,9 +36,12 @@ interactive objects.
 (Correction: an earlier note labeled byte2 "param"; it is the **type**, byte1 is position.)
 
 ## Type tables (indexed by `$FFC0` object type)
-Types run past the `$00–$1B` enemies — ITEMS live higher: **`$28` = Super Mushroom**, **`$2D`
-= the big-Mario power-up** (superball flower). Block-content values (bank3 `$6536`) are spawned
-as these object types (`Jump_000_1888` → `Call_000_254d`).
+Types run past the `$00–$1B` enemies — ITEMS live higher [item map corrected 2026-07-02]:
+**`$28`→`$29` Super Mushroom** (hop→walker), **`$2A`→`$2B` 1-UP heart** (identical physics +
+scripts to the mushroom, sprite param `$17` = tile `$84`; pickup → `$c0a3` = +1 life),
+**`$2C`→`$34` star** (rise → arc-bounce; pickup → `$c0d3`=`$f8` invincibility), **`$2D`→`$2E`
+Superball Flower** (rise → sit). Block-content values (bank3 `$6536`) are spawned as these
+object types (`Jump_000_1888` → `Call_000_254d`).
 - **`AIScriptPtrTable` @ `$349E`** — per-type pointer to a **movement-script** (below).
 - **`PhysicsParamTable` @ `$3375`** — **3 bytes/type** (`Call_000_2cbb` indexes `type*3`):
   byte0 → `$FFC7` (collision/accel flags; `&$0c==$04` = reverse-X-on-wall, `&$30`/`&$c0` =

@@ -9,17 +9,23 @@ and the bank-3 metasprite table `$4C37`. Implemented in `src/main.s`; data via
 The tile value (`$80`/`$81`) does **not** decide coin-vs-mushroom. During level decode
 `Call_000_2321` looks each special tile up in a per-level table (**bank3 `$6536`**, 3-byte
 `[segment, col-in-seg, value]` entries) and stores the content `value`. Blocks NOT listed hold
-a single **coin**. World 1-1 lists 5: cols 22 & 95 = `$28` **Super Mushroom**; cols 83/174/259
-= `$2a`/`$2c`/`$c0` (star / superball / multi-coin). (Columns are −20 vs the pre-2026-06-30
-values, after the seg-3 play-start fix in `docs/10`.) Extracted to `level_NN_blocks.bin`
-(`decode_blocks`), looked up at hit time by `find_block (col,row)`.
+a single **coin**. World 1-1 lists 5: cols 22 & 95 = `$28` **power-up**; col 83 = `$2a` **1-UP
+HEART**; col 174 = `$2c` **STAR**; col 259 = `$c0` **multi-coin**. [CORRECTED 2026-07-02: an
+earlier note had `$2a`=star / `$2c`=superball — wrong. Tile `$84` is a heart and its pickup
+routes to `$c0a3`, the +1-life trigger; the star is `$2c`, tile `$86`.] (Columns are −20 vs the
+pre-2026-06-30 values, after the seg-3 play-start fix in `docs/10`.) Extracted to
+`level_NN_blocks.bin` (`decode_blocks`), looked up at hit time by `find_block (col,row)`.
 
 | Hit tile | Content (table) | Reaction (head-bonk from below) |
 |----------|-----------------|---------------------------------|
-| `$80`/`$81` | unlisted | **launch a coin** (coin-pop entity) + `+1` coin + `+100` score |
-| `$80`/`$81` | `$28` | **spawn a Super Mushroom entity** (slides out, Mario walks into it → big) |
-| `$80`/`$81` | `$2a`/`$2c`/`$c0` | spawn mushroom (placeholder — real star/superball/multi-coin = TODO) |
-| `$82` | brick | big Mario → smash (blank `$2C`, +50); small → just bonk |
+| `$80`/`$81` | unlisted | **spinning coin pop** + `+1` coin + `+100` score |
+| `$80`/`$81` | `$28` | **Super Mushroom** entity (or **Superball Flower** if already big) |
+| `$80`/`$81` | `$2a` | **1-UP heart** entity (walks like the mushroom; pickup = +1 life) |
+| `$80`/`$81` | `$2c` | **star** entity (bounces away; pickup = ~16s invincibility) |
+| `$80`/`$81` | `$c0` | **multi-coin block** (see below) |
+| `$82` | brick | big Mario → smash into **4 flying shards** (+50); small → the brick **hops** |
+
+Every `?`-block bonk also plays the **block-bounce** animation (below).
 
 Solidity rule is unchanged (`tile >= $60`). A used `?`-block stays solid (`$7F`); a smashed
 brick becomes passable. The used-tile transform is now applied in **read_map_tile, draw_column
@@ -174,11 +180,57 @@ segment there. Boot already selects `SYSCTRL_BANK0` (`$2026` bits7:5), so bank 0
 Result: **~5.6K free in the fixed bank** for code. To scale further (enemies), page more data
 through `$8000` (up to 128K / 8 banks).
 
+## 1-UP heart + star + multi-coin block [added 2026-07-02 — RE + trace verified]
+**Heart (`$2a` → object types `$2A`/`$2B`).** Identical physics + AI script to the mushroom
+(`$28`/`$29`) — hop out, drop, walk, reverse at walls; only the sprite param differs (`$17` →
+tile **`$84`**, confirmed emerging in the gameplay trace). Pickup → `$c0a3`=1 = **+1 life** (the
+same trigger the 100-coin 1-up uses; drives the lives HUD). Port: `OBJ_HEART` through the shared
+`spawn_walker`/`upd_mush` engine.
+
+**Star (`$2c` → type `$2C` rise, morph `$34`).** Rises 8px out of the block (2 updates × 4px,
+script vel `$40`×2), then **bounces forward in small arcs**: the `$34` script encodes the hop as
+a per-update vy ramp (up 3,2,1,1,0 then falling), X speed 1 throughout; floor restarts the ramp,
+walls reverse. Tile **`$86`** twinkling with `$85`. Pickup → `$c0d3`=`$f8`: **248 ticks,
+decremented every 4th frame (~16s), Mario's sprite toggling visible/invisible each tick** (port:
+`mario_starT`/`star_flash`, `draw_player` skips the off phase; the every-frame erase keeps it
+clean). While `$c0d3`≠0 object collisions take the kill-enemy path (hooks in with enemies).
+The port's vy ramp (`star_vy`) is a linearization of the script — flag if the arc looks off.
+
+**Multi-coin (`$c0`, RE of `Jump_000_1888`/`18a4`/`19e1`).** First bonk: coin + a **hard
+255-frame window** (`$c0ce`, NOT reset by re-bonks) + the block **draws as a brick `$82`** but
+stays live. Re-bonks (the `$82` ceiling path checks content `$c0` FIRST, so big Mario cannot
+smash it): another coin each. First bonk after expiry: final coin + converts to used. Port:
+single global `mc_tmr`/`mc_cell` (like the original), `read_map_tile` returns `$82` for the live
+cell, `jump_player`'s brick path routes that cell back to `hit_qblock`. Reset on respawn.
+
+## Block bounce, spinning coin-pop, score popups, brick shards [added 2026-07-02 — trace-exact]
+All from `tools/trace_bounce.lua` + the bank2 popup engine (`$5892` place / `$59a5` move):
+- **Block bounce**: a bonked `?`-block hops as a sprite of its own pre-bonk tile, offsets
+  **−2,−2,+1,+2** (~5 frames), then the final tile stands. `OBJ_BOUNCE`; all `?`-bonks (the
+  multi-coin cell is registered before the hop so even the first bonk hops as `$82`) and
+  small-Mario brick bonks. Deviation: the final tile is stamped under the hop sprite during the
+  ~5 frames (the original blanks the cell) — covered by the sprite, invisible in practice.
+- **Coin-pop**: block coins are `$c0`-marked popups — they rise **1px every frame for 32
+  frames**, spinning tiles **`$F6`→`$F7`→`$F8`→`$F7`** (1 step/frame). (Earlier `$F4` +
+  gravity-arc pop was wrong.) `upd_coin` rewritten to match.
+- **Score popups**: pickups queue a 2-glyph floating text at Mario (`$ffeb/ec/ed`): value `$10`
+  → tiles `$59`+`$57` = **"1000"** (mushroom/flower/star), `$ff` → `$5E`+`$5F` = **"1UP"**
+  (heart). Rises **1px every 2 frames, 32 ticks** (64 frames). Glyph tiles `$57-$5F` are the
+  packed score-text set ("00","0","10".."80","1U","P."). `OBJ_POPUP`, hooked into all pickups.
+- **Brick shards**: a smashed brick bursts into **4 sprites, all tile `$62`**, x ±1px EVERY
+  frame from the brick's halves, y stepping along **Mario's own jump-arc table** — high pair
+  from arc index 7 (21px rise), low pair from index 11 (13px), hold at the `$7F` apex, then fall
+  down the mirrored table (the original steps `$c218/28/38/48` along `JumpArcTable` per frame).
+  Port: `OBJ_DEBRIS` driven by the extracted `jumparc.bin` with the same indices.
+- **Object pool** grown to **8 slots** (a brick break spawns 4 shards on top of a live item).
+- **Top clip**: `draw_objects` skips anything whose `dy=o_y+8` lands above y=16 — a high
+  coin-pop/popup can no longer stamp the HUD rows (o_y wrap included).
+
 ## TODO / not-yet-faithful
-- Coin/mushroom **bounce animations** (mushroom entity + grow are done & trace-faithful).
 - Persisting block state across pipe-trip re-renders (mod bitmap is shared surface/room; fine for
   1-1 since there's no col/row collision, but not general).
 - Time-up and damage-shrink (need death sequence / enemies).
-- **`$2a` star (invincibility) + `$c0` multi-coin blocks** — still stubbed through the power-up/coin
-  path. NEXT task. (`$2c` superball-flower also stubbed.)
 - Superball: kills enemies (needs enemies) + collects floating coins.
+- Star: enemy invulnerability effect (needs enemies); vy ramp is a script linearization.
+- Block-bounce cell blanking (see deviation above) if it ever reads wrong.
+- Pickup jingles / star music (audio phase).
