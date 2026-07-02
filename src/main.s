@@ -250,6 +250,7 @@ main_loop:
     lda goal_phase               ; level-clear running? jingle -> tally -> next level
     beq :+
     jsr goal_seq
+    jsr update_objects           ; platforms keep patrolling during the clear (trace-verified)
     jmp @play
 :   lda mario_grow               ; small->big grow running? freeze the action, just flash
     bne @growing
@@ -1029,14 +1030,14 @@ main_loop:
     stz goal_top
     stz mario_frame              ; he stands in the arch for the whole sequence
     stz mario_duck
+    stz ride                     ; (a platform carry must not drag him out of the arch)
     lda spr_y                    ; top exit (door at rows 0-1) vs bottom (rows 13-14)
     cmp #64
-    bcs :+
+    bcs @no
     inc goal_top                 ; TODO: top exit = the bonus game; same tally for now
-:   jsr clear_objects            ; nothing else runs during the sequence
 @no:
-    rts
-.endproc
+    rts                          ; (objects stay LIVE through the sequence -- the original's
+.endproc                         ;  platforms keep patrolling during the jingle/tally)
 
 .proc goal_seq
     lda goal_phase
