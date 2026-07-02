@@ -2579,6 +2579,34 @@ bounce_dy: .byte $FE,$FE,$01,$02
     rts
 .endproc
 
+; ball_solid: the superball's tile test -- like read_solid, but a floating coin ($f4) is
+; COLLECTED and acts solid, so the ball bounces off it and keeps flying (RE: Call_000_1fd2
+; queues the coin award then returns the tile through the `cp $60` solidity check).
+.proc ball_solid
+    jsr read_map_tile
+    cmp #$F4
+    beq @coin
+    cmp #$60
+    bcc @no
+    lda #1
+    rts
+@no:
+    lda #0
+    rts
+@coin:
+    jsr mod_test                 ; (already-collected cells read as blank, so this is just
+    bne @no                      ;  a same-frame race guard)
+    jsr mod_set
+    lda feet_col
+    sta wcol
+    lda feet_col+1
+    sta wcol+1
+    jsr redraw_one               ; blank the coin cell on screen
+    jsr award_coin               ; +1 coin, +100, 1-up at 100
+    lda #1                       ; and the cell is solid this frame -> the ball bounces
+    rts
+.endproc
+
 ; upd_ball (oi=slot): move 2px/frame diagonally; bounce off the floor (reverse vy up + arm a
 ; fixed ~20px rise budget in o_st) and off walls (reverse vx); expire on timer or off-screen.
 ; Runs EVERY frame -- the ball is fast (2px/frame in the trace), not the every-other object rate.
@@ -2619,7 +2647,7 @@ bounce_dy: .byte $FE,$FE,$01,$02
     sec
     sbc #1                       ; test the wall one row ABOVE the feet, so the flat floor the
     sta mrow                     ; ball bounces on is never mistaken for a wall (the yo-yo bug)
-    jsr read_solid
+    jsr ball_solid               ; (a coin here is collected + bounces the ball)
     beq @vert
     ldx oi                       ; wall -> reverse vx
     lda o_vx,x
@@ -2653,7 +2681,7 @@ bounce_dy: .byte $FE,$FE,$01,$02
     lsr
     lsr
     sta mrow
-    jsr read_solid
+    jsr ball_solid               ; (a coin here is collected + bounces the ball up)
     beq @edge
     ldx oi                       ; floor -> snap onto it and bounce up. NO fixed height: it
     lda mrow                     ; climbs away at 45 deg until a real ceiling/wall or off-screen
@@ -2672,7 +2700,7 @@ bounce_dy: .byte $FE,$FE,$01,$02
     sec
     sbc #1
     sta mrow
-    jsr read_solid
+    jsr ball_solid               ; (a coin here is collected + bounces the ball down)
     beq @edge
     ldx oi                       ; ceiling -> bounce back down
     lda #BALL_SPD
