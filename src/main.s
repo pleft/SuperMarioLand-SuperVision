@@ -97,6 +97,15 @@ goal_tmr:    .res 1          ; frames left in the current goal phase
 goal_top:    .res 1          ; 1 = Mario exited through the TOP door (bonus game; TODO)
 plats_on:    .res 1          ; end-area moving platforms spawned (one-shot)
 ride:        .res 1          ; 0 = not riding; else (slot+1) of the platform under Mario
+bonus_phase: .res 1          ; bonus game: 0 off, 2 play, 3 walk, 5 award
+b_tick:      .res 1          ; 3-frame tick divider ($da22)
+b_ladder:    .res 1          ; ladder cycle counter 1..6 ($da27); odd = visible at gap (n-1)/2
+b_floor:     .res 1          ; Mario's floor 0..3 (top..bottom)
+b_prz:       .res 4          ; the 4 prize tiles top..bottom (rotated ring)
+b_awn:       .res 1          ; lives left to award
+b_awt:       .res 1          ; award pacing timer
+b_row:       .res 1          ; bput cursor: BG row
+b_col:       .res 1          ; bput cursor: BG col
 hud_row:     .res 1          ; put_hud target row (0 or 1)
 htmp:        .res 1          ; put_hud scratch (digit being blitted)
 rb_vx:       .res 1          ; restore_bg: VRAM pixel X of the region to repaint
@@ -247,7 +256,11 @@ main_loop:
     jmp main_loop
 @normal:
     jsr read_input
-    lda goal_phase               ; level-clear running? jingle -> tally -> next level
+    lda bonus_phase              ; bonus game running? it owns the whole frame
+    beq :+
+    jsr bonus_frame
+    jmp main_loop
+:   lda goal_phase               ; level-clear running? jingle -> tally -> next level
     beq :+
     jsr goal_seq
     jsr update_objects           ; platforms keep patrolling during the clear (trace-verified)
@@ -1047,9 +1060,28 @@ main_loop:
     beq @hold
     cmp #3
     beq @tally
-    dec goal_tmr                 ; phase 4: end hold -> the next level
+    dec goal_tmr                 ; phase 4: end hold -> next level (or the bonus game)
     bne @done
+    lda goal_top                 ; top door -> the ladder bonus game first
+    beq @next
+    stz goal_phase
+    lda frame_count              ; prize ring rotated pseudo-randomly (original: DIV&3+1
+    and #3                       ;  into [00 01 02 E5 03 01 02 E5] @ $3E7B)
+    tax
+    ldy #0
+:   lda @ring+1,x
+    sta b_prz,y
+    inx
+    iny
+    cpy #4
+    bne :-
+    jsr bonus_start
+    lda #2
+    sta bonus_phase
+    rts
+@next:
     jmp next_level
+@ring: .byte $00,$01,$02,$E5,$03,$01,$02,$E5
 @jingle:
     dec goal_tmr                 ; the "course clear" jingle pause
     bne @done
@@ -1090,6 +1122,366 @@ main_loop:
     lda #43
     sta goal_tmr
     rts
+.endproc
+
+; ---------------------------------------------------------------------------
+; BONUS GAME (top-door exit). RE: docs/14 "Bonus game RE" — screen drawn by code
+; (states $12/$13), prizes = tiles $01/$02/$03 (1/2/3-UP) + $E5 (flower) in a random
+; rotation; Mario on a random floor; every-3-frames tick: the ladder blinks around the
+; 3 inter-floor gaps while Mario cycles down a floor; A registers only while a ladder
+; is visible; then Mario walks right to the pedestal and the prize is awarded.
+; (Port simplification: Mario takes his own floor's prize — the traced run also went
+; walk->award with no climb. Climb states $18/$19 not modeled.)
+
+; bput: blit tile A at (b_row, b_col) of the bonus screen (full-screen coords).
+.proc bput
+    pha
+    lda b_col
+    asl
+    sta dcol
+    lda b_row
+    asl
+    asl
+    asl
+    sta dy
+    jsr set_dst
+    pla
+    jsr get_tile_src
+    jsr blit_tile
+    rts
+.endproc
+
+.proc bput_run                   ; A = tile, X = count: blit a horizontal run from b_col
+    sta tmpL2
+    stx tmpH2
+:   lda tmpL2
+    jsr bput
+    inc b_col
+    dec tmpH2
+    bne :-
+    rts
+.endproc
+
+; b_sety: spr_y = 40 + 24*b_floor (floor tops at dy 56/80/104/128; Mario is 16 above).
+.proc b_sety
+    lda b_floor
+    asl
+    asl
+    asl
+    sta tmpL2                    ; floor*8
+    asl
+    clc
+    adc tmpL2                    ; floor*24
+    clc
+    adc #40
+    sta spr_y
+    rts
+.endproc
+
+; b_erase: blank the 3x3 tile area at Mario's current (spr_x, spr_y).
+.proc b_erase
+    lda spr_y
+    lsr
+    lsr
+    lsr
+    sta tmpL3                    ; top tile row
+    stz tmpH3                    ; row counter
+@row:
+    lda spr_x
+    lsr
+    lsr
+    lsr
+    sta tmpL2                    ; left tile col
+    stz tmpH2
+@col:
+    lda tmpL2
+    asl
+    sta dcol
+    lda tmpL3
+    asl
+    asl
+    asl
+    sta dy
+    jsr set_dst
+    jsr blit_blank
+    inc tmpL2
+    inc tmpH2
+    lda tmpH2
+    cmp #3
+    bne @col
+    inc tmpL3
+    inc tmpH3
+    lda tmpH3
+    cmp #3
+    bne @row
+    rts
+.endproc
+
+; b_ladder_cell: draw (A=0) or erase (A=1) the ladder at gap Y (0..2). The ladder is a
+; 1-col 4-row strip at BG col 10, rows (7+3*gap)..(+3) — tiles $2E,$2F,$2F,$30, erased
+; back to $2D (floor) at top+bottom and $2C between (RE: bank2 $5B27).
+.proc b_ladder_cell
+    sta tmpH3                    ; 0 draw / 1 erase
+    tya
+    asl
+    sta tmpL3                    ; gap*2
+    tya
+    clc
+    adc tmpL3
+    clc
+    adc #7
+    sta b_row                    ; row = 7 + 3*gap
+    lda #10
+    sta b_col
+    ldx #0
+@loop:
+    ldy tmpH3
+    beq :+
+    lda b_erasetab,x
+    bra @put
+:   lda b_ladtab,x
+@put:
+    jsr bput
+    inc b_row
+    inx
+    cpx #4
+    bne @loop
+    rts
+b_ladtab:   .byte $2E,$2F,$2F,$30
+b_erasetab: .byte $2D,$2C,$2C,$2D
+.endproc
+
+; bonus_start: draw the whole bonus screen + place Mario. (RE: State_12/$13/$14.)
+.proc bonus_start
+    jsr clear_vram               ; blank the full framebuffer (incl. the HUD rows)
+    stz b_row                    ; --- border: top row ---
+    stz b_col
+    lda #$F5
+    jsr bput
+    inc b_col
+    lda #$9F
+    ldx #18
+    jsr bput_run
+    lda #$FC
+    jsr bput
+    lda #17                      ; --- bottom border (row 17) ---
+    sta b_row
+    stz b_col
+    lda #$FF
+    jsr bput
+    inc b_col
+    lda #$9F
+    ldx #18
+    jsr bput_run
+    lda #$E9
+    jsr bput
+    lda #1                       ; --- side walls rows 1..16 ---
+    sta b_row
+@sides:
+    stz b_col
+    lda #$F8
+    jsr bput
+    lda #19
+    sta b_col
+    lda #$F8
+    jsr bput
+    inc b_row
+    lda b_row
+    cmp #17
+    bne @sides
+    lda #2                       ; --- "BONUS GAME" at row 2 col 5 ---
+    sta b_row
+    lda #5
+    sta b_col
+    ldx #0
+:   lda @txt,x
+    jsr bput
+    inc b_col
+    inx
+    cpx #10
+    bne :-
+    lda #4                       ; --- lives: head icon + count at row 4 ---
+    sta b_row
+    lda #7
+    sta b_col
+    lda #$E4
+    jsr bput
+    lda #10
+    sta b_col
+    lda lives                    ; BCD tens/ones as font tiles
+    lsr
+    lsr
+    lsr
+    lsr
+    jsr bput
+    inc b_col
+    lda lives
+    and #$0F
+    jsr bput
+    ldx #0                       ; --- 4 floors (rows 7/10/13/16, cols 1..18) + pedestals ---
+    stx b_floor
+@floors:
+    txa
+    asl
+    sta tmpL3
+    txa
+    clc
+    adc tmpL3
+    clc
+    adc #7
+    sta b_row                    ; floor row = 7+3n
+    lda #1
+    sta b_col
+    phx
+    lda #$2D
+    ldx #18
+    jsr bput_run
+    plx
+    dec b_row                    ; pedestal row = floor row - 1
+    lda #17
+    sta b_col
+    lda #$2B
+    jsr bput
+    inc b_col
+    lda b_prz,x
+    jsr bput
+    inx
+    cpx #4
+    bne @floors
+    lda frame_count              ; Mario's random start floor
+    lsr
+    lsr
+    and #3
+    sta b_floor
+    lda #16
+    sta spr_x
+    sta mario_vx
+    jsr b_sety
+    stz mario_frame
+    stz mario_facing
+    jsr draw_player
+    stz b_tick
+    lda #1
+    sta b_ladder
+    ldy #0                       ; first ladder visible at gap 0
+    lda #0
+    jsr b_ladder_cell
+    rts
+@txt: .byte $0B,$18,$17,$1E,$1C,$2C,$10,$0A,$16,$0E   ; "BONUS GAME" (font; $2C = space)
+.endproc
+
+; bonus_frame: one frame of the bonus game (called instead of the normal play loop).
+.proc bonus_frame
+    lda bonus_phase
+    cmp #2
+    beq @play
+    cmp #3
+    beq @walk
+    jmp @award
+@play:
+    lda b_ladder                 ; A while a ladder is visible (odd counter) -> lock it in
+    and #1
+    beq @tick
+    lda pad_pressed
+    and #GB_A
+    beq @tick
+    lda #3                       ; locked: walk to the pedestal
+    sta bonus_phase
+    rts
+@tick:
+    inc b_tick
+    lda b_tick
+    cmp #3
+    beq :+
+    rts
+:   stz b_tick
+    lda b_ladder                 ; erase the currently shown ladder (odd) / advance
+    and #1
+    beq @showit
+    lda b_ladder                 ; visible now -> erase it at its gap
+    dea
+    lsr
+    tay
+    lda #1
+    jsr b_ladder_cell
+    bra @cycle
+@showit:
+    lda b_ladder                 ; hidden -> the NEXT odd shows at gap ((n)/2 mod 3)
+@cycle:
+    inc b_ladder
+    lda b_ladder
+    cmp #7
+    bcc :+
+    lda #1
+    sta b_ladder
+:   and #1
+    beq @mario
+    lda b_ladder                 ; became visible: draw at its gap
+    dea
+    lsr
+    tay
+    cpy #3
+    bcs @mario
+    lda #0
+    jsr b_ladder_cell
+@mario:
+    jsr b_erase                  ; Mario cycles DOWN a floor per tick (wraps to the top)
+    lda b_floor
+    ina
+    and #3
+    sta b_floor
+    jsr b_sety
+    jsr draw_player
+    rts
+@walk:
+    jsr b_erase                  ; walk right 1px/frame to the pedestal (x=128)
+    inc spr_x
+    lda spr_x
+    sta mario_vx
+    lsr
+    lsr
+    lsr
+    and #1                       ; simple 2-frame walk cycle
+    ina
+    sta mario_frame
+    jsr draw_player
+    lda spr_x
+    cmp #128
+    bcc @wdone
+    lda #5                       ; reached the prize
+    sta bonus_phase
+    ldx b_floor
+    lda b_prz,x
+    cmp #$E5                     ; flower?
+    beq @flower
+    and #$0F                     ; tile $01/$02/$03 = that many lives
+    sta b_awn
+    lda #40
+    sta b_awt
+@wdone:
+    rts
+@flower:
+    lda #1                       ; flower: the superball power (grows small Mario too)
+    sta mario_superball
+    sta mario_big
+    stz b_awn
+    lda #120
+    sta b_awt
+    rts
+@award:
+    dec b_awt
+    bne @adone
+    lda b_awn
+    beq @exit
+    jsr add_life                 ; one 1-UP per beat
+    dec b_awn
+    lda #40
+    sta b_awt
+@adone:
+    rts
+@exit:
+    stz bonus_phase
+    jmp next_level
 .endproc
 
 ; next_level: level complete. The original proceeds to 1-2; the port has one level
