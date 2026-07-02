@@ -81,6 +81,12 @@ mario_big:   .res 1          ; 0 = small Mario, 1 = big ("Super") Mario
 mario_duck:  .res 1          ; 1 = big Mario ducking (Down held, grounded)
 mario_grow:  .res 1          ; >0 = small->big grow animation running (counts 80->0, game frozen)
 mario_superball: .res 1      ; 1 = Superball Mario (got a flower) -> B fires a bouncing superball
+mario_starT: .res 1          ; star invincibility ticks (248..0, dec every 4th frame; $c0d3)
+star_flash:  .res 1          ; star flash phase: 1 = Mario invisible this 4-frame window
+mc_tmr:      .res 1          ; multi-coin window, 255 frames from the FIRST bonk ($c0ce)
+mc_coll:     .res 1          ; the active multi-coin block's cell (col lo/hi + row);
+mc_colh:     .res 1          ;   mc_colh = $FF -> none active (init'd at reset/respawn —
+mc_row:      .res 1          ;   ZP is zero-cleared, and col-hi 0 is a real column)
 hud_row:     .res 1          ; put_hud target row (0 or 1)
 htmp:        .res 1          ; put_hud scratch (digit being blitted)
 rb_vx:       .res 1          ; restore_bg: VRAM pixel X of the region to repaint
@@ -198,6 +204,8 @@ o_st:        .res 4          ; sub-state (superball: rise-budget counter for the
     jsr render_status_bar        ; status bar (drawn once; pinned by the NMI/IRQ raster split)
     lda #$02                     ; SML starts with 2 spare lives ($da15 init)
     sta lives
+    lda #$FF                     ; no multi-coin block active (ZP cleared to 0 above)
+    sta mc_colh
     lda #<block_count            ; find_block limit = block_count*4 (low byte is enough: < 64)
     asl
     asl
@@ -229,6 +237,22 @@ main_loop:
     jsr read_input
     lda mario_grow               ; small->big grow running? freeze the action, just flash
     bne @growing
+    lda mc_tmr                   ; multi-coin window ticks every frame ($c0ce)
+    beq :+
+    dec mc_tmr
+:   lda mario_starT              ; star: dec every 4th frame, toggling the flash ($c0d3/Call_1f03)
+    beq @nostar
+    lda frame_count
+    and #3
+    bne @nostar
+    dec mario_starT
+    bne :+
+    stz star_flash               ; expired -> visible for good
+    bra @nostar
+:   lda star_flash
+    eor #1
+    sta star_flash
+@nostar:
     jsr try_fire                 ; B + Superball Mario -> fire a superball
     jsr move_player              ; walk (updates spr_x) or scroll the camera (cam_x)
     jsr jump_player              ; A = jump (real arc); updates spr_y while airborne
@@ -352,6 +376,27 @@ main_loop:
     jsr mod_test                 ; A = mod bit for (feet_col, mrow); clobbers map_ptr/tmpL/X
     bne @mod
     pla
+    cmp #$80                     ; unmodified ?-block: if it's the ACTIVE multi-coin block,
+    beq @mcchk                   ; it draws (and collides) as a brick ($82) after its 1st bonk
+    cmp #$81
+    bne @ret
+@mcchk:
+    pha
+    lda mc_colh
+    cmp feet_col+1               ; ($FF sentinel never matches a real col-hi)
+    bne @nomc
+    lda mc_coll
+    cmp feet_col
+    bne @nomc
+    lda mc_row
+    cmp mrow
+    bne @nomc
+    pla
+    lda #$82                     ; the live multi-coin block looks like a brick
+    rts
+@nomc:
+    pla
+@ret:
     rts
 @mod:
     pla                          ; recover the raw tile
@@ -439,35 +484,82 @@ main_loop:
     rts
 .endproc
 
-; hit_qblock: head-bonk reaction for a ?-block at (feet_col, mrow). Mark it used + redraw as a
-; used block, then dispatch by the block-contents table: $28 (Super Mushroom) -> spawn a
-; mushroom entity; everything else (and unlisted blocks) -> launch a coin + award it. The
-; tile value ($80 vs $81) does NOT decide the contents — the table does (Call_000_2321).
+; hit_qblock: head-bonk reaction for a ?-block at (feet_col, mrow). Dispatch by the block-
+; contents table (the tile value $80/$81 does NOT decide the contents — Call_000_2321):
+;   $28 power-up (mushroom, or flower if big), $2a 1-up heart, $2c star, $c0 multi-coin,
+;   unlisted -> a single coin. One-shot blocks are marked used + redrawn; the multi-coin
+;   block stays live (drawn as a brick $82) for a hard 255-frame window from the FIRST bonk,
+;   coins per bonk, then converts to used on the first bonk after expiry (RE: Jump_000_1888).
 .proc hit_qblock
-    jsr mod_set                  ; flag (feet_col,mrow) used so it can't be re-bumped
-    lda feet_col                 ; redraw the cell -> read_map_tile now returns $7F (used)
-    sta wcol
-    lda feet_col+1
-    sta wcol+1
-    jsr redraw_one
     jsr find_block               ; C=1,A=value if this block is in the contents table
     bcc @coin
-    cmp #$28                     ; $28 = Super Mushroom power-up block
+    cmp #$c0                     ; multi-coin: special lifecycle, NOT marked used yet
+    beq @multicoin
+    pha
+    jsr mark_used                ; one-shot block -> used ($7F) + redraw
+    pla
+    cmp #$28                     ; $28 = power-up block
     beq @powerup
-    cmp #$c0                     ; $c0 = multi-coin block -> treat as a coin (TODO: 10-coin)
-    beq @coin
-                                 ; $2a/$2c (star/superball) -> power-up too, for now
+    cmp #$2a                     ; $2a = 1-up heart
+    beq @heart
+    cmp #$2c                     ; $2c = star
+    beq @star
+    bra @coinspawn               ; unknown listed value -> coin (defensive)
 @powerup:                        ; SML size rule: big Mario gets a Superball Flower, small a Mushroom
     lda mario_big
     bne @flower
-    jsr spawn_mushroom
+    lda #OBJ_MUSH
+    jsr spawn_walker
     rts
 @flower:
     jsr spawn_flower
     rts
+@heart:
+    lda #OBJ_HEART               ; walks exactly like the mushroom (types $2A/$2B == $28/$29)
+    jsr spawn_walker
+    rts
+@star:
+    jsr spawn_star
+    rts
 @coin:
+    jsr mark_used
+@coinspawn:
     jsr spawn_coin               ; coin-pop animation
     jsr award_coin               ; +1 coin, +100 score, 1-up at 100
+    rts
+@multicoin:
+    lda mc_colh                  ; first bonk? (only one multi-coin block exists per level)
+    cmp #$FF
+    bne @mc_again
+    lda feet_col                 ; record the cell + start the hard window ($c0ce = $ff);
+    sta mc_coll                  ; the block now READS as $82 (read_map_tile) -> redraw it
+    lda feet_col+1
+    sta mc_colh
+    lda mrow
+    sta mc_row
+    lda #$FF
+    sta mc_tmr
+    jsr redraw_cell
+    bra @coinspawn
+@mc_again:
+    lda mc_tmr                   ; window still open -> just another coin
+    bne @coinspawn
+    jsr mark_used                ; expired: final coin + convert to a used block
+    lda #$FF
+    sta mc_colh
+    bra @coinspawn
+.endproc
+
+; mark_used: set the (feet_col,mrow) mod bit and redraw the cell (-> $7F used / blank).
+.proc mark_used
+    jsr mod_set
+.endproc                         ; fall through
+.proc redraw_cell
+    lda feet_col
+    sta wcol
+    lda feet_col+1
+    sta wcol+1
+    jsr redraw_one
     rts
 .endproc
 
@@ -732,6 +824,17 @@ main_loop:
     jsr hit_qblock                ; spawn coin or mushroom per the content table
     bra @bonk
 @brick:
+    lda mc_colh                   ; the LIVE multi-coin block reads as $82 -> re-bonk = more
+    cmp feet_col+1                ; coins (content check precedes brick-break in the original,
+    bne @realbrick                ; so big Mario cannot break it)
+    lda mc_coll
+    cmp feet_col
+    bne @realbrick
+    lda mc_row
+    cmp mrow
+    bne @realbrick
+    bra @qblock
+@realbrick:
     lda mario_big                 ; small Mario can't break bricks -> just bonk
     beq @bonk
     jsr break_brick               ; big Mario smashes it
@@ -824,6 +927,11 @@ main_loop:
     stz mario_duck
     stz mario_grow                ; cancel any in-progress grow
     stz mario_superball           ; lose the superball ability
+    stz mario_starT               ; cancel invincibility
+    stz star_flash
+    stz mc_tmr                    ; reset the multi-coin block (level restarts fresh)
+    lda #$FF
+    sta mc_colh
     jsr clear_objects             ; drop any live mushroom/coins
     jsr clear_tile_mod            ; reset bumped/broken blocks for the fresh attempt
     stz shift_px
@@ -1746,6 +1854,10 @@ FB_MAX_COL = level0_cols - 24    ; last fb_col0 that keeps cols fb_col0..+23 in 
 ; draw_player: blit Mario's 16x16 standing metasprite (tiles $20,$21,$30,$31 -
 ; captured from the GB shadow OAM $C00C) at (spr_col, spr_y), transparent.
 .proc draw_player
+    lda star_flash               ; star invincibility: Mario blinks (skip the draw this phase;
+    beq :+                       ; the erase runs every frame regardless, so nothing goes stale)
+    rts
+:
     lda mario_vx                 ; sub-pixel offset within the byte (VRAM pixel X = spr_x + scroll_s)
     and #3
     sta spr_subx
@@ -1846,6 +1958,11 @@ OBJ_MUSH   = 1
 OBJ_COIN   = 2
 OBJ_FLOWER = 3
 OBJ_BALL   = 4
+OBJ_HEART  = 5                   ; 1-up heart ($2a): same hop->walk engine as the mushroom
+OBJ_STAR   = 6                   ; star ($2c): rises, then bounces forward in small arcs
+HEART_TILE = $84                 ; heart = 1 OBJ tile (metasprite param $17)
+STAR_TA    = $86                 ; star twinkles between $86 and $85 (param $19 list)
+STAR_TB    = $85
 BALL_TILE  = $60                 ; superball = 1 OBJ tile (mGBA OAM trace)
 BALL_SPD   = 2                   ; 2 px/frame, both axes (45 deg diagonal, from the trace)
 BALL_LIFE  = 90                  ; max lifetime (frames); also expires off-screen
@@ -1897,11 +2014,14 @@ FLOWER_RISE = 7                  ; emerge: rise 7px out of the block, then sit (
     rts
 .endproc
 
-; spawn_mushroom: appear on top of the block at (feet_col,mrow), sliding right.
-.proc spawn_mushroom
+; spawn_walker (A = OBJ_MUSH or OBJ_HEART): the mushroom-style item — hop out of the block,
+; then drop + walk. The 1-up heart uses the IDENTICAL engine in the original (types $2A/$2B
+; share the $28/$29 physics + script; only the sprite param differs).
+.proc spawn_walker
+    sta tmpH
     jsr find_free_obj
     bcs @full
-    lda #OBJ_MUSH
+    lda tmpH
     sta o_type,x
     jsr obj_set_x8
     lda mrow                     ; o_y = mrow*8 (feet rest on the block top)
@@ -1943,6 +2063,190 @@ FLOWER_RISE = 7                  ; emerge: rise 7px out of the block, then sit (
     sta o_tmr,x
     stz o_pdr,x
 @full:
+    rts
+.endproc
+
+; --- star ($2c -> type $2C rise, morph $34 bounce; RE'd from the AI scripts @ $38C3/$3964) ---
+; The $34 script encodes the hop as a per-update vy ramp (up 3,2,1,1,0 then falling) with
+; X speed 1 throughout; floor contact restarts the ramp; walls reverse X.
+star_vy: .byte $FD,$FE,$FF,$FF,$00,$01,$01,$02,$03   ; -3..-1 up, 0 apex, +1..+3 fall (hold +3)
+STAR_VY_END = 8                                       ; last index (held until floor)
+
+; spawn_star: rise straight out of the block (script: 2 updates x 4px), then bounce forward.
+.proc spawn_star
+    jsr find_free_obj
+    bcs @full
+    lda #OBJ_STAR
+    sta o_type,x
+    jsr obj_set_x8
+    lda mrow
+    asl
+    asl
+    asl
+    sta o_y,x
+    lda #1                       ; travels forward; reverses on walls
+    sta o_vx,x
+    lda #2                       ; emerge: 2 updates x 4px = 8px rise (script vel $40 x2)
+    sta o_tmr,x
+    stz o_st,x
+    stz o_pdr,x
+@full:
+    rts
+.endproc
+
+; upd_star (oi=slot): every-other-frame like the other items. Emerge, then bounce via the
+; star_vy ramp; floor restarts the ramp; wall reverses X; Mario overlap -> invincibility.
+.proc upd_star
+    lda frame_count
+    lsr
+    bcc :+
+    rts
+:   ldx oi
+    lda o_tmr,x                  ; emerging: 4px/update straight up, no X motion
+    beq @bounce
+    dec o_tmr,x
+    lda o_y,x
+    sec
+    sbc #4
+    sta o_y,x
+    jmp @consume
+@bounce:
+    lda o_st,x                   ; y += star_vy[st]
+    tay
+    lda star_vy,y
+    pha
+    clc
+    adc o_y,x
+    sta o_y,x
+    pla
+    bmi @ramp                    ; rising: no floor check
+    lda o_xl,x                   ; falling: solid floor at the centre column / feet row?
+    clc
+    adc #4
+    sta feet_col
+    lda o_xh,x
+    adc #0
+    sta feet_col+1
+    lsr feet_col+1
+    ror feet_col
+    lsr feet_col+1
+    ror feet_col
+    lsr feet_col+1
+    ror feet_col
+    lda o_y,x
+    lsr
+    lsr
+    lsr
+    sta mrow
+    jsr read_solid
+    beq @ramp2
+    ldx oi                       ; floor: snap on top + restart the hop ramp
+    lda mrow
+    asl
+    asl
+    asl
+    sta o_y,x
+    stz o_st,x
+    bra @xmove
+@ramp:
+    ldx oi
+@ramp2:
+    ldx oi
+    lda o_st,x
+    cmp #STAR_VY_END
+    bcs @xmove
+    inc o_st,x
+@xmove:
+    lda o_vx,x                   ; wall ahead (one row above the feet) -> reverse
+    bmi @wleft
+    lda o_xl,x
+    clc
+    adc #8
+    sta feet_col
+    lda o_xh,x
+    adc #0
+    sta feet_col+1
+    bra @wtest
+@wleft:
+    lda o_xl,x
+    sec
+    sbc #1
+    sta feet_col
+    lda o_xh,x
+    sbc #0
+    sta feet_col+1
+@wtest:
+    lsr feet_col+1
+    ror feet_col
+    lsr feet_col+1
+    ror feet_col
+    lsr feet_col+1
+    ror feet_col
+    ldx oi
+    lda o_y,x
+    lsr
+    lsr
+    lsr
+    sec
+    sbc #1
+    sta mrow
+    jsr read_solid
+    beq @wmove
+    ldx oi
+    lda o_vx,x
+    eor #$FF
+    ina
+    sta o_vx,x
+    bra @consume
+@wmove:
+    jsr mush_xmove
+@consume:
+    ldx oi                       ; Mario overlap -> invincibility (same AABB as the mushroom)
+    lda cam_x
+    clc
+    adc spr_x
+    sta tmpL
+    lda cam_x+1
+    adc #0
+    sta tmpH
+    sec
+    lda tmpL
+    sbc o_xl,x
+    sta tmpL
+    lda tmpH
+    sbc o_xh,x
+    sta tmpH
+    bpl @posdx
+    sec
+    lda #0
+    sbc tmpL
+    sta tmpL
+    lda #0
+    sbc tmpH
+    sta tmpH
+@posdx:
+    lda tmpH
+    bne @done
+    lda tmpL
+    cmp #14
+    bcs @done
+    lda spr_y
+    sec
+    sbc o_y,x
+    bpl :+
+    eor #$FF
+    ina
+:   cmp #16
+    bcs @done
+    lda #248                     ; star! 248 ticks, dec every 4th frame (~16s; $c0d3=$f8)
+    sta mario_starT
+    stz star_flash
+    lda #$00                     ; +1000
+    ldx #$10
+    jsr add_score
+    ldx oi
+    stz o_type,x
+@done:
     rts
 .endproc
 
@@ -2179,7 +2483,9 @@ FLOWER_RISE = 7                  ; emerge: rise 7px out of the block, then sit (
     beq @flower
     cmp #OBJ_BALL
     beq @ball
-    jsr upd_mush
+    cmp #OBJ_STAR
+    beq @star
+    jsr upd_mush                 ; OBJ_MUSH and OBJ_HEART (identical walker engine)
     bra @next
 @coin:
     jsr upd_coin
@@ -2189,6 +2495,9 @@ FLOWER_RISE = 7                  ; emerge: rise 7px out of the block, then sit (
     bra @next
 @ball:
     jsr upd_ball
+    bra @next
+@star:
+    jsr upd_star
 @next:
     inc oi
     lda oi
@@ -2421,6 +2730,10 @@ FLOWER_RISE = 7                  ; emerge: rise 7px out of the block, then sit (
     ina
 :   cmp #16
     bcs @done
+    ldx oi
+    lda o_type,x                 ; heart or mushroom?
+    cmp #OBJ_HEART
+    beq @heart
     lda mario_big
     bne @score                   ; already big -> just score, no grow
     lda #$50
@@ -2430,6 +2743,10 @@ FLOWER_RISE = 7                  ; emerge: rise 7px out of the block, then sit (
     lda #$00
     ldx #$10
     jsr add_score
+    bra @take
+@heart:
+    jsr add_life                 ; 1-up heart ($2b pickup -> $c0a3 in the original)
+@take:
     ldx oi
     stz o_type,x
 @done:
@@ -2539,11 +2856,18 @@ FLOWER_RISE = 7                  ; emerge: rise 7px out of the block, then sit (
     ldx oi
     lda o_type,x
     cmp #OBJ_COIN
-    beq @coin
-    cmp #OBJ_FLOWER
-    beq @flower
-    cmp #OBJ_BALL
-    beq @ball
+    bne :+
+    jmp @coin
+:   cmp #OBJ_FLOWER
+    bne :+
+    jmp @flower
+:   cmp #OBJ_BALL
+    bne :+
+    jmp @ball
+:   cmp #OBJ_HEART
+    beq @heart
+    cmp #OBJ_STAR
+    beq @stard
     ; --- mushroom: one 8x8 OBJ tile, drawn at the feet line (o_y + 8) ---
     lda spr_col
     sta dcol
@@ -2554,6 +2878,32 @@ FLOWER_RISE = 7                  ; emerge: rise 7px out of the block, then sit (
     sta dy
     ldx #MUSH_TILE
     jsr draw_quad
+    rts
+@heart:
+    lda spr_col
+    sta dcol
+    ldx oi
+    lda o_y,x
+    clc
+    adc #8
+    sta dy
+    ldx #HEART_TILE
+    jsr draw_quad
+    rts
+@stard:
+    lda spr_col
+    sta dcol
+    ldx oi
+    lda o_y,x
+    clc
+    adc #8
+    sta dy
+    ldx #STAR_TA                 ; twinkle $86 <-> $85 (~every 8 frames, like the flower)
+    lda frame_count
+    and #8
+    beq :+
+    ldx #STAR_TB
+:   jsr draw_quad
     rts
 @ball:
     lda spr_col
