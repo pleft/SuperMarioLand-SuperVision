@@ -87,6 +87,9 @@ mc_tmr:      .res 1          ; multi-coin window, 255 frames from the FIRST bonk
 mc_coll:     .res 1          ; the active multi-coin block's cell (col lo/hi + row);
 mc_colh:     .res 1          ;   mc_colh = $FF -> none active (init'd at reset/respawn —
 mc_row:      .res 1          ;   ZP is zero-cleared, and col-hi 0 is a real column)
+goal_phase:  .res 1          ; level-clear sequence: 0 none, 1 jingle, 2 hold, 3 tally, 4 end
+goal_tmr:    .res 1          ; frames left in the current goal phase
+goal_top:    .res 1          ; 1 = Mario exited through the TOP door (bonus game; TODO)
 hud_row:     .res 1          ; put_hud target row (0 or 1)
 htmp:        .res 1          ; put_hud scratch (digit being blitted)
 rb_vx:       .res 1          ; restore_bg: VRAM pixel X of the region to repaint
@@ -237,7 +240,11 @@ main_loop:
     jmp main_loop
 @normal:
     jsr read_input
-    lda mario_grow               ; small->big grow running? freeze the action, just flash
+    lda goal_phase               ; level-clear running? jingle -> tally -> next level
+    beq :+
+    jsr goal_seq
+    jmp @play
+:   lda mario_grow               ; small->big grow running? freeze the action, just flash
     bne @growing
     lda mc_tmr                   ; multi-coin window ticks every frame ($c0ce)
     beq :+
@@ -258,6 +265,7 @@ main_loop:
     jsr try_fire                 ; B + Superball Mario -> fire a superball
     jsr move_player              ; walk (updates spr_x) or scroll the camera (cam_x)
     jsr jump_player              ; A = jump (real arc); updates spr_y while airborne
+    jsr goal_check               ; walked through the goal door? start the clear sequence
     jsr coin_collect             ; grab floating coins Mario walked/jumped into
     jsr update_objects           ; mushroom/coin physics + mushroom pickup
     jsr animate_player           ; pick the pose
@@ -357,6 +365,14 @@ main_loop:
     lda mrow
     cmp #16
     bcs @off
+    lda feet_col+1               ; past the level's right edge? open space -- the goal door
+    cmp #>level0_cols            ; leads off the map (the walk-through would otherwise read
+    bcc :+                       ; garbage past the level data and block Mario)
+    bne @off
+    lda feet_col
+    cmp #<level0_cols
+    bcs @off
+:
     lda feet_col                 ; map_ptr = map_base + feet_col*16
     sta map_ptr
     lda feet_col+1
@@ -968,6 +984,141 @@ main_loop:
     jsr hud_init                  ; level restart: reset the clock to 400
     jsr draw_hud                  ; restamp score/coins/time over the fresh template
     jsr draw_player              ; place Mario at the start
+    rts
+.endproc
+
+; ---------------------------------------------------------------------------
+; Level-clear (goal) sequence. Trace-exact vs the original (tools/trace_goal.lua):
+; Mario walks fully through the door (screen x = 160) -> 240-frame jingle freeze
+; (st=$07) -> 64-frame hold (st=$05 entry, $ffa6=$40) -> TALLY: TIME -1/frame with
+; +10 score each, to 000 -> 43-frame hold (st=$06+$08) -> next level, clock 400.
+.proc goal_check
+    lda goal_phase
+    bne @no
+    lda cam_x+1                  ; only possible with the camera at its max (the level end)
+    cmp #>CAM_MAX
+    bne @no
+    lda cam_x
+    cmp #<CAM_MAX
+    bne @no
+    lda spr_x
+    cmp #160                     ; fully through the door column
+    bcc @no
+    lda #1
+    sta goal_phase
+    lda #240
+    sta goal_tmr
+    stz goal_top
+    lda spr_y                    ; top exit (door at rows 0-1) vs bottom (rows 13-14)
+    cmp #64
+    bcs :+
+    inc goal_top                 ; TODO: top exit = the bonus game; same tally for now
+:   jsr clear_objects            ; nothing else runs during the sequence
+@no:
+    rts
+.endproc
+
+.proc goal_seq
+    lda goal_phase
+    cmp #1
+    beq @jingle
+    cmp #2
+    beq @hold
+    cmp #3
+    beq @tally
+    dec goal_tmr                 ; phase 4: end hold -> the next level
+    bne @done
+    jmp next_level
+@jingle:
+    dec goal_tmr                 ; the "course clear" jingle pause
+    bne @done
+    lda #2
+    sta goal_phase
+    lda #64
+    sta goal_tmr
+@done:
+    rts
+@hold:
+    dec goal_tmr
+    bne @done
+    lda #3
+    sta goal_phase
+    rts
+@tally:
+    lda timer                    ; TIME == 000? tally over
+    ora timer+1
+    beq @tdone
+    sed                          ; TIME -= 1 (BCD; timer+1 = hundreds)
+    lda timer
+    sec
+    sbc #1
+    sta timer
+    lda timer+1
+    sbc #0
+    sta timer+1
+    cld
+    lda #$10                     ; +10 points per time unit
+    ldx #$00
+    jsr add_score
+    lda #1
+    sta hud_dirty
+    rts
+@tdone:
+    lda #4
+    sta goal_phase
+    lda #43
+    sta goal_tmr
+    rts
+.endproc
+
+; next_level: level complete. The original proceeds to 1-2; the port has one level
+; built in, so it loops 1-1 fresh for now (multi-level = its own task). Score, coins,
+; lives and Mario's power-ups (big/superball) PERSIST; everything level-local resets.
+.proc next_level
+    stz goal_phase
+    stz room_mode
+    lda #<level0_map
+    sta map_base
+    lda #>level0_map
+    sta map_base+1
+    stz cam_x
+    stz cam_x+1
+    stz fb_col0
+    stz fb_col0+1
+    stz scroll_s
+    stz prev_scroll_s
+    stz XSCROLL
+    stz jump_state
+    stz fall_v
+    stz arc_idx
+    stz h_hold
+    stz h_idx
+    stz h_toggle
+    stz mario_facing
+    stz mario_frame
+    stz prev_frame
+    stz mario_duck
+    stz mario_grow
+    stz mario_starT
+    stz star_flash
+    stz mc_tmr
+    lda #$FF
+    sta mc_colh
+    jsr clear_objects
+    jsr clear_tile_mod
+    stz shift_px
+    lda #40
+    sta spr_x
+    sta mario_vx
+    sta prev_vx
+    lda #112
+    sta spr_y
+    sta prev_y
+    jsr render_background
+    jsr render_status_bar
+    jsr hud_init                 ; clock back to 400 (score/coins/lives untouched)
+    jsr draw_hud
+    jsr draw_player
     rts
 .endproc
 
@@ -1671,11 +1822,11 @@ CAM_MAX = (level0_cols - 20) * 8 ; max scroll: (level width - 20 visible cols) *
     lda cam_x
     cmp #<CAM_MAX
     bcc @scroll
-@atmax:                          ; camera maxed -> let Mario reach the right edge
-    lda tmpL
-    cmp #145                     ; clamp to screen (160 - 16)
+@atmax:                          ; camera maxed -> let Mario walk fully THROUGH the goal door
+    lda tmpL                     ; (original: the clear triggers at screen x = 160, off-edge)
+    cmp #161
     bcc :+
-    lda #144
+    lda #160
 :   sta spr_x
     rts
 @scroll:
@@ -1892,6 +2043,9 @@ FB_MAX_COL = level0_cols - 24    ; last fb_col0 that keeps cols fb_col0..+23 in 
 .proc draw_player
     lda star_flash               ; star invincibility: Mario blinks (skip the draw this phase;
     beq :+                       ; the erase runs every frame regardless, so nothing goes stale)
+    rts
+:   lda goal_phase               ; level-clear: Mario has walked through the door -> off-screen
+    beq :+
     rts
 :
     lda mario_vx                 ; sub-pixel offset within the byte (VRAM pixel X = spr_x + scroll_s)
