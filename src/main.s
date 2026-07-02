@@ -2802,6 +2802,12 @@ STAR_VY_END = 8                                       ; last index (held until f
     stz oi
 @loop:
     ldx oi
+    lda o_y,x                    ; top clip: items draw at dy=o_y+8; anything above the
+    clc                          ; playfield (dy<16 = the HUD rows, incl. o_y wrap-around)
+    adc #8                       ; is skipped so a high coin-pop can't stamp the HUD
+    cmp #16
+    bcc @off
+    ldx oi
     lda o_type,x
     beq @off
     sec                          ; VRAM pixel X = o_x - cam_x + scroll_s
