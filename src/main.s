@@ -282,7 +282,10 @@ main_loop:
     ; timing-critical; stream the incoming columns last as they're off-screen this frame.)
     jsr scroll_update            ; advance camera: framebuffer shift (fast) + scroll_s
     lda prev_vx                  ; if the frame shifted, old Mario moved left with it
-    sec
+    cmp shift_px                 ; (clamp: can't wrap below col 0 -- see erase_objects)
+    bcs :+
+    lda shift_px
+:   sec
     sbc shift_px
     sta prev_vx
     sta rb_vx                    ; erase old Mario at his (shifted) spot: 4 cols x 3 rows
@@ -1270,6 +1273,8 @@ main_loop:
     lda t_col                    ; VRAM tile col = t_col + ri
     clc
     adc ri
+    cmp #24                      ; past the 48-byte row stride (24 tile cols incl. the
+    bcs @skip                    ; streaming margin)? never blit -- it bleeds into the next row
     sta dcol                     ; stash VRAM tile col (drives dest byte col)
     clc                          ; world col = fb_col0 + VRAM tile col
     adc fb_col0
@@ -3038,7 +3043,10 @@ bounce_dy: .byte $FE,$FE,$01,$02
     lda o_pdr,x
     beq @next
     lda o_pvx,x
-    sec
+    cmp shift_px                 ; drawn left of this frame's 32px DMA shift? the subtraction
+    bcs :+                       ; would WRAP (rb_vx ~224+ -> tile col past the 48-byte row
+    lda shift_px                 ; stride -> blits bleed across rows = bands/rectangles).
+:   sec                          ; clamp to col 0 so left-edge leftovers still get erased
     sbc shift_px
     sta rb_vx
     lda o_pvy,x                  ; = the drawn dy (o_y+8)
