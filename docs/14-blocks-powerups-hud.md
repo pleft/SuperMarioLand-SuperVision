@@ -308,3 +308,29 @@ otherwise. Normal gameplay is **state `$00`** (every trace confirms), so in play
 collects coins and never bonks blocks — which is what the port does. (An earlier note here
 claimed the opposite by wrongly assuming `$0D` = the gameplay state; `$0D` is a special mode,
 likely the demo.)
+
+## Bonus game RE [2026-07-03 — static RE; implementation in progress]
+State handlers: `$12/$13/$16` in bank 0 ($3D97/$3DD7/$3EA7); `$14/$15/$17/$18/$19/$1A` in
+BANK 2 via jump stubs at `$5832+` → `$5A72/$5ABB/$5B65/$5BEB/$5C44/$5CDE`. State jump table
+@ bank0 `$02A6` (2 bytes/state).
+- **$12**: LCD off, OAM clear, BG fill `$2C`, lives BCD drawn at `$988B`; → $13.
+- **$13**: draws the WHOLE screen with code: border (`$F5` corner, `$9F` runs, `$F8` sides,
+  `$FC/$FF/$E9` corners), "BONUS GAME" text at `$9845` (font tiles, A=`$0A`…), icon pair at
+  `$9887` (`$E4`,`$2B`), **4 floors** = 18×`$2D` runs at `$98E1/$9941/$99A1/$9A01` each with a
+  `$2B` anchor, and the **prizes** at BG col 18, rows 6/9/12/15 (`$98D2`+`$60`×n): 4 tiles from
+  an 8-byte ring `[00 01 02 E5 03 01 02 E5]` @ `$3E7B`, start index = `DIV&3+1` → prizes are
+  `$01/$02/$03` (= "1"/"2"/"3" UP) + `$E5` (flower), rotated randomly; → $14.
+- **$14** (b2): Mario's 4 OAM entries @ `$C030` at X=$10/$18, Y = `$38+$18*(DIV&3+1)` (random
+  floor), stand tiles (+$20 if big); → $15.
+- **$15/$16 loop** (tick when `$da22` hits 3): `$da27` counts; **odd = a ladder is VISIBLE**
+  (tiles `$2E,$2F,$2F,$30` drawn 4-tall via the `$da23` buffer + `$da18/19` VRAM ptr; even =
+  erased with `$2D,$2C,$2C,$2D`) cycling the 3 inter-floor gaps (`$98EA`, +$60, +$C0, wrap);
+  meanwhile Mario's OAM cycles DOWN a floor per tick (+$18, wrap $80→$38). **A registers only
+  while a ladder is visible** (`$da27` bit0) → `$5B56` zeroes the counters → $17. $16 is the
+  VRAM blit of the 3(?)×4 ladder cell; → $15.
+- **$17** (b2): jingle once (`$da1c`), Mario walks RIGHT 1px/frame, walk anim from the table @
+  b2 `$5C9D` ($FF-terminated ring, `$da14` index, +$20 big).
+- **$18/$19** (b2 `$5BEB/$5C44`): ladder climb up/down (not yet read in detail).
+- **$1A** (b2 `$5CDE`): prize award (~213 frames in the trace) — 1/2/3-UP or flower — then
+  `$1B/$08` → next level. (Award internals not yet read.)
+Trace (top-door run): $12,$13,$14 ≈1 frame each; $15/$16 alternate ~140f; $17 ~112f; $1A ~213f.
