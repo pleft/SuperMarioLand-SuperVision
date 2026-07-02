@@ -221,7 +221,10 @@ All from `tools/trace_bounce.lua` + the bank2 popup engine (`$5892` place / `$59
   frame from the brick's halves, y stepping along **Mario's own jump-arc table** — high pair
   from arc index 7 (21px rise), low pair from index 11 (13px), hold at the `$7F` apex, then fall
   down the mirrored table (the original steps `$c218/28/38/48` along `JumpArcTable` per frame).
-  Port: `OBJ_DEBRIS` driven by the extracted `jumparc.bin` with the same indices.
+  Port: `OBJ_DEBRIS` driven by the extracted `jumparc.bin` with the same indices. A second break
+  **recycles the shard slots** (the original's 4 fixed slots mean the new set replaces the old —
+  SML never shows 8 shards); this is also what keeps double-breaks inside the frame budget
+  (see `docs/22`).
 - **Object pool** grown to **8 slots** (a brick break spawns 4 shards on top of a live item).
 - **Top clip**: `draw_objects` skips anything whose `dy=o_y+8` lands above y=16 — a high
   coin-pop/popup can no longer stamp the HUD rows (o_y wrap included).

@@ -48,3 +48,30 @@ Verified in MAME + Potator: clean full-screen grey, animates, no artifacts.
 4. **Level stream** — `LevelColumnStream` + world-banked level data.
 5. **Enemies** — object slots + AI script VM + ballistic physics.
 6. **Sound** — driver + music format → SV squares/noise/DMA (pitch conversion).
+
+## Frame budget + the cycle profiler [added 2026-07-02]
+Budget: **4MHz / 61Hz NMI ≈ 65,574 cycles/frame**. Frames that run over draw after the
+beam has passed → per-frame sprites (Mario, items) visibly flicker. Symptom chain we hit:
+4 brick shards + bounce + popup pushed heavy frames to 57-72k (110% worst); breaking a
+second brick mid-flight (8 shards) spiked to 66.8k.
+
+**`tools/perf_break.py`** (py65) measures this: boots the port ROM, teleports big Mario
+under the col-68 brick (raised-platform floor = row 11, so `spr_y=88`), jump-bonks it,
+walks right through the col-69 coin block and bonks the col-70 brick mid-flight, printing
+cycles/frame + a per-routine profile of the worst frame. Needs debug symbols:
+`ca65 -g` + `ld65 --dbgfile build/dbg.txt` (same code bytes as the normal build).
+
+Fixes that brought the worst case to **61.6k (93%), zero frames over**:
+- **Exact-bounds erases**: a 4px-aligned 8px quad spans at most 2 tile cols × 1-2 rows
+  (was 3×2-3); the 2-glyph popup spans 3 cols (width per-slot in `o_pw`); Mario spans
+  3 cols (was 4) × 2 rows standing / 3 airborne.
+- **Blank-sky fast path** in `restore_bg`: effective tile `$2C` erases as a direct
+  zero-fill (`blit_blank`) — no source lookup/copy. (BG tile `$2C` is all-$00 bytes.)
+- **Debris slot recycling** (also fidelity: the original's 4 fixed debris slots mean a
+  second break OVERWRITES the first set — SML never shows 8 shards).
+- Spawn procs no longer clear `o_pdr`: a recycled slot's pending erase survives, so the
+  old image is wiped before the new one draws (fixes orphaned-erase artifacts).
+- Erase-compensation clamp: `drawn_x - shift_px` could WRAP for sprites at the left edge
+  during a 32px DMA-shift frame → erases landed past the 48-byte row stride and bled
+  across rows (full-width bands). Clamped at col 0 + hard tile-col < 24 guard in
+  restore_bg. `restore_bg` also restores the dirt band (rows 16/17) as `$61` now.
