@@ -1002,13 +1002,15 @@ main_loop:
     cmp #<CAM_MAX
     bne @no
     lda spr_x
-    cmp #160                     ; fully through the door column
+    cmp #152                     ; stepped into the door column (framed in the arch)
     bcc @no
     lda #1
     sta goal_phase
     lda #240
     sta goal_tmr
     stz goal_top
+    stz mario_frame              ; he stands in the arch for the whole sequence
+    stz mario_duck
     lda spr_y                    ; top exit (door at rows 0-1) vs bottom (rows 13-14)
     cmp #64
     bcs :+
@@ -1822,11 +1824,11 @@ CAM_MAX = (level0_cols - 20) * 8 ; max scroll: (level width - 20 visible cols) *
     lda cam_x
     cmp #<CAM_MAX
     bcc @scroll
-@atmax:                          ; camera maxed -> let Mario walk fully THROUGH the goal door
-    lda tmpL                     ; (original: the clear triggers at screen x = 160, off-edge)
-    cmp #161
+@atmax:                          ; camera maxed -> let Mario walk INTO the goal door: he stops
+    lda tmpL                     ; framed in the arch, left half visible in the last 8px column
+    cmp #153                     ; (original $c202=160 = GB OAM x -> screen x 152)
     bcc :+
-    lda #160
+    lda #152
 :   sta spr_x
     rts
 @scroll:
@@ -2044,10 +2046,8 @@ FB_MAX_COL = level0_cols - 24    ; last fb_col0 that keeps cols fb_col0..+23 in 
     lda star_flash               ; star invincibility: Mario blinks (skip the draw this phase;
     beq :+                       ; the erase runs every frame regardless, so nothing goes stale)
     rts
-:   lda goal_phase               ; level-clear: Mario has walked through the door -> off-screen
-    beq :+
-    rts
-:
+:                                ; (during the goal sequence Mario stays VISIBLE, standing
+                                 ;  framed in the door arch -- original-accurate)
     lda mario_vx                 ; sub-pixel offset within the byte (VRAM pixel X = spr_x + scroll_s)
     and #3
     sta spr_subx
