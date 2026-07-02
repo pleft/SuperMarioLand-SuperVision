@@ -148,9 +148,17 @@ height (an early guess; the trace's mid-air turnaround was really a block/ceilin
 lifetime or off-screen (X or Y). Gotcha fixed: the wall test must be **one row above the feet**,
 else the flat floor reads as a wall and the ball yo-yos in place. Lost on death. It bounces off `?`-blocks as solid geometry but does **not** activate them —
 correct: `?`-blocks are bonked only by Mario's head (`hit_qblock`), never by the superball, in
-the original too. The superball region in bank 3 touches no tilemap/coin/block routine.
-**TODO: superball kills enemies (needs enemies); collects floating coins (real SML feature but
-1-1 has none). NOT `?`-blocks.**
+the original too.
+
+**Superball collects floating coins [added 2026-07-02, RE `Call_000_1fd2`]:** the ball's
+per-axis tile test compares `$f4`, queues the coin award through the same `$ffee=$c0` VBlank
+path as a bonked block-coin (coin sound `$05`), then falls through to the `cp $60` solidity
+check with `A=$f4` — so the collected coin acts **solid**: the ball **bounces off the coin it
+grabs** and keeps flying (it persists; user gameplay memory + source both confirm). Port:
+`ball_solid` wraps the ball's three axis tests (wall/floor/ceiling) — a `$f4` cell is collected
+(`mod_set` + blank + `award_coin`) and returns solid, so the ball ricochets exactly like the
+original. Test: the col-87 coin stack, cols 266-277, or the 18-coin pipe rooms.
+**TODO: superball kills enemies (needs enemies).**
 
 ## Coins: pop + collectible floating coins [added 2026-07-02]
 **Coin tile is `$F4`** (round with a hole), for BOTH the `?`-block pop and floating coins.
@@ -233,7 +241,7 @@ All from `tools/trace_bounce.lua` + the bank2 popup engine (`$5892` place / `$59
 - Persisting block state across pipe-trip re-renders (mod bitmap is shared surface/room; fine for
   1-1 since there's no col/row collision, but not general).
 - Time-up and damage-shrink (need death sequence / enemies).
-- Superball: kills enemies (needs enemies) + collects floating coins.
+- Superball: kills enemies (needs enemies). (Coin-collect: DONE, see the superball section.)
 - Star: enemy invulnerability effect (needs enemies); vy ramp is a script linearization.
 - Block-bounce cell blanking (see deviation above) if it ever reads wrong.
 - Pickup jingles / star music (audio phase).
