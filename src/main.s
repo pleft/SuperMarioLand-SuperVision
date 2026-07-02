@@ -46,6 +46,11 @@ dcol:        .res 1          ; set_dst input: byte column
 dy:          .res 1          ; set_dst input: scanline
 tmpL:        .res 1
 tmpH:        .res 1
+tmpL2:       .res 1          ; second/third 16-bit scratch (platform overlap math --
+tmpH2:       .res 1          ;   runs while tmpL still holds jump_player's fall delta)
+tmpL3:       .res 1
+tmpH3:       .res 1
+oi2:         .res 1          ; secondary object index (platform scans from player code)
 tmp_src:     .res 1
 tmp_mask:    .res 1
 bg_col:      .res 1          ; background render: level column 0..19
@@ -90,6 +95,8 @@ mc_row:      .res 1          ;   ZP is zero-cleared, and col-hi 0 is a real colu
 goal_phase:  .res 1          ; level-clear sequence: 0 none, 1 jingle, 2 hold, 3 tally, 4 end
 goal_tmr:    .res 1          ; frames left in the current goal phase
 goal_top:    .res 1          ; 1 = Mario exited through the TOP door (bonus game; TODO)
+plats_on:    .res 1          ; end-area moving platforms spawned (one-shot)
+ride:        .res 1          ; 0 = not riding; else (slot+1) of the platform under Mario
 hud_row:     .res 1          ; put_hud target row (0 or 1)
 htmp:        .res 1          ; put_hud scratch (digit being blitted)
 rb_vx:       .res 1          ; restore_bg: VRAM pixel X of the region to repaint
@@ -266,6 +273,7 @@ main_loop:
     jsr move_player              ; walk (updates spr_x) or scroll the camera (cam_x)
     jsr jump_player              ; A = jump (real arc); updates spr_y while airborne
     jsr goal_check               ; walked through the goal door? start the clear sequence
+    jsr plats_check              ; entering the end area? spawn the two moving platforms
     jsr coin_collect             ; grab floating coins Mario walked/jumped into
     jsr update_objects           ; mushroom/coin physics + mushroom pickup
     jsr animate_player           ; pick the pose
@@ -802,20 +810,28 @@ main_loop:
     lda pad_pressed
     and #GB_A
     bne @startjump
+    lda ride                      ; riding a platform? supported while still x-over it
+    beq @tilesup
+    jsr ride_support
+    beq @unsup                    ; slipped off the platform's edge -> fall
+    jmp @done
+@tilesup:
     lda spr_y                     ; still supported? test the tile under the feet
     lsr
     lsr
     lsr
     sta mrow
     jsr read_solid
-    beq :+                        ; A==0 -> not supported -> fall
+    beq @unsup                    ; A==0 -> not supported -> fall
     jmp @done                     ; supported -> stay grounded
-:   lda #2                        ; walked off a ledge -> free-fall
+@unsup:
+    lda #2                        ; walked off a ledge -> free-fall
     sta jump_state
     lda #1
     sta fall_v
     jmp @done
 @startjump:
+    stz ride                      ; jumping leaves the platform
     lda #2                        ; seed the arc index at 2 (matches the game)
     sta arc_idx
     lda #1
@@ -916,6 +932,8 @@ main_loop:
     sta respawn_req
     rts
 @checkland:
+    jsr plat_land                 ; crossed a moving platform's top? land + ride it
+    bne @done
     lda spr_y                     ; landed? test the tile the feet are entering
     lsr
     lsr
@@ -1002,7 +1020,7 @@ main_loop:
     cmp #<CAM_MAX
     bne @no
     lda spr_x
-    cmp #152                     ; stepped into the door column (framed in the arch)
+    cmp #144                     ; stepped into the door arch
     bcc @no
     lda #1
     sta goal_phase
@@ -1824,11 +1842,11 @@ CAM_MAX = (level0_cols - 20) * 8 ; max scroll: (level width - 20 visible cols) *
     lda cam_x
     cmp #<CAM_MAX
     bcc @scroll
-@atmax:                          ; camera maxed -> let Mario walk INTO the goal door: he stops
-    lda tmpL                     ; framed in the arch, left half visible in the last 8px column
-    cmp #153                     ; (original $c202=160 = GB OAM x -> screen x 152)
+@atmax:                          ; camera maxed -> Mario walks INTO the goal door and stops
+    lda tmpL                     ; CENTERED in the arch (cols 298-299 = screen 144-159; the
+    cmp #145                     ; original's $c202=160 spans exactly those cells)
     bcc :+
-    lda #152
+    lda #144
 :   sta spr_x
     rts
 @scroll:
@@ -2153,6 +2171,17 @@ OBJ_STAR   = 6                   ; star ($2c): rises, then bounces forward in sm
 OBJ_DEBRIS = 7                   ; brick-break shard: flies along the jump arc (trace-verified)
 OBJ_POPUP  = 8                   ; floating score text ("1000"/"1UP"): 2 glyph tiles side by side
 OBJ_BOUNCE = 9                   ; bonked-block hop: the block tile as a sprite, cell blank under it
+OBJ_PLATV  = 10                  ; end-area moving platform, vertical (SML type $0A)
+OBJ_PLATH  = 11                  ; end-area moving platform, horizontal (SML type $0B)
+PLAT_TILE  = $EF                 ; platform = 3x tile $EF (24px; metasprite param $12)
+; patrol geometry from the goal trace at cam-max (GB OAM coords -8/-16 -> world):
+PLATV_X    = 2280                ; vertical platform: fixed world x (screen 40 @ cam 2240)
+PLATV_YT   = 60 + 8              ; o_y bounds (o_y = world top + 8): top of patrol...
+PLATV_YB   = 116 + 8             ; ...bottom (trace: OAM y 76..132)
+PLATH_Y    = 32 + 8              ; horizontal platform: fixed o_y (OAM y 48)
+PLATH_X0   = 2306                ; patrol left..right world x (trace: OAM x 74..112 @ cam 2240)
+PLATH_X1   = 2344
+PLATS_AT   = 2120                ; spawn both once the camera reaches this (they enter view)
 DEBRIS_TILE = $62                ; all 4 shards are OBJ tile $62 (mGBA OAM trace)
 DEBRIS_HI  = 7                   ; jump-arc start index: high pair rises 21px (trace: 21px)
 DEBRIS_LO  = 11                  ; low pair rises 13px (trace: 13px)
@@ -2176,6 +2205,8 @@ FLOWER_RISE = 7                  ; emerge: rise 7px out of the block, then sit (
 
 ; clear_objects: free all slots (level restart / pipe transition).
 .proc clear_objects
+    stz ride                     ; no platforms left to ride
+    stz plats_on                 ; they respawn when the camera re-enters the end area
     ldx #7
 :   stz o_type,x
     stz o_pdr,x
@@ -2656,6 +2687,264 @@ bounce_dy: .byte $FE,$FE,$01,$02
     rts
 .endproc
 
+; --- end-area moving platforms (SML types $0A/$0B: script-driven ping-pong, 1px per
+; object-update = 0.5px/frame, no gravity; goal-trace-verified patrol bounds) ---
+.proc plats_check
+    lda plats_on
+    bne @done
+    lda cam_x+1                  ; camera reached the end area?
+    cmp #>PLATS_AT
+    bcc @done
+    bne @go
+    lda cam_x
+    cmp #<PLATS_AT
+    bcc @done
+@go:
+    inc plats_on
+    jsr find_free_obj            ; vertical platform (rides Mario up to the high route)
+    bcs @h
+    lda #OBJ_PLATV
+    sta o_type,x
+    lda #<PLATV_X
+    sta o_xl,x
+    lda #>PLATV_X
+    sta o_xh,x
+    lda #PLATV_YB                ; start at the bottom of its patrol
+    sta o_y,x
+    lda #1                       ; moving up first (toward the high route)
+    sta o_st,x
+@h:
+    jsr find_free_obj            ; horizontal platform (carries Mario to the top door)
+    bcs @done
+    lda #OBJ_PLATH
+    sta o_type,x
+    lda #<PLATH_X0
+    sta o_xl,x
+    lda #>PLATH_X0
+    sta o_xh,x
+    lda #PLATH_Y
+    sta o_y,x
+    stz o_st,x                   ; moving right first
+@done:
+    rts
+.endproc
+
+; upd_platv: ping-pong o_y between PLATV_YT..PLATV_YB; carry Mario when riding this slot.
+.proc upd_platv
+    lda frame_count
+    lsr
+    bcc :+
+    rts
+:   ldx oi
+    lda o_st,x
+    bne @up
+    inc o_y,x                    ; down
+    jsr carry_y_dn
+    ldx oi
+    lda o_y,x
+    cmp #PLATV_YB
+    bcc @done
+    lda #1
+    sta o_st,x
+@done:
+    rts
+@up:
+    dec o_y,x
+    jsr carry_y_up
+    ldx oi
+    lda o_y,x
+    cmp #PLATV_YT
+    bcs @done
+    stz o_st,x
+    rts
+.endproc
+
+carry_y_dn:                      ; riding this slot? Mario follows the platform
+    jsr riding_this
+    bne :+
+    inc spr_y
+:   rts
+carry_y_up:
+    jsr riding_this
+    bne :+
+    dec spr_y
+:   rts
+riding_this:                     ; Z=1 if Mario rides slot oi
+    lda ride
+    beq @no
+    dea
+    cmp oi
+    rts
+@no:
+    lda #1                       ; clear Z
+    rts
+
+; upd_plath: ping-pong o_x between PLATH_X0..PLATH_X1; carry Mario horizontally.
+.proc upd_plath
+    lda frame_count
+    lsr
+    bcc :+
+    rts
+:   ldx oi
+    lda o_st,x
+    bne @left
+    inc o_xl,x                   ; right
+    bne :+
+    inc o_xh,x
+:   jsr riding_this
+    bne :+
+    inc spr_x
+:   ldx oi
+    lda o_xh,x                   ; reached the right bound?
+    cmp #>PLATH_X1
+    bne @done
+    lda o_xl,x
+    cmp #<PLATH_X1
+    bcc @done
+    lda #1
+    sta o_st,x
+@done:
+    rts
+@left:
+    lda o_xl,x
+    bne :+
+    dec o_xh,x
+:   dec o_xl,x
+    jsr riding_this
+    bne :+
+    dec spr_x
+:   ldx oi
+    lda o_xh,x                   ; back at the left bound?
+    cmp #>PLATH_X0
+    bne @done
+    lda o_xl,x
+    cmp #<PLATH_X0
+    bne @done
+    stz o_st,x
+@done2:
+    rts
+.endproc
+
+; plat_land: called while FALLING (tmpL = this frame's fall delta). If Mario's feet crossed
+; a platform's top this frame and he x-overlaps it, land + ride. Returns A=1 if landed.
+.proc plat_land
+    stz oi2
+@loop:
+    ldx oi2
+    lda o_type,x
+    cmp #OBJ_PLATV
+    beq @try
+    cmp #OBJ_PLATH
+    beq @try
+@next:
+    inc oi2
+    lda oi2
+    cmp #8
+    bne @loop
+    lda #0
+    rts
+@try:
+    lda o_y,x                    ; T = platform top = o_y - 8
+    sec
+    sbc #8
+    sta tmpH                     ; tmpH = T
+    lda spr_y                    ; crossed T this frame? old = spr_y - tmpL <= T <= spr_y
+    cmp tmpH
+    bcc @next                    ; still above it
+    lda spr_y
+    sec
+    sbc tmpL
+    cmp tmpH
+    bcc :+
+    bne @next                    ; was already below the top -> no landing
+:   jsr plat_xover               ; x-overlap?
+    bcs @next
+    ldx oi2
+    lda tmpH                     ; land: snap to the platform top + ride it
+    sta spr_y
+    stz jump_state
+    stz fall_v
+    lda oi2
+    ina
+    sta ride
+    lda #1
+    rts
+.endproc
+
+; plat_xover: C=0 if Mario's centre is within +/-16 px of platform slot oi2's centre.
+.proc plat_xover
+    ldx oi2
+    lda cam_x                    ; Mario centre world x = cam + spr_x + 8
+    clc
+    adc spr_x
+    sta tmpL2
+    lda cam_x+1
+    adc #0
+    sta tmpH2
+    lda tmpL2
+    clc
+    adc #8
+    sta tmpL2
+    bcc :+
+    inc tmpH2
+:   lda o_xl,x                   ; platform centre = o_x + 12
+    clc
+    adc #12
+    sta tmpL3
+    lda o_xh,x
+    adc #0
+    sta tmpH3
+    sec                          ; diff = mario - plat (16-bit, abs)
+    lda tmpL2
+    sbc tmpL3
+    sta tmpL3
+    lda tmpH2
+    sbc tmpH3
+    bpl @pos
+    eor #$FF
+    tay
+    lda tmpL3
+    eor #$FF
+    ina
+    sta tmpL3
+    bne :+
+    iny
+:   tya
+@pos:
+    bne @no                      ; |diff| >= 256
+    lda tmpL3
+    cmp #16
+    bcs @no
+    clc
+    rts
+@no:
+    sec
+    rts
+.endproc
+
+; ride_support: A=1 if Mario is still supported by the platform he rides (x-overlap holds).
+.proc ride_support
+    lda ride
+    beq @no
+    dea
+    sta oi2
+    ldx oi2
+    lda o_type,x                 ; platform still there?
+    cmp #OBJ_PLATV
+    beq :+
+    cmp #OBJ_PLATH
+    bne @off
+:   jsr plat_xover
+    bcs @off
+    lda #1
+    rts
+@off:
+    stz ride
+@no:
+    lda #0
+    rts
+.endproc
+
 ; ball_active: C=1 if a superball is already live (only one at a time, per the original).
 .proc ball_active
     ldx #7
@@ -2922,7 +3211,17 @@ bounce_dy: .byte $FE,$FE,$01,$02
     beq @popup
     cmp #OBJ_BOUNCE
     beq @bounce
+    cmp #OBJ_PLATV
+    beq @platv
+    cmp #OBJ_PLATH
+    beq @plath
     jsr upd_mush                 ; OBJ_MUSH and OBJ_HEART (identical walker engine)
+    bra @next
+@platv:
+    jsr upd_platv
+    bra @next
+@plath:
+    jsr upd_plath
     bra @next
 @coin:
     jsr upd_coin
@@ -3303,11 +3602,16 @@ bounce_dy: .byte $FE,$FE,$01,$02
     clc                          ; the exact tile rows the quad touched (1 aligned, 2 not)
     adc #8
     sta o_pvy,x
-    lda #2                       ; drawn width in tile cols: 2, or 3 for the 2-glyph popup
+    lda #2                       ; drawn width in tile cols: 2; 3 = popup; 4 = 24px platform
     ldy o_type,x
     cpy #OBJ_POPUP
     bne :+
     lda #3
+:   cpy #OBJ_PLATV
+    bcc :+
+    cpy #OBJ_PLATH+1
+    bcs :+
+    lda #4
 :   sta o_pw,x
     lda #1
     sta o_pdr,x
@@ -3350,6 +3654,11 @@ bounce_dy: .byte $FE,$FE,$01,$02
 :   cmp #OBJ_BOUNCE
     bne :+
     jmp @bounce
+:   cmp #OBJ_PLATV
+    bcc :+
+    cmp #OBJ_PLATH+1
+    bcs :+
+    jmp @plat
 :   cmp #OBJ_HEART
     beq @heart
     cmp #OBJ_STAR
@@ -3482,6 +3791,39 @@ bounce_dy: .byte $FE,$FE,$01,$02
     sta dy
     lda o_vx,x
     tax
+    jsr draw_quad
+    rts
+@plat:
+    ldx oi                       ; platform: 3x tile $EF side by side (24px)
+    lda o_y,x
+    clc
+    adc #8
+    sta dy
+    lda spr_col
+    sta dcol
+    ldx #PLAT_TILE
+    jsr draw_quad
+    lda spr_col
+    clc
+    adc #2
+    sta dcol
+    ldx oi
+    lda o_y,x
+    clc
+    adc #8
+    sta dy
+    ldx #PLAT_TILE
+    jsr draw_quad
+    lda spr_col
+    clc
+    adc #4
+    sta dcol
+    ldx oi
+    lda o_y,x
+    clc
+    adc #8
+    sta dy
+    ldx #PLAT_TILE
     jsr draw_quad
     rts
 .endproc

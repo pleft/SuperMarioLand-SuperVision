@@ -273,3 +273,20 @@ through; he is undrawn during the sequence. `next_level` loops 1-1 for now (mult
 its own task; the original loads 1-2). `goal_top` records the top exit but runs the same
 tally — the **bonus game is NOT implemented** (needs its own RE round: screen layout, ladder
 mechanic, prizes).
+
+## End-area moving platforms [added 2026-07-03 — trace + RE verified]
+The route to the TOP goal door: two flying platforms near the level end, SML object types
+**`$0A` (vertical)** and **`$0B` (horizontal)** — spawn-list entries at raw cols 142/146 (the
+last two non-terminator entries; they were visible as the "two live objects" throughout the
+goal traces). Both: physics `00 B1 00` (script-driven, no gravity), speed **1px per object
+update = 0.5px/frame**, ping-pong via the `F0` direction commands; sprite = **3× tile `$EF`**
+(24px, metasprite param `$12`). Patrol from the goal trace at cam-max (GB OAM −8/−16 → world):
+vertical at world x **2280**, top **60↔116**; horizontal at top **32**, x **2306↔2344**.
+
+Port: `OBJ_PLATV/OBJ_PLATH` spawned once the camera reaches world 2120 (`plats_check`);
+`upd_platv/upd_plath` ping-pong; **ride physics**: `plat_land` (falling feet crossing the
+platform top + x-overlap ±16 of centre → snap + `ride=slot+1`), `ride_support` (grounded
+support while riding = still x-overlapping; walking off falls), jump releases, and the
+platform's per-update delta carries Mario (y or x). Verified in py65: land → carried through
+a full patrol turnaround → jump off → re-land. Platforms respawn with the camera (cleared by
+clear_objects like everything else).
