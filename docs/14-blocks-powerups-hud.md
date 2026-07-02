@@ -245,3 +245,31 @@ All from `tools/trace_bounce.lua` + the bank2 popup engine (`$5892` place / `$59
 - Star: enemy invulnerability effect (needs enemies); vy ramp is a script linearization.
 - Block-bounce cell blanking (see deviation above) if it ever reads wrong.
 - Pickup jingles / star music (audio phase).
+
+## Level-end goal sequence [added 2026-07-03 — trace-exact, tools/trace_goal.lua]
+**Goal area** (1-1 cols 280-299): the floor drops to a row-15 strip; the right wall (cols
+298-299, `$8e/$8f` bricks) has two 2×2 door arches (`$13/$21/$24/$39`): rows 13-14 = the
+bottom exit, rows 0-1 = the top exit (reached from the high platform at cols 278-279).
+
+**Trigger**: Mario walks fully THROUGH a door — screen x reaches **160** (off the right edge)
+with the camera at max. (`$d007` pulses internally; the observable is state `$07` at x=160.)
+The level data simply ends there: columns ≥ the level width must read as OPEN SPACE
+(`read_map_tile` bounds check), else the walk-through blocks on garbage reads.
+
+**Sequence** (both doors): 240-frame freeze (state `$07`, the clear jingle) → 64-frame hold
+(state `$05` entry, `$ffa6=$40`) → **TALLY: TIME −1 unit per frame, +10 score each**, down to
+000 → 43-frame hold (`$06`+`$08`) → next level, clock 400, **score/coins/lives and Mario's
+power-ups persist**.
+
+**Top door only**: after the tally, the **BONUS GAME** runs before the next level: states
+`$12/$13/$14` (screen teardown + bonus screen build, ~3 frames) → `$15/$16` alternating
+(~140 frames = the ladder mini-game, input-driven) → `$17` (~112 frames, the climb) → `$1A`
+(~213 frames, prize award) → `$1B`/`$08` → next level.
+
+**Port** (`goal_check`/`goal_seq`/`next_level` + `goal_phase/goal_tmr/goal_top`): implements
+the shared sequence trace-exactly (verified end-to-end in py65: 240/64/1-per-frame/43, score
++10×TIME exact). Mario's right-edge clamp at max camera is 160 (was 144) so he can walk
+through; he is undrawn during the sequence. `next_level` loops 1-1 for now (multi-level =
+its own task; the original loads 1-2). `goal_top` records the top exit but runs the same
+tally — the **bonus game is NOT implemented** (needs its own RE round: screen layout, ladder
+mechanic, prizes).
