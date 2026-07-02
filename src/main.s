@@ -294,18 +294,18 @@ main_loop:
     sta rb_rows
     jsr restore_bg
     jsr erase_objects            ; erase the mushroom/coins at their old (shifted) spots
-    jsr draw_objects             ; mushroom/coins under Mario
     lda spr_x                    ; mario_vx = spr_x + scroll_s (drawn pinned under the scroll)
     clc
     adc scroll_s
     sta mario_vx
-    jsr draw_player              ; Mario drawn early, before his scanlines render
-    lda mario_vx
-    sta prev_vx
+    jsr draw_player              ; Mario BEFORE the objects: when a heavy frame (shards +
+    lda mario_vx                 ; bounce + popup) runs long, the late draws must be the
+    sta prev_vx                  ; items, not Mario -- he was drawn last and flickered
     lda spr_y
     sta prev_y
     lda mario_frame
     sta prev_frame
+    jsr draw_objects             ; items/shards after (may overdraw Mario on a 1-frame overlap)
     lda shift_px                 ; if we shifted this frame, refill the right margin LAST
     bne @stream
     jmp main_loop
