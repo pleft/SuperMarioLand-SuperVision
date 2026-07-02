@@ -107,6 +107,7 @@ b_awt:       .res 1          ; award pacing timer
 b_row:       .res 1          ; bput cursor: BG row
 b_col:       .res 1          ; bput cursor: BG col
 b_i:         .res 1          ; loop counter safe across bput (set_dst clobbers X!)
+b_gap:       .res 1          ; the locked ladder's gap 0..2 (between floors gap..gap+1)
 hud_row:     .res 1          ; put_hud target row (0 or 1)
 htmp:        .res 1          ; put_hud scratch (digit being blitted)
 rb_vx:       .res 1          ; restore_bg: VRAM pixel X of the region to repaint
@@ -1390,6 +1391,20 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
     lsr
     lsr
     sta b_row
+    sec                          ; only repaint REAL floor rows (7/10/13/16) -- mid-gap rows
+    sbc #7                       ; during a climb must stay blank
+    bmi @skip
+    cmp #10
+    bcs @skip
+:   cmp #3
+    bcc :+
+    sbc #3
+    bra :-
+:   cmp #0
+    beq @okrow
+@skip:
+    rts
+@okrow:
     lda spr_x
     lsr
     lsr
@@ -1430,10 +1445,69 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
 .proc bonus_frame
     lda bonus_phase
     cmp #2
-    beq @play
-    cmp #3
-    beq @walk
+    bne :+
+    jmp @play
+:   cmp #3
+    bne :+
+    jmp @walk
+:   cmp #4
+    beq @climbup
+    cmp #6
+    beq @climbdn
     jmp @award
+@climbup:
+    jsr b_erase
+    jsr b_fixfloor
+    dec spr_y                    ; up the ladder 1px/frame
+    jsr @clstep
+    lda b_gap                    ; reached the top floor?
+    jsr @floory
+    cmp spr_y
+    bne @cdone
+    lda b_gap
+    sta b_floor
+    lda #3
+    sta bonus_phase
+@cdone:
+    rts
+@climbdn:
+    jsr b_erase
+    jsr b_fixfloor
+    inc spr_y
+    jsr @clstep
+    lda b_gap
+    ina
+    jsr @floory
+    cmp spr_y
+    bne @cdone
+    lda b_gap
+    ina
+    sta b_floor
+    lda #3
+    sta bonus_phase
+    rts
+@clstep:                         ; ladder redrawn under him + climb-ish pose
+    lda #0
+    ldy b_gap
+    jsr b_ladder_cell
+    lda spr_y
+    lsr
+    lsr
+    lsr
+    and #1
+    sta mario_frame
+    jmp draw_player
+@floory:                         ; A = floor n -> A = its spr_y (40 + 24n = 8n + 16n + 40)
+    asl
+    asl
+    asl
+    sta tmpH3                    ; 8n
+    asl                          ; 16n
+    clc
+    adc tmpH3
+    clc
+    adc #40
+    rts
 @play:
     lda b_ladder                 ; A while a ladder is visible (odd counter) -> lock it in
     and #1
@@ -1441,7 +1515,11 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
     lda pad_pressed
     and #GB_A
     beq @tick
-    lda #3                       ; locked: walk to the pedestal
+    lda b_ladder                 ; locked: remember the gap, walk to the pedestal
+    dea
+    lsr
+    sta b_gap
+    lda #3
     sta bonus_phase
     rts
 @tick:
@@ -1503,6 +1581,23 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
     ina
     sta mario_frame
     jsr draw_player
+    lda spr_x
+    cmp #80                      ; at the ladder column?
+    bne @notlad
+    lda b_floor                  ; ladder top at his floor -> climb DOWN; bottom -> UP
+    cmp b_gap
+    bne :+
+    lda #6                       ; climb down to floor gap+1
+    sta bonus_phase
+    rts
+:   lda b_gap
+    ina
+    cmp b_floor
+    bne @notlad
+    lda #4                       ; climb up to floor gap
+    sta bonus_phase
+    rts
+@notlad:
     lda spr_x
     cmp #128
     bcc @wdone
