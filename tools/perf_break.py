@@ -61,8 +61,14 @@ def run_frame(profile=None):
 print(f"budget/frame = {BUDGET} cycles")
 worst = (0, -1)
 cyc_log = []
+def pad(f):
+    # bonk col 68 (f2), walk right to col 70, bonk again mid-shard-flight (~f26)
+    if f in (2, 3): return 0xDF                    # A
+    if 8 <= f < 24: return 0xFE                    # Right
+    if f in (26, 27): return 0xDF                  # A again
+    return 0xFF
 for f in range(150):
-    mem[0x2020] = 0xDF if f in (2, 3) else 0xFF   # press A to jump-bonk the brick
+    mem[0x2020] = pad(f)
     c = run_frame()
     types = ''.join('%x' % mem[OT + i] for i in range(8))
     cyc_log.append((f, c, types))
@@ -86,7 +92,7 @@ mem[FBC] = 62; mem[FBC + 1] = 0
 mem[SPRX] = 40; mem[SPRY] = 88
 prof = None
 for f in range(worst[1] + 1):
-    mem[0x2020] = 0xDF if f in (2, 3) else 0xFF
+    mem[0x2020] = pad(f)
     p = {} if f == worst[1] else None
     run_frame(profile=p)
     if p is not None: prof = p

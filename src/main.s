@@ -1296,7 +1296,7 @@ main_loop:
     sta mrow
     jsr read_map_tile            ; effective tile (used-block transform applied)
 @havetile:
-    jsr get_tile_src
+    pha                          ; the effective tile
     lda dcol                     ; dcol = tile_col*2
     asl
     sta dcol
@@ -1306,7 +1306,14 @@ main_loop:
     asl
     sta dy
     jsr set_dst
+    pla
+    cmp #$2C                     ; blank sky (most of a flying shard's erase area):
+    beq @blank                   ; zero-fill directly -- skip the src lookup + copy
+    jsr get_tile_src
     jsr blit_tile
+    bra @skip
+@blank:
+    jsr blit_blank
 @skip:
     inc rj
     lda rj
@@ -2075,7 +2082,6 @@ FLOWER_RISE = 7                  ; emerge: rise 7px out of the block, then sit (
     sta o_vy,x
     lda #25                      ; HOP duration (updates) ~= the original's $28 stage (~50 frames)
     sta o_tmr,x
-    stz o_pdr,x
 @full:
     rts
 .endproc
@@ -2101,7 +2107,6 @@ FLOWER_RISE = 7                  ; emerge: rise 7px out of the block, then sit (
     stz o_vy,x
     lda #FLOWER_RISE             ; emerge counter: rise this many px (1/update) up to the block top
     sta o_tmr,x
-    stz o_pdr,x
 @full:
     rts
 .endproc
@@ -2129,7 +2134,6 @@ STAR_VY_END = 8                                       ; last index (held until f
     lda #2                       ; emerge: 2 updates x 4px = 8px rise (script vel $40 x2)
     sta o_tmr,x
     stz o_st,x
-    stz o_pdr,x
 @full:
     rts
 .endproc
@@ -2298,6 +2302,13 @@ STAR_VY_END = 8                                       ; last index (held until f
 ; the low pair from index 11 (13px), hold at the $7F apex, then fall back down the mirrored
 ; table. Exactly how the original steps $c218/28/38/48 along JumpArcTable each frame.
 .proc spawn_debris4
+    ldx #7                       ; the original keeps debris in 4 FIXED slots ($c218/28/38/48):
+:   lda o_type,x                 ; a second break OVERWRITES the first set -- never 8 shards.
+    cmp #OBJ_DEBRIS              ; (their pending erase survives: o_pdr stays set, so the old
+    bne :+                       ; images are wiped this frame before the new ones draw)
+    stz o_type,x
+:   dex
+    bpl :--
     lda #$FF                     ; left, high arc
     ldy #DEBRIS_HI
     jsr spawn_debris1
@@ -2351,7 +2362,6 @@ STAR_VY_END = 8                                       ; last index (held until f
     lda tmpH
     sta o_st,x                   ; jump-arc index
     stz o_vy,x                   ; phase 0 = rising
-    stz o_pdr,x
 @full:
     rts
 .endproc
@@ -2432,7 +2442,6 @@ STAR_VY_END = 8                                       ; last index (held until f
     sta o_st,x                   ; right glyph in o_st
     lda #32                      ; 32 ticks (one tick per 2 frames)
     sta o_tmr,x
-    stz o_pdr,x
 @full:
     rts
 .endproc
@@ -2473,7 +2482,6 @@ bounce_dy: .byte $FE,$FE,$01,$02
     lda tmpL
     sta o_vx,x                   ; the tile it shows
     stz o_st,x
-    stz o_pdr,x
 @full:
     rts
 .endproc
@@ -2567,7 +2575,6 @@ bounce_dy: .byte $FE,$FE,$01,$02
     stz o_st,x
     lda #BALL_LIFE
     sta o_tmr,x
-    stz o_pdr,x
 @full:
     rts
 .endproc
@@ -2708,7 +2715,6 @@ bounce_dy: .byte $FE,$FE,$01,$02
     lda #32                      ; RE (bank2 $5892): block coins are $c0-marked popups -- they
     sta o_tmr,x                  ; rise 1px EVERY frame for 32 ticks, spinning $F6/$F7/$F8
     stz o_st,x                   ; spin phase 0..3
-    stz o_pdr,x
 @full:
     rts
 .endproc
@@ -3745,6 +3751,32 @@ HUD_SPLIT_LINE = 16              ; timer reload = split scanline (IPeriod=256 cy
 ; blit_tile: draw one 8x8 SV tile (16 bytes at src_ptr) to VRAM at dst_ptr.
 ; Byte-aligned (tile x must be a multiple of 4 px). 2 bytes/row, advancing the
 ; VRAM dest by the line stride ($30). src_ptr/dst_ptr are preserved (uses copies).
+; blit_blank: zero-fill one tile cell at dst_ptr (tile $2C = sky, bytes all $00).
+; Same addressing as blit_tile but no source reads -- the erase fast path.
+.proc blit_blank
+    lda dst_ptr
+    sta cur_dst
+    lda dst_ptr+1
+    sta cur_dst+1
+    ldx #8
+    lda #0
+@row:
+    ldy #1
+    sta (cur_dst),y
+    dey
+    sta (cur_dst),y
+    lda cur_dst                  ; dst += stride ($30)
+    clc
+    adc #VRAM_STRIDE
+    sta cur_dst
+    bcc :+
+    inc cur_dst+1
+:   lda #0
+    dex
+    bne @row
+    rts
+.endproc
+
 .proc blit_tile
     lda src_ptr
     sta cur_src
