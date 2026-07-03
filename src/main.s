@@ -1806,16 +1806,18 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
     sta tmpH3                    ; FROZEN game screen, then holds ~256 frames, then exits
 @anim:
     jsr @wait1
-    stz rb_vx                    ; erase the previous strip position: restore the map band
-    lda tmpH3
+    dec tmpH3                    ; the strip rises 1px; the new OPAQUE draw covers all of the
+    stz rb_vx                    ; old image except its bottom 1px sliver -> restore only the
+    lda tmpH3                    ; single tile row containing it (60 blits caused a flash)
+    clc
+    adc #8
     sta rb_y
     lda #20
     sta rb_cols
-    lda #3
+    lda #1
     sta rb_rows
     jsr restore_bg
-    dec tmpH3
-    jsr @text                    ; draw the 17 glyph quads at the new pixel Y
+    jsr @text                    ; draw the 17 glyphs at the new pixel Y
     lda tmpH3
     cmp #64
     bne @anim
