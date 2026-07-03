@@ -869,9 +869,8 @@ main_loop:
     lda spr_y
     sec
     sbc tmpL
-    cmp #16                       ; clamp to the play-area top (HUD = scanlines 0..15)
-    bcs :+
-    lda #16
+    bcs :+                        ; NO ceiling at the HUD (original: Mario rises behind it);
+    lda #0                        ; clamp only at 0 so spr_y can't wrap
 :   sta tmpH                      ; tentative new spr_y -> head-bonk test first
     lsr
     lsr
@@ -2709,6 +2708,9 @@ FB_MAX_COL = level0_cols - 24    ; last fb_col0 that keeps cols fb_col0..+23 in 
     sta pose_br
     stx pose_bl
 @draw:
+    lda spr_y                    ; top quads inside the HUD rows? Mario slides BEHIND the
+    cmp #16                      ; status bar (the original overlaps it; our HUD rows are
+    bcc @bottom                  ; framebuffer content, so we occlude instead)
     lda spr_col                  ; TL
     sta dcol
     lda spr_y
@@ -2723,7 +2725,14 @@ FB_MAX_COL = level0_cols - 24    ; last fb_col0 that keeps cols fb_col0..+23 in 
     sta dy
     ldx pose_tr
     jsr draw_quad
-    lda spr_col                  ; BL (y+8)
+@bottom:
+    lda spr_y                    ; bottom quads too high as well? fully hidden
+    clc
+    adc #8
+    cmp #16
+    bcs :+
+    rts
+:   lda spr_col                  ; BL (y+8)
     sta dcol
     lda spr_y
     clc
