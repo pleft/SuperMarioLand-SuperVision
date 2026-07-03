@@ -1606,6 +1606,9 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
 @walk:
     jsr b_erase                  ; walk right 1px/frame to the pedestal (x=128)
     jsr b_fixfloor               ; repaint the floor bricks he just passed over
+    lda #0                       ; and keep the locked ladder intact (its end cells sit ON
+    ldy b_gap                    ; floor rows, so the erase/repair above clips them)
+    jsr b_ladder_cell
     inc spr_x
     lda spr_x
     sta mario_vx
