@@ -1803,16 +1803,16 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
 @text:
     stz b_i
 @t:
-    lda b_i                      ; dcol = (col+1)*2 pixel-ish: quads at x = 12 + i*8
+    lda b_i                      ; 17 tiles from x=0 (original WX=7 = left edge)
     asl
     sta dcol
     lda tmpH3
     sta dy
-    stz spr_subx
+    jsr set_dst
     ldx b_i
-    lda @txt,x
-    tax
-    jsr draw_quad
+    lda @txt,x                   ; FONT tiles come from the BG set -- get_tile_src picks it
+    jsr get_tile_src             ; (draw_quad reads the OBJ set = Mario tiles = the garbage)
+    jsr blit_tile
     inc b_i
     lda b_i
     cmp #17
