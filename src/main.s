@@ -344,19 +344,6 @@ main_loop:
     sta rb_y                     ; and 2 tile rows when row-aligned (standing), 3 in the air
     lda #3
     sta rb_cols
-    lda prev_y                   ; touched the HUD band? the top half was SCREEN-anchored
-    cmp #24                      ; (up to 32px left of the playfield anchor) -> widen the
-    bcs @nwide                   ; erase to cover both anchors
-    lda rb_vx
-    sec
-    sbc #32
-    bcs @wok
-    lda #0
-@wok:
-    sta rb_vx
-    lda #8
-    sta rb_cols
-@nwide:
     ldy #2
     lda prev_y
     and #7
@@ -3009,20 +2996,9 @@ FB_MAX_COL = level0_cols - 24    ; last fb_col0 that keeps cols fb_col0..+23 in 
     lda spr_y                    ; Mario draws OVER the HUD (GB sprites sit above the BG
     cmp #153                     ; status bar); his erase restores the template. Only clip
     bcs @bottom                  ; the bottom: dy>152 would spill past line 160
-    cmp #16                      ; quads in the HUD band display at XSCROLL=0 (raster split)
-    bcs :+                       ; -> anchor them in SCREEN coords (spr_x, no scroll)
-    lda spr_x
-    bra @topa
-:   lda mario_vx
-@topa:
-    pha
-    and #3
-    sta spr_subx
-    pla
-    lsr
-    lsr
-    sta spr_col
-    lda spr_col                  ; TL
+    cmp #16                      ; quads in the HUD band: OCCLUDE (Mario passes behind the
+    bcc @bottom                  ; HUD) until the row-split renderer lands -- the two scroll
+    lda spr_col                  ; TL   domains otherwise tear his halves apart
     sta dcol
     lda spr_y
     sta dy
@@ -3043,20 +3019,10 @@ FB_MAX_COL = level0_cols - 24    ; last fb_col0 that keeps cols fb_col0..+23 in 
     cmp #153
     bcc :+
     rts
-:   cmp #16                      ; same anchor selection for the bottom pair
+:   cmp #16                      ; bottom pair in the HUD band? occlude it too
     bcs :+
-    lda spr_x
-    bra @bota
-:   lda mario_vx
-@bota:
-    pha
-    and #3
-    sta spr_subx
-    pla
-    lsr
-    lsr
-    sta spr_col
-    lda spr_col                  ; BL (y+8)
+    rts
+:   lda spr_col                  ; BL (y+8)
     sta dcol
     lda spr_y
     clc
