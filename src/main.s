@@ -266,7 +266,7 @@ main_loop:
     beq :++
     jsr goal_seq
     lda bonus_phase              ; just switched to the bonus screen? nothing else may draw
-    beq :++
+    beq :+
     jmp main_loop
 :   jsr update_objects           ; platforms keep patrolling during the clear (trace-verified)
     jmp @play
