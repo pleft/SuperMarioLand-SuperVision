@@ -2269,9 +2269,7 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
     sta dy                       ; stash VRAM tile row (drives the destination scanline)
     sec                          ; map_row = VRAM row - 2 (playfield sits below status bar)
     sbc #2
-    cmp #18                      ; rows 0..17 are restorable (16,17 = the dirt band; <0 wraps
-    bcs @skip                    ;   to >=$FE so bcs also skips the status-bar rows)
-    sta map_row
+    sta map_row                  ; (rows 0-1 wrap to $FE/$FF = the STATUS BAR rows)
     lda t_col                    ; VRAM tile col = t_col + ri
     clc
     adc ri
@@ -2285,6 +2283,10 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
     adc #0
     sta feet_col+1
     lda map_row
+    cmp #$FE
+    bcs @hud                     ; HUD rows: restore the status-bar TEMPLATE cell
+    cmp #18
+    bcs @skip
     cmp #16
     bcc @maptile
     lda #$61                     ; dirt band (rows 16,17): solid fill, same as draw_column --
@@ -2292,6 +2294,24 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
 @maptile:                        ; (brick shards) left permanent imprints in the dirt
     sta mrow
     jsr read_map_tile            ; effective tile (used-block transform applied)
+    bra @havetile
+@hud:
+    ldy dcol                     ; template is 2 rows x 20 cols; the margin is blank
+    cpy #20
+    bcs @hudblank
+    lda map_row
+    cmp #$FF                     ; VRAM row 1 -> template offset +20
+    bne :+
+    tya
+    clc
+    adc #20
+    tay
+:   lda #1                       ; digits repaint next frame (draw_hud over the template)
+    sta hud_dirty
+    lda statusbar_tiles,y
+    bra @havetile
+@hudblank:
+    lda #$2C
 @havetile:
     pha                          ; the effective tile
     lda dcol                     ; dcol = tile_col*2
@@ -2315,12 +2335,14 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
     inc rj
     lda rj
     cmp rb_rows
-    bne @rloop
-    inc ri
+    beq :+
+    jmp @rloop
+:   inc ri
     lda ri
     cmp rb_cols
-    bne @cloop
-    rts
+    beq :+
+    jmp @cloop
+:   rts
 .endproc
 
 ; ---------------------------------------------------------------------------
@@ -2946,11 +2968,9 @@ FB_MAX_COL = level0_cols - 24    ; last fb_col0 that keeps cols fb_col0..+23 in 
     sta pose_br
     stx pose_bl
 @draw:
-    lda spr_y                    ; top quads inside the HUD rows? Mario slides BEHIND the
-    cmp #16                      ; status bar (the original overlaps it; our HUD rows are
-    bcc @bottom                  ; framebuffer content, so we occlude instead)
-    cmp #153                     ; and clip at the bottom: dy>152 would spill past line 160
-    bcs @bottom                  ; (pit falls corrupted the dirt band / wrapped past VRAM)
+    lda spr_y                    ; Mario draws OVER the HUD (GB sprites sit above the BG
+    cmp #153                     ; status bar); his erase restores the template. Only clip
+    bcs @bottom                  ; the bottom: dy>152 would spill past line 160
     lda spr_col                  ; TL
     sta dcol
     lda spr_y
@@ -2966,14 +2986,11 @@ FB_MAX_COL = level0_cols - 24    ; last fb_col0 that keeps cols fb_col0..+23 in 
     ldx pose_tr
     jsr draw_quad
 @bottom:
-    lda spr_y                    ; bottom quads clipped too? (above the playfield or below it)
+    lda spr_y                    ; bottom quads below the frame? clip
     clc
     adc #8
-    cmp #16
-    bcc @hidden
     cmp #153
     bcc :+
-@hidden:
     rts
 :   lda spr_col                  ; BL (y+8)
     sta dcol
