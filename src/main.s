@@ -1012,25 +1012,43 @@ main_loop:
     sta map_base
     lda #>level0_map
     sta map_base+1
-    stz cam_x                    ; respawn checkpoint (trace: deaths at seg 8 respawn at
-    stz cam_x+1                  ; seg 7 = world 640, the mid-level pipes): past it -> there
-    stz fb_col0
+    stz cam_x                    ; respawn = the start of the SEGMENT SCREEN Mario died in
+    stz cam_x+1                  ; (trace: death cab 53 -> respawn cab 52, same area; the
+    stz fb_col0                  ; first pit already respawns there, not the level start)
     stz fb_col0+1
-    lda cam_dead+1               ; (death-time camera, saved below before we zeroed it)
-    cmp #>640
-    bcc :+
-    bne @ckpt
+@sub:                            ; cam = cam_dead rounded down to a 160px segment boundary
+    lda cam_dead+1
+    bne :+
     lda cam_dead
-    cmp #<640
-    bcc :+
-@ckpt:
-    lda #<640
+    cmp #160
+    bcc @have
+:   sec                          ; cam_dead -= 160 ; cam += 160
+    lda cam_dead
+    sbc #160
+    sta cam_dead
+    lda cam_dead+1
+    sbc #0
+    sta cam_dead+1
+    clc
+    lda cam_x
+    adc #160
     sta cam_x
-    lda #>640
+    lda cam_x+1
+    adc #0
     sta cam_x+1
-    lda #80
+    bra @sub
+@have:
+    lda cam_x                    ; fb_col0 = cam/8
     sta fb_col0
-:   stz scroll_s
+    lda cam_x+1
+    sta fb_col0+1
+    lsr fb_col0+1
+    ror fb_col0
+    lsr fb_col0+1
+    ror fb_col0
+    lsr fb_col0+1
+    ror fb_col0
+    stz scroll_s
     stz prev_scroll_s
     stz XSCROLL
     stz jump_state
@@ -1813,25 +1831,43 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
     sta map_base
     lda #>level0_map
     sta map_base+1
-    stz cam_x                    ; respawn checkpoint (trace: deaths at seg 8 respawn at
-    stz cam_x+1                  ; seg 7 = world 640, the mid-level pipes): past it -> there
-    stz fb_col0
+    stz cam_x                    ; respawn = the start of the SEGMENT SCREEN Mario died in
+    stz cam_x+1                  ; (trace: death cab 53 -> respawn cab 52, same area; the
+    stz fb_col0                  ; first pit already respawns there, not the level start)
     stz fb_col0+1
-    lda cam_dead+1               ; (death-time camera, saved below before we zeroed it)
-    cmp #>640
-    bcc :+
-    bne @ckpt
+@sub:                            ; cam = cam_dead rounded down to a 160px segment boundary
+    lda cam_dead+1
+    bne :+
     lda cam_dead
-    cmp #<640
-    bcc :+
-@ckpt:
-    lda #<640
+    cmp #160
+    bcc @have
+:   sec                          ; cam_dead -= 160 ; cam += 160
+    lda cam_dead
+    sbc #160
+    sta cam_dead
+    lda cam_dead+1
+    sbc #0
+    sta cam_dead+1
+    clc
+    lda cam_x
+    adc #160
     sta cam_x
-    lda #>640
+    lda cam_x+1
+    adc #0
     sta cam_x+1
-    lda #80
+    bra @sub
+@have:
+    lda cam_x                    ; fb_col0 = cam/8
     sta fb_col0
-:   stz scroll_s
+    lda cam_x+1
+    sta fb_col0+1
+    lsr fb_col0+1
+    ror fb_col0
+    lsr fb_col0+1
+    ror fb_col0
+    lsr fb_col0+1
+    ror fb_col0
+    stz scroll_s
     stz prev_scroll_s
     stz XSCROLL
     stz jump_state
