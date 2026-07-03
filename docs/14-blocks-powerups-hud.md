@@ -345,3 +345,20 @@ $18 = climb DOWN (inc Y), $19 = climb UP (dec Y, 1px/frame), both stop at a floo
 `$03`→4 (= award N-1 lives, paced by `$da1b=$40`-frame delays with a jingle per 1-UP);
 `$E5` flower → `$da17=$10` = the flower grant (superball power), or if already superball
 (`$ffb5`) just a sound and exit. Cleanup zeroes the bonus vars → `$1B` → next level.
+
+### Bonus game — PORT COMPLETE [2026-07-03, user-confirmed]
+Implemented per the RE above (`bonus_start`/`bonus_frame` + phases: 2 play, 3 walk, 4/6 climb
+up/down, 5 award). Working notes for the renderer:
+- All screen drawing via `bput` (row/col → framebuffer blit). **`set_dst` clobbers X — never
+  loop on X across `bput`/`draw_quad`**; counters live in `b_i`.
+- The bonus owns the whole frame (main loop hands over before ANY normal rendering — even on
+  the transition frame, which previously stamped HUD/level restores over the fresh screen).
+- `bonus_start` zeroes `scroll_s`/`XSCROLL`: the level end leaves the display window at a
+  32px sub-shift, which showed the screen shifted left (Mario off-screen).
+- Mario erase = 3×3 `blit_blank`; repairs after it: `b_fixfloor` (his floor row + pedestal
+  cells; only REAL floor rows 7/10/13/16), `b_fixgap` during climbs (both gap-end floors at
+  the ladder cols), and the locked ladder is redrawn every walk AND climb frame (its end
+  cells sit on floor rows, so erase/repair clip them otherwise).
+- Ladder traversal: at x=80, floor==gap → climb DOWN; floor==gap+1 → climb UP; else walk
+  past. Prize = the FINAL floor's: `$01/$02/$03` → that many paced 1-UPs; `$E5` → superball
+  power (grows small Mario). Exit via `next_level`.
