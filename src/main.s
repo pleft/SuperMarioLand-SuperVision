@@ -1012,31 +1012,62 @@ main_loop:
     sta map_base
     lda #>level0_map
     sta map_base+1
-    stz cam_x                    ; respawn = the start of the SEGMENT SCREEN Mario died in
-    stz cam_x+1                  ; (trace: death cab 53 -> respawn cab 52, same area; the
-    stz fb_col0                  ; first pit already respawns there, not the level start)
-    stz fb_col0+1
-@sub:                            ; cam = cam_dead rounded down to a 160px segment boundary
+    ; --- respawn checkpoint, the ORIGINAL'S algorithm (State_02 @ $06E2): take the death
+    ; segment counter, step ONE segment back (unless at the start), then quantize to the
+    ; fixed checkpoints at static segs 3/7/11/15/19 (= port camera 0/640/1280/1920/2240).
+    lsr cam_dead+1               ; death column = cam/8
+    ror cam_dead
+    lsr cam_dead+1
+    ror cam_dead
+    lsr cam_dead+1
+    ror cam_dead
+    lda cam_dead                 ; right-edge column = col + 20
+    clc
+    adc #20
+    sta cam_dead
+    bcc :+
+    inc cam_dead+1
+:   ldx #3                       ; seg = 3 + (right edge)/20
+@div:
     lda cam_dead+1
-    bne :+
+    bne @sub20
     lda cam_dead
-    cmp #160
-    bcc @have
-:   sec                          ; cam_dead -= 160 ; cam += 160
+    cmp #20
+    bcc @seg
+@sub20:
+    sec
     lda cam_dead
-    sbc #160
+    sbc #20
     sta cam_dead
     lda cam_dead+1
     sbc #0
     sta cam_dead+1
-    clc
-    lda cam_x
-    adc #160
-    sta cam_x
-    lda cam_x+1
-    adc #0
-    sta cam_x+1
-    bra @sub
+    inx
+    bra @div
+@seg:
+    cpx #3                       ; not at the very start? one segment back (the generous rule)
+    beq :+
+    dex
+:   stz cam_x
+    stz cam_x+1
+    cpx #7                       ; quantize: <7 -> start (0)
+    bcc @have
+    ldy #<640
+    sty cam_x
+    ldy #>640
+    sty cam_x+1
+    cpx #11                      ; <11 -> 640
+    bcc @have
+    ldy #<1280
+    sty cam_x
+    ldy #>1280
+    sty cam_x+1
+    cpx #15                      ; <15 -> 1280
+    bcc @have
+    ldy #<1920                   ; else 1920 (seg 15; 19/23 lie past 1-1's cam max)
+    sty cam_x
+    ldy #>1920
+    sty cam_x+1
 @have:
     lda cam_x                    ; fb_col0 = cam/8
     sta fb_col0
@@ -1831,31 +1862,62 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
     sta map_base
     lda #>level0_map
     sta map_base+1
-    stz cam_x                    ; respawn = the start of the SEGMENT SCREEN Mario died in
-    stz cam_x+1                  ; (trace: death cab 53 -> respawn cab 52, same area; the
-    stz fb_col0                  ; first pit already respawns there, not the level start)
-    stz fb_col0+1
-@sub:                            ; cam = cam_dead rounded down to a 160px segment boundary
+    ; --- respawn checkpoint, the ORIGINAL'S algorithm (State_02 @ $06E2): take the death
+    ; segment counter, step ONE segment back (unless at the start), then quantize to the
+    ; fixed checkpoints at static segs 3/7/11/15/19 (= port camera 0/640/1280/1920/2240).
+    lsr cam_dead+1               ; death column = cam/8
+    ror cam_dead
+    lsr cam_dead+1
+    ror cam_dead
+    lsr cam_dead+1
+    ror cam_dead
+    lda cam_dead                 ; right-edge column = col + 20
+    clc
+    adc #20
+    sta cam_dead
+    bcc :+
+    inc cam_dead+1
+:   ldx #3                       ; seg = 3 + (right edge)/20
+@div:
     lda cam_dead+1
-    bne :+
+    bne @sub20
     lda cam_dead
-    cmp #160
-    bcc @have
-:   sec                          ; cam_dead -= 160 ; cam += 160
+    cmp #20
+    bcc @seg
+@sub20:
+    sec
     lda cam_dead
-    sbc #160
+    sbc #20
     sta cam_dead
     lda cam_dead+1
     sbc #0
     sta cam_dead+1
-    clc
-    lda cam_x
-    adc #160
-    sta cam_x
-    lda cam_x+1
-    adc #0
-    sta cam_x+1
-    bra @sub
+    inx
+    bra @div
+@seg:
+    cpx #3                       ; not at the very start? one segment back (the generous rule)
+    beq :+
+    dex
+:   stz cam_x
+    stz cam_x+1
+    cpx #7                       ; quantize: <7 -> start (0)
+    bcc @have
+    ldy #<640
+    sty cam_x
+    ldy #>640
+    sty cam_x+1
+    cpx #11                      ; <11 -> 640
+    bcc @have
+    ldy #<1280
+    sty cam_x
+    ldy #>1280
+    sty cam_x+1
+    cpx #15                      ; <15 -> 1280
+    bcc @have
+    ldy #<1920                   ; else 1920 (seg 15; 19/23 lie past 1-1's cam max)
+    sty cam_x
+    ldy #>1920
+    sty cam_x+1
 @have:
     lda cam_x                    ; fb_col0 = cam/8
     sta fb_col0
