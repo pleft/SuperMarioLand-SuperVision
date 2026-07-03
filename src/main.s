@@ -1044,10 +1044,12 @@ main_loop:
     lda jump_state               ; only from the ground (jumping into the arch waits for landing)
     bne @no
     lda spr_x
-    cmp #128                     ; front touches the door plane -> controls lock, AUTO-WALK in
-    bcc @no                      ; (trace: the original approaches at a steady 1px/frame)
-    lda #6
+    cmp #144                     ; TRIGGER: fully in the arch. The dedicated door trace proves
+    bcc @no                      ; FULL control (even running) until this point, then an
+    lda #1                       ; instant freeze -- no auto-walk, no early lock.
     sta goal_phase
+    lda #240
+    sta goal_tmr
     stz goal_top
     stz mario_frame              ; he stands in the arch for the whole sequence
     stz mario_duck
@@ -1068,8 +1070,6 @@ main_loop:
     beq @hold
     cmp #3
     beq @tally
-    cmp #6
-    beq @approach
     dec goal_tmr                 ; phase 4: end hold -> next level (or the bonus game)
     bne @done
     lda goal_top                 ; top door -> the ladder bonus game first
@@ -1092,26 +1092,6 @@ main_loop:
 @next:
     jmp next_level
 @ring: .byte $00,$01,$02,$E5,$03,$01,$02,$E5
-@approach:
-    inc spr_x                    ; auto-walk into the arch, 1px/frame
-    lda spr_x
-    lsr
-    lsr
-    lsr
-    and #1
-    ina
-    sta mario_frame              ; walk animation
-    lda spr_x
-    cmp #144                     ; centered in the arch -> the jingle freeze
-    bcc @adone
-    stz mario_frame
-    stz mario_duck
-    lda #1
-    sta goal_phase
-    lda #240
-    sta goal_tmr
-@adone:
-    rts
 @jingle:
     dec goal_tmr                 ; the "course clear" jingle pause
     bne @done
