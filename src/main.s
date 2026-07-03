@@ -108,6 +108,7 @@ b_row:       .res 1          ; bput cursor: BG row
 b_col:       .res 1          ; bput cursor: BG col
 b_i:         .res 1          ; loop counter safe across bput (set_dst clobbers X!)
 b_gap:       .res 1          ; the locked ladder's gap 0..2 (between floors gap..gap+1)
+paused:      .res 1          ; 1 = game paused (Start toggles)
 hud_row:     .res 1          ; put_hud target row (0 or 1)
 htmp:        .res 1          ; put_hud scratch (digit being blitted)
 rb_vx:       .res 1          ; restore_bg: VRAM pixel X of the region to repaint
@@ -258,7 +259,17 @@ main_loop:
     jmp main_loop
 @normal:
     jsr read_input
-    lda bonus_phase              ; bonus game running? it owns the whole frame
+    lda pad_pressed              ; Start toggles pause (freeze everything, screen stays)
+    and #GB_START
+    beq @nopause
+    lda paused
+    eor #1
+    sta paused
+@nopause:
+    lda paused
+    beq :+
+    jmp main_loop
+:   lda bonus_phase              ; bonus game running? it owns the whole frame
     beq :+
     jsr bonus_frame
     jmp main_loop
@@ -300,7 +311,7 @@ main_loop:
     lda respawn_req              ; fell into a pit -> restart the level (skip normal draw)
     beq @chkpipe
     jsr do_respawn
-    bra main_loop
+    jmp main_loop
 @growing:
     dec mario_grow               ; count down the 80-frame grow (draw_player flashes on bit2)
     bne @play
@@ -977,7 +988,10 @@ main_loop:
 ; yet; TODO: death animation + life count). Reset camera/state and redraw the scene.
 .proc do_respawn
     stz respawn_req
-    jsr lose_life                ; dying costs a spare life (game-over at 0 = TODO)
+    lda lives                    ; dying with no spare lives -> GAME OVER
+    bne :+
+    jmp game_over
+:   jsr lose_life                ; dying costs a spare life
     stz room_mode                ; always restart on the surface
     lda #<level0_map
     sta map_base
@@ -1677,6 +1691,38 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
 @exit:
     stz bonus_phase
     jmp next_level
+.endproc
+
+; game_over: blank screen + "GAME OVER" text, hold ~4s, then a full machine restart
+; (the original shows GAME OVER then returns to the title; the port has no title yet).
+.proc game_over
+    stz scroll_s
+    stz prev_scroll_s
+    stz XSCROLL
+    jsr clear_vram
+    lda #8                       ; centred-ish: row 8, col 5
+    sta b_row
+    lda #5
+    sta b_col
+    stz b_i
+:   ldx b_i
+    lda @txt,x
+    jsr bput
+    inc b_col
+    inc b_i
+    lda b_i
+    cmp #9
+    bne :-
+    lda #240                     ; ~4 seconds
+    sta tmpL3
+@wait:
+    lda frame_flag
+    beq @wait
+    stz frame_flag
+    dec tmpL3
+    bne @wait
+    jmp reset                    ; full restart (fresh lives/score, level from the top)
+@txt: .byte $10,$0A,$16,$0E,$2C,$18,$1F,$0E,$1B   ; "GAME OVER" (font: G A M E _ O V E R)
 .endproc
 
 ; next_level: level complete. The original proceeds to 1-2; the port has one level
@@ -2711,6 +2757,8 @@ FB_MAX_COL = level0_cols - 24    ; last fb_col0 that keeps cols fb_col0..+23 in 
     lda spr_y                    ; top quads inside the HUD rows? Mario slides BEHIND the
     cmp #16                      ; status bar (the original overlaps it; our HUD rows are
     bcc @bottom                  ; framebuffer content, so we occlude instead)
+    cmp #153                     ; and clip at the bottom: dy>152 would spill past line 160
+    bcs @bottom                  ; (pit falls corrupted the dirt band / wrapped past VRAM)
     lda spr_col                  ; TL
     sta dcol
     lda spr_y
@@ -2726,11 +2774,14 @@ FB_MAX_COL = level0_cols - 24    ; last fb_col0 that keeps cols fb_col0..+23 in 
     ldx pose_tr
     jsr draw_quad
 @bottom:
-    lda spr_y                    ; bottom quads too high as well? fully hidden
+    lda spr_y                    ; bottom quads clipped too? (above the playfield or below it)
     clc
     adc #8
     cmp #16
-    bcs :+
+    bcc @hidden
+    cmp #153
+    bcc :+
+@hidden:
     rts
 :   lda spr_col                  ; BL (y+8)
     sta dcol
