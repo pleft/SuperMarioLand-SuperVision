@@ -1696,14 +1696,9 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
 ; game_over: blank screen + "GAME OVER" text, hold ~4s, then a full machine restart
 ; (the original shows GAME OVER then returns to the title; the port has no title yet).
 .proc game_over
-    stz scroll_s
-    stz prev_scroll_s
-    stz XSCROLL
-    jsr clear_vram
-    lda #8                       ; centred-ish: row 8, col 5
-    sta b_row
-    lda #5
-    sta b_col
+    lda #18                      ; RE State_39: the game screen stays FROZEN and the window
+    sta b_row                    ; overlays "  GAME OVER  " at the bottom (WY=$8F=143 -> our
+    stz b_col                    ; tile row 18), 17 tiles from $1CD7, with the jingle
     stz b_i
 :   ldx b_i
     lda @txt,x
@@ -1711,19 +1706,19 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
     inc b_col
     inc b_i
     lda b_i
-    cmp #9
+    cmp #17
     bne :-
-    lda #240                     ; ~4 seconds
-    sta tmpL3
+    lda #240                     ; hold (the original waits then exits to its title screen;
+    sta tmpL3                    ; the port restarts fresh)
 @wait:
     lda frame_flag
     beq @wait
     stz frame_flag
     dec tmpL3
     bne @wait
-    jmp reset                    ; full restart (fresh lives/score, level from the top)
-@txt: .byte $10,$0A,$16,$0E,$2C,$18,$1F,$0E,$1B   ; "GAME OVER" (font: G A M E _ O V E R)
-.endproc
+    jmp reset
+@txt: .byte $2C,$2C,$2C,$2C,$2C,$10,$0A,$16,$0E,$2C,$2C,$18,$1F,$0E,$1B,$2C,$2C  ; the exact
+.endproc                                                                          ; $1CD7 bytes
 
 ; next_level: level complete. The original proceeds to 1-2; the port has one level
 ; built in, so it loops 1-1 fresh for now (multi-level = its own task). Score, coins,
