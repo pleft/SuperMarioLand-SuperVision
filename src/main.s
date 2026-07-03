@@ -2308,10 +2308,8 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
     adc #0
     sta feet_col+1
     lda map_row
-    cmp #$FE
-    bcs @hud                     ; HUD rows: restore the status-bar TEMPLATE cell
-    cmp #18
-    bcs @skip
+    cmp #18                      ; rows 0..17 restorable; $FE/$FF (the HUD rows) skip too --
+    bcs @skip                    ; nothing is drawn there while Mario occludes behind the HUD
     cmp #16
     bcc @maptile
     lda #$61                     ; dirt band (rows 16,17): solid fill, same as draw_column --
@@ -2320,23 +2318,6 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
     sta mrow
     jsr read_map_tile            ; effective tile (used-block transform applied)
     bra @havetile
-@hud:
-    ldy dcol                     ; template is 2 rows x 20 cols; the margin is blank
-    cpy #20
-    bcs @hudblank
-    lda map_row
-    cmp #$FF                     ; VRAM row 1 -> template offset +20
-    bne :+
-    tya
-    clc
-    adc #20
-    tay
-:   lda #1                       ; digits repaint next frame (draw_hud over the template)
-    sta hud_dirty
-    lda statusbar_tiles,y
-    bra @havetile
-@hudblank:
-    lda #$2C
 @havetile:
     pha                          ; the effective tile
     lda dcol                     ; dcol = tile_col*2
