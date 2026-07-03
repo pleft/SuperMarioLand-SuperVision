@@ -377,3 +377,29 @@ through the whole goal sequence (fall-through into the normal path when the bonu
 under overhangs that sit at his head row (pipe-top ledges, the room coin corridors) — exactly
 like the original. Big Mario still collides with the full 2-tile body, so those same 1-gap
 openings block him.
+
+## Accuracy round: HUD ceiling, pause, death, game over [2026-07-03 — all user-verified]
+- **No ceiling at the HUD**: the jump ascent clamps only at 0 (was 16). Mario passes **behind**
+  the status bar (occlusion): draw clipped to dy 16..152 (the bottom clip also fixed pit-fall
+  corruption past line 160), and his erase SKIPS the HUD rows entirely — nothing draws there,
+  so nothing may restore there (a template-restore at playfield-anchored columns wiped HUD
+  statics). The original draws sprites OVER its BG status bar; matching that needs a
+  **row-split blit** (the crossing quad drawn per scroll-domain) — designed, queued, not done:
+  per-pair anchoring was tried and fragments Mario during the straddle frames.
+- **Pause** (`$079C`, screenshot-verified): Start (gameplay only, the original's state<$0e
+  gate) freezes everything and shows `$2C,$84(♥),P,A,U,S,E,$84(♥),$2C` at the bottom-right,
+  **screen-anchored** (+scroll_s — fixed fb coords drifted with the camera). Unpause restores
+  the map band.
+- **Death** (trace `/tmp/sml_death.txt`): 144-frame freeze (death music window), then respawn
+  per the ORIGINAL'S State_02 algorithm: segment counter −1 (unless at the start), quantized
+  to fixed checkpoints at static segs 3/7/11/15/19 = port camera 0/640/1280/1920. (Two earlier
+  guesses — "past 640" and "death screen" — were both wrong; the trace + $06E2 settled it.
+  Pipe-room deaths restart from the pipe's segment via $fff9/$fff5 — relevant later.)
+- **Game over** (trace + State_39/$3A RE): frozen final screen; the exact 17-tile
+  "  GAME OVER  " ($1CD7) rises from y=143 to y=64 at 1px/frame, holds ~256 frames, then exits
+  (port: restart; original: title screen — future task). Screen-anchored; glyphs from the BG
+  set (the OBJ set renders Mario tiles at those indices); the per-frame erase restores only
+  the vacated 1px sliver's tile row (a 3-row band overran the frame = flashing). State $3B =
+  the " TIME UP " variant ($1D14) — wire with time-up death later.
+- **Small Mario = 12px box** (wall test skips his top body row): passes under head-row
+  overhangs; big Mario blocks. User-verified on the pipe ledge + room corridors.
