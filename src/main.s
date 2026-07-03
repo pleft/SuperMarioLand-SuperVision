@@ -1441,6 +1441,41 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
     rts
 .endproc
 
+; b_fixgap: while climbing, the erase clips BOTH end floors of the gap at the ladder
+; columns (10..12) -- repaint them each frame (the ladder redraw then overlays col 10).
+.proc b_fixgap
+    lda b_gap                    ; top floor row = 7 + 3*gap
+    asl
+    clc
+    adc b_gap
+    clc
+    adc #7
+    sta tmpH3
+    lda #2
+    sta tmpL3                    ; two rows: top floor, then +3 = bottom floor
+@rows:
+    lda tmpH3
+    sta b_row
+    lda #10
+    sta b_col
+    stz b_i
+@cols:
+    lda #$2D
+    jsr bput
+    inc b_col
+    inc b_i
+    lda b_i
+    cmp #3
+    bne @cols
+    lda tmpH3
+    clc
+    adc #3
+    sta tmpH3
+    dec tmpL3
+    bne @rows
+    rts
+.endproc
+
 ; bonus_frame: one frame of the bonus game (called instead of the normal play loop).
 .proc bonus_frame
     lda bonus_phase
@@ -1457,7 +1492,7 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
     jmp @award
 @climbup:
     jsr b_erase
-    jsr b_fixfloor
+    jsr b_fixgap
     dec spr_y                    ; up the ladder 1px/frame
     jsr @clstep
     lda b_gap                    ; reached the top floor?
@@ -1472,7 +1507,7 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
     rts
 @climbdn:
     jsr b_erase
-    jsr b_fixfloor
+    jsr b_fixgap
     inc spr_y
     jsr @clstep
     lda b_gap
