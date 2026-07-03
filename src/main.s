@@ -1825,8 +1825,9 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
 @anim:
     jsr @wait1
     dec tmpH3                    ; the strip rises 1px; the new OPAQUE draw covers all of the
-    stz rb_vx                    ; old image except its bottom 1px sliver -> restore only the
-    lda tmpH3                    ; single tile row containing it (60 blits caused a flash)
+    lda scroll_s                 ; old image except its bottom 1px sliver -> restore only the
+    sta rb_vx                    ; single tile row containing it (screen-anchored, like PAUSE)
+    lda tmpH3
     clc
     adc #8
     sta rb_y
@@ -1854,8 +1855,14 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
 @text:
     stz b_i
 @t:
-    lda b_i                      ; 17 tiles from x=0 (original WX=7 = left edge)
+    lda scroll_s                 ; screen-anchored: 17 tiles from screen x=0 (original WX=7)
+    lsr
+    lsr
+    sta dcol
+    lda b_i
     asl
+    clc
+    adc dcol
     sta dcol
     lda tmpH3
     sta dy
