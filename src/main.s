@@ -109,6 +109,7 @@ b_col:       .res 1          ; bput cursor: BG col
 b_i:         .res 1          ; loop counter safe across bput (set_dst clobbers X!)
 b_gap:       .res 1          ; the locked ladder's gap 0..2 (between floors gap..gap+1)
 paused:      .res 1          ; 1 = game paused (Start toggles)
+cam_dead:    .res 2          ; camera at the moment of death (checkpoint decision)
 hud_row:     .res 1          ; put_hud target row (0 or 1)
 htmp:        .res 1          ; put_hud scratch (digit being blitted)
 rb_vx:       .res 1          ; restore_bg: VRAM pixel X of the region to repaint
@@ -991,20 +992,45 @@ main_loop:
 ; yet; TODO: death animation + life count). Reset camera/state and redraw the scene.
 .proc do_respawn
     stz respawn_req
+    lda #144                     ; trace: 144-frame death pause (music) before anything
+    sta tmpL3
+:   lda frame_flag
+    beq :-
+    stz frame_flag
+    dec tmpL3
+    bne :-
     lda lives                    ; dying with no spare lives -> GAME OVER
     bne :+
     jmp game_over
 :   jsr lose_life                ; dying costs a spare life
     stz room_mode                ; always restart on the surface
+    lda cam_x
+    sta cam_dead
+    lda cam_x+1
+    sta cam_dead+1
     lda #<level0_map
     sta map_base
     lda #>level0_map
     sta map_base+1
-    stz cam_x
-    stz cam_x+1
+    stz cam_x                    ; respawn checkpoint (trace: deaths at seg 8 respawn at
+    stz cam_x+1                  ; seg 7 = world 640, the mid-level pipes): past it -> there
     stz fb_col0
     stz fb_col0+1
-    stz scroll_s
+    lda cam_dead+1               ; (death-time camera, saved below before we zeroed it)
+    cmp #>640
+    bcc :+
+    bne @ckpt
+    lda cam_dead
+    cmp #<640
+    bcc :+
+@ckpt:
+    lda #<640
+    sta cam_x
+    lda #>640
+    sta cam_x+1
+    lda #80
+    sta fb_col0
+:   stz scroll_s
     stz prev_scroll_s
     stz XSCROLL
     stz jump_state
@@ -1727,29 +1753,55 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
 ; game_over: blank screen + "GAME OVER" text, hold ~4s, then a full machine restart
 ; (the original shows GAME OVER then returns to the title; the port has no title yet).
 .proc game_over
-    lda #18                      ; RE State_39: the game screen stays FROZEN and the window
-    sta b_row                    ; overlays "  GAME OVER  " at the bottom (WY=$8F=143 -> our
-    stz b_col                    ; tile row 18), 17 tiles from $1CD7, with the jingle
+    lda #143                     ; trace: the strip rises WY 143 -> 64 at 1px/frame over the
+    sta tmpH3                    ; FROZEN game screen, then holds ~256 frames, then exits
+@anim:
+    jsr @wait1
+    stz rb_vx                    ; erase the previous strip position: restore the map band
+    lda tmpH3
+    sta rb_y
+    lda #20
+    sta rb_cols
+    lda #3
+    sta rb_rows
+    jsr restore_bg
+    dec tmpH3
+    jsr @text                    ; draw the 17 glyph quads at the new pixel Y
+    lda tmpH3
+    cmp #64
+    bne @anim
+    lda #255                     ; hold
+    sta tmpL3
+@hold:
+    jsr @wait1
+    dec tmpL3
+    bne @hold
+    jmp reset
+@wait1:
+    lda frame_flag
+    beq @wait1
+    stz frame_flag
+    rts
+@text:
     stz b_i
-:   ldx b_i
+@t:
+    lda b_i                      ; dcol = (col+1)*2 pixel-ish: quads at x = 12 + i*8
+    asl
+    sta dcol
+    lda tmpH3
+    sta dy
+    stz spr_subx
+    ldx b_i
     lda @txt,x
-    jsr bput
-    inc b_col
+    tax
+    jsr draw_quad
     inc b_i
     lda b_i
     cmp #17
-    bne :-
-    lda #240                     ; hold (the original waits then exits to its title screen;
-    sta tmpL3                    ; the port restarts fresh)
-@wait:
-    lda frame_flag
-    beq @wait
-    stz frame_flag
-    dec tmpL3
-    bne @wait
-    jmp reset
-@txt: .byte $2C,$2C,$2C,$2C,$2C,$10,$0A,$16,$0E,$2C,$2C,$18,$1F,$0E,$1B,$2C,$2C  ; the exact
-.endproc                                                                          ; $1CD7 bytes
+    bne @t
+    rts
+@txt: .byte $2C,$2C,$2C,$2C,$2C,$10,$0A,$16,$0E,$2C,$2C,$18,$1F,$0E,$1B,$2C,$2C  ; $1CD7
+.endproc
 
 ; next_level: level complete. The original proceeds to 1-2; the port has one level
 ; built in, so it loops 1-1 fresh for now (multi-level = its own task). Score, coins,
@@ -1761,11 +1813,25 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
     sta map_base
     lda #>level0_map
     sta map_base+1
-    stz cam_x
-    stz cam_x+1
+    stz cam_x                    ; respawn checkpoint (trace: deaths at seg 8 respawn at
+    stz cam_x+1                  ; seg 7 = world 640, the mid-level pipes): past it -> there
     stz fb_col0
     stz fb_col0+1
-    stz scroll_s
+    lda cam_dead+1               ; (death-time camera, saved below before we zeroed it)
+    cmp #>640
+    bcc :+
+    bne @ckpt
+    lda cam_dead
+    cmp #<640
+    bcc :+
+@ckpt:
+    lda #<640
+    sta cam_x
+    lda #>640
+    sta cam_x+1
+    lda #80
+    sta fb_col0
+:   stz scroll_s
     stz prev_scroll_s
     stz XSCROLL
     stz jump_state
