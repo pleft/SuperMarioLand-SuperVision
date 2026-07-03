@@ -259,12 +259,15 @@ main_loop:
     jmp main_loop
 @normal:
     jsr read_input
-    lda pad_pressed              ; Start toggles pause (freeze everything, screen stays)
-    and #GB_START
+    lda pad_pressed              ; Start toggles pause (gameplay only, like the original's
+    and #GB_START                ; state<$0e gate; the bonus is not pausable)
     beq @nopause
+    lda bonus_phase
+    bne @nopause
     lda paused
     eor #1
     sta paused
+    jsr pause_strip              ; show/remove the bottom-right ♥PAUSE♥ strip (RE $079C)
 @nopause:
     lda paused
     beq :+
@@ -1691,6 +1694,34 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
 @exit:
     stz bonus_phase
     jmp next_level
+.endproc
+
+; pause_strip: draw (paused=1) or clear (paused=0) the original's "♥PAUSE♥" window strip:
+; tiles $2C,$84,P,A,U,S,E,$84,$2C at the screen bottom-right (row 18, cols 11-19). Clearing
+; repaints the dirt fill ($61) that draw_column puts there.
+.proc pause_strip
+    lda #18
+    sta b_row
+    lda #11
+    sta b_col
+    stz b_i
+@loop:
+    lda paused
+    beq @dirt
+    ldx b_i
+    lda @txt,x
+    bra @put
+@dirt:
+    lda #$61
+@put:
+    jsr bput
+    inc b_col
+    inc b_i
+    lda b_i
+    cmp #9
+    bne @loop
+    rts
+@txt: .byte $2C,$84,$19,$0A,$1E,$1C,$0E,$84,$2C   ; the exact $079C bytes
 .endproc
 
 ; game_over: blank screen + "GAME OVER" text, hold ~4s, then a full machine restart
