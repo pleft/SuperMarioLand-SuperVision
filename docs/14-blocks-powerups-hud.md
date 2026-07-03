@@ -362,3 +362,18 @@ up/down, 5 award). Working notes for the renderer:
 - Ladder traversal: at x=80, floor==gap → climb DOWN; floor==gap+1 → climb UP; else walk
   past. Prize = the FINAL floor's: `$01/$02/$03` → that many paced 1-UPs; `$E5` → superball
   power (grows small Mario). Exit via `next_level`.
+
+### Door entry + small Mario's hitbox — trace-settled [2026-07-03]
+**Door entry** (`tools/trace_door.lua`, running entry + input-hammering): the original keeps
+**full player control — even at run speed, 1.5px/frame with no deceleration — until Mario is
+fully inside the arch** (`$c202` ≥ 160 = port `spr_x` ≥ 144, grounded), then state `$07`
+freezes him **instantly and totally** (Left/A hammered through the jingle/tally move nothing).
+No auto-walk, no early lock (an auto-walk was briefly implemented off an ambiguous 1px/frame
+walk-in from the earlier goal trace — the dedicated trace disproved it; removed).
+Related fix: an anonymous-label bug in the main loop's goal branch had left move/jump LIVE
+through the whole goal sequence (fall-through into the normal path when the bonus was off).
+
+**Small Mario = a 12px collision box**: his wall test skips the top body row, so he walks
+under overhangs that sit at his head row (pipe-top ledges, the room coin corridors) — exactly
+like the original. Big Mario still collides with the full 2-tile body, so those same 1-gap
+openings block him.
