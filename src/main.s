@@ -1775,27 +1775,45 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
 ; tiles $2C,$84,P,A,U,S,E,$84,$2C at the screen bottom-right (row 18, cols 11-19). Clearing
 ; repaints the dirt fill ($61) that draw_column puts there.
 .proc pause_strip
-    lda #18
-    sta b_row
-    lda #11
-    sta b_col
+    lda paused
+    beq @clear
+    lda scroll_s                 ; anchor in SCREEN coords: the display window is offset by
+    lsr                          ; the scroll, so the fb x = 88 + scroll_s (byte = /4)
+    lsr
+    clc
+    adc #22                      ; (88/4) + scroll_s/4
+    sta tmpH3                    ; base byte col
     stz b_i
 @loop:
-    lda paused
-    beq @dirt
+    lda b_i
+    asl
+    clc
+    adc tmpH3
+    sta dcol
+    lda #144                     ; screen bottom strip (row 18)
+    sta dy
+    jsr set_dst
     ldx b_i
     lda @txt,x
-    bra @put
-@dirt:
-    lda #$61
-@put:
-    jsr bput
-    inc b_col
+    jsr get_tile_src
+    jsr blit_tile
     inc b_i
     lda b_i
     cmp #9
     bne @loop
     rts
+@clear:
+    lda scroll_s                 ; unpause: restore the map band under the strip
+    clc
+    adc #88
+    sta rb_vx
+    lda #144
+    sta rb_y
+    lda #10
+    sta rb_cols
+    lda #1
+    sta rb_rows
+    jmp restore_bg
 @txt: .byte $2C,$84,$19,$0A,$1E,$1C,$0E,$84,$2C   ; the exact $079C bytes
 .endproc
 
