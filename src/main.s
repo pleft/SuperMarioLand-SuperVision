@@ -1900,6 +1900,8 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
     jsr b_erase
     jsr b_fixfloor
     dec spr_x
+    lda spr_x                    ; keep the draw position in sync (the bug: Mario kept
+    sta mario_vx                 ; being DRAWN at the stale pedestal x while spr_x walked)
     jsr draw_player
     rts
 @atladder:
@@ -1923,6 +1925,8 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
     lda #4
     sta b_awt
     stz mario_facing
+    lda spr_x
+    sta mario_vx
     rts
     ; ---- phase 9: climb the ladders to the top floor ----
 @cl2top:
