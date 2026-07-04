@@ -1068,23 +1068,29 @@ main_loop:
     dex
 :   stz cam_x
     stz cam_x+1
-    cpx #7                       ; quantize: <7 -> start (0)
+    cpx #7                       ; quantize (cab math: checkpoint cam = (C-12)*8, every
+    bcc @have                    ; 2 segments): <7 -> 0
+    ldy #<320
+    sty cam_x
+    ldy #>320
+    sty cam_x+1
+    cpx #11                      ; <11 -> 320
     bcc @have
     ldy #<640
     sty cam_x
     ldy #>640
     sty cam_x+1
-    cpx #11                      ; <11 -> 640
+    cpx #15                      ; <15 -> 640
     bcc @have
-    ldy #<1280
+    ldy #<960
+    sty cam_x
+    ldy #>960
+    sty cam_x+1
+    cpx #19                      ; <19 -> 960
+    bcc @have
+    ldy #<1280                   ; else 1280 (seg 19; 23 -> 1600 past 1-1's practical range)
     sty cam_x
     ldy #>1280
-    sty cam_x+1
-    cpx #15                      ; <15 -> 1280
-    bcc @have
-    ldy #<1920                   ; else 1920 (seg 15; 19/23 lie past 1-1's cam max)
-    sty cam_x
-    ldy #>1920
     sty cam_x+1
 @have:
     lda cam_x                    ; fb_col0 = cam/8
@@ -1967,23 +1973,29 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
     dex
 :   stz cam_x
     stz cam_x+1
-    cpx #7                       ; quantize: <7 -> start (0)
+    cpx #7                       ; quantize (cab math: checkpoint cam = (C-12)*8, every
+    bcc @have                    ; 2 segments): <7 -> 0
+    ldy #<320
+    sty cam_x
+    ldy #>320
+    sty cam_x+1
+    cpx #11                      ; <11 -> 320
     bcc @have
     ldy #<640
     sty cam_x
     ldy #>640
     sty cam_x+1
-    cpx #11                      ; <11 -> 640
+    cpx #15                      ; <15 -> 640
     bcc @have
-    ldy #<1280
+    ldy #<960
+    sty cam_x
+    ldy #>960
+    sty cam_x+1
+    cpx #19                      ; <19 -> 960
+    bcc @have
+    ldy #<1280                   ; else 1280 (seg 19; 23 -> 1600 past 1-1's practical range)
     sty cam_x
     ldy #>1280
-    sty cam_x+1
-    cpx #15                      ; <15 -> 1280
-    bcc @have
-    ldy #<1920                   ; else 1920 (seg 15; 19/23 lie past 1-1's cam max)
-    sty cam_x
-    ldy #>1920
     sty cam_x+1
 @have:
     lda cam_x                    ; fb_col0 = cam/8
