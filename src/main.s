@@ -3903,8 +3903,7 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     bne @done
     lda spawn_table,y
     cmp cam_x
-    bcc @fire
-    bne @done
+    bcs @done                    ; STRICT: fires only once the camera passes the column
 @fire:
     lda spawn_table+3,y          ; type: only Chibibo ($00) handled so far
     bne @skip
@@ -4982,12 +4981,14 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     clc
     adc #8
     sta dy
-    ldx #CHIB_TA                 ; 2-frame walk ($90/$91)
-    lda frame_count
-    and #8
-    beq :+
-    ldx #CHIB_TB
-:   jsr draw_quad
+    lda frame_count              ; walk anim = the SAME tile $90 MIRRORED every 8 frames
+    lsr                          ; (RE: params $00/$01 are both tile $90, one with the flip
+    lsr                          ; attr -- $91 is the SQUASH frame, not a walk frame)
+    lsr
+    and #1
+    sta do_flip
+    ldx #CHIB_TA
+    jsr draw_quad
     rts
 @squash:
     lda spr_col
