@@ -3127,6 +3127,19 @@ CHIB_TA    = $90                 ; Chibibo walk frames (metasprite params $00/$0
 CHIB_TB    = $91
 POP_100_L  = $59                 ; "100" popup = value $01 -> tiles $59,$58 (bank2 $5892)
 POP_100_R  = $58
+OBJ_NOKO   = 14                  ; Nokobon / Bombshell Koopa (SML type $04): 8x16 walker
+OBJ_BOMB   = 15                  ; its stomped shell: ticking bomb (type $05) -- harmless touch
+OBJ_BOOM   = 16                  ; the explosion (type $46): 16px wide, contact HURTS
+NOKO_B1    = $97                 ; walk frame A: bottom / top
+NOKO_T1    = $96
+NOKO_B2    = $99                 ; walk frame B
+NOKO_T2    = $98
+BOMB_TA    = $9A                 ; bomb blink tiles
+BOMB_TB    = $9B
+BOOM_TA    = $9D                 ; explosion cloud (drawn + X-mirrored pair)
+BOOM_TB    = $9E
+BOMB_FUSE  = 144                 ; ~2.4s tick (script: 2 waits + 8 blinks; trace-tune later)
+BOOM_LIFE  = 40
 STAR_TA    = $86                 ; star twinkles between $86 and $85 (param $19 list)
 STAR_TB    = $85
 BALL_TILE  = $60                 ; superball = 1 OBJ tile (mGBA OAM trace)
@@ -3899,8 +3912,13 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     cmp cam_x
     bcs @done                    ; STRICT: fires only once the camera passes the column
 @fire:
-    lda spawn_table+3,y          ; type: only Chibibo ($00) handled so far
+    lda spawn_table+3,y          ; type: Chibibo $00 and Nokobon $04 so far
+    beq @chib
+    cmp #$04
     bne @skip
+    jsr spawn_noko
+    bra @skip
+@chib:
     jsr spawn_chib
 @skip:
     inc spawn_idx
@@ -3926,6 +3944,30 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     lda spawn_table+2,y          ; feet line from the table
     sta o_y,x
     lda #$FF                     ; walks LEFT (toward Mario), 1px/update
+    sta o_vx,x
+    stz o_st,x
+    stz o_tmr,x
+@full:
+    rts
+.endproc
+
+.proc spawn_noko
+    phy
+    jsr find_free_obj
+    ply
+    bcs @full
+    lda #OBJ_NOKO
+    sta o_type,x
+    lda cam_x
+    clc
+    adc #180
+    sta o_xl,x
+    lda cam_x+1
+    adc #0
+    sta o_xh,x
+    lda spawn_table+2,y
+    sta o_y,x
+    lda #$FF                     ; walks left, same measured speed engine as the Chibibo
     sta o_vx,x
     stz o_st,x
     stz o_tmr,x
@@ -4119,30 +4161,26 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     adc #4
     cmp o_y,x
     bcc @stomp
-    ; --- side contact: hurt Mario ---
-    lda hurt_inv
-    bne @done
-    lda mario_grow
-    ora mario_shrink
-    bne @done
-    lda mario_big
-    beq @die
-    lda #$50                     ; big -> the 80-frame shrink flash (mirror of grow)
-    sta mario_shrink
-    stz mario_duck
-    rts
-@die:
-    lda #1                       ; small -> death (144f pause + checkpoint respawn)
-    sta respawn_req
-    rts
+    jmp hurt_mario               ; side contact
 @stomp:
-    ldx oi                       ; enemy -> squashed corpse
-    lda #OBJ_SQUASH
+    ldx oi
+    lda o_type,x
+    cmp #OBJ_NOKO
+    beq @sbomb
+    lda #OBJ_SQUASH              ; Chibibo -> squashed corpse ($91)
     sta o_type,x
-    lda #CHIB_TB                 ; squash frame (RE: type $01 shows param $02 = tile $91)
+    lda #CHIB_TB
     sta o_vx,x
     lda #32
     sta o_tmr,x
+    bra @sboth
+@sbomb:
+    lda #OBJ_BOMB                ; Nokobon -> the TICKING BOMB (RE $3186: $04 -> $05)
+    sta o_type,x
+    lda #BOMB_FUSE
+    sta o_tmr,x
+    stz o_vx,x
+@sboth:
     lda #1                       ; Mario's fixed stomp bounce: a short hop
     sta jump_state
     lda #14
@@ -4158,19 +4196,126 @@ riding_this:                     ; Z=1 if Mario rides slot oi
 @done:
     rts
 @kill:
-    ldx oi                       ; star kill: corpse + points, no bounce
+    ldx oi                       ; star kill: gone + points, no bounce (dead-flip type
+    lda o_type,x                 ; equivalents $11/$12 just leave the screen)
+    cmp #OBJ_NOKO
+    beq @kgone
     lda #OBJ_SQUASH
     sta o_type,x
     lda #CHIB_TB
     sta o_vx,x
     lda #24
     sta o_tmr,x
+    bra @kpts
+@kgone:
+    stz o_type,x
+@kpts:
     lda #$00
     ldx #$01
     jsr add_score
     lda #POP_100_L
     ldy #POP_100_R
     jsr spawn_popup
+    rts
+.endproc
+
+; hurt_mario: shared side-contact/explosion damage (RE: big -> shrink flash + powers
+; lost + mercy blink; small -> death). Respects mercy/grow/shrink windows.
+.proc hurt_mario
+    lda hurt_inv
+    ora mario_grow
+    ora mario_shrink
+    bne @no
+    lda mario_big
+    beq @die
+    lda #$50
+    sta mario_shrink
+    stz mario_duck
+    rts
+@die:
+    lda #1
+    sta respawn_req
+@no:
+    rts
+.endproc
+
+; upd_bomb: the stomped Nokobon's shell ticks (~2.4s, blinking) then explodes.
+; Touching the ticking bomb is HARMLESS (RE: its $3186 row is all zeros).
+.proc upd_bomb
+    ldx oi
+    dec o_tmr,x
+    bne @tick
+    lda #OBJ_BOOM                ; fuse out -> the explosion (type $46), 16px wide:
+    sta o_type,x                 ; shift left 4px so the cloud is centred on the bomb
+    lda #BOOM_LIFE
+    sta o_tmr,x
+    lda o_xl,x
+    sec
+    sbc #4
+    sta o_xl,x
+    bcs @tick
+    dec o_xh,x
+@tick:
+    rts
+.endproc
+
+; upd_boom: the explosion -- contact HURTS ($3186[$46] byte2=$FF), then it burns out.
+.proc upd_boom
+    ldx oi
+    dec o_tmr,x
+    bne :+
+    stz o_type,x
+    rts
+:   lda cam_x                    ; |mario centre - cloud centre| < 14 ?
+    clc
+    adc spr_x
+    sta tmpL2
+    lda cam_x+1
+    adc #0
+    sta tmpH2
+    lda tmpL2
+    clc
+    adc #8
+    sta tmpL2
+    bcc :+
+    inc tmpH2
+:   lda o_xl,x
+    clc
+    adc #8
+    sta tmpL3
+    lda o_xh,x
+    adc #0
+    sta tmpH3
+    sec
+    lda tmpL2
+    sbc tmpL3
+    sta tmpL3
+    lda tmpH2
+    sbc tmpH3
+    sta tmpH3
+    bpl :+
+    sec
+    lda #0
+    sbc tmpL3
+    sta tmpL3
+    lda #0
+    sbc tmpH3
+    sta tmpH3
+:   lda tmpH3
+    bne @no
+    lda tmpL3
+    cmp #14
+    bcs @no
+    lda spr_y                    ; |mario feet - cloud line| < 14
+    sec
+    sbc o_y,x
+    bpl :+
+    eor #$FF
+    ina
+:   cmp #14
+    bcs @no
+    jmp hurt_mario
+@no:
     rts
 .endproc
 
@@ -4420,8 +4565,10 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     ldx oi2
     lda o_type,x
     cmp #OBJ_CHIB
+    beq :+
+    cmp #OBJ_NOKO
     bne @next
-    ldy oi                       ; dx = |ball - enemy| (16-bit)
+:   ldy oi                       ; dx = |ball - enemy| (16-bit)
     lda o_xl,y
     sec
     sbc o_xl,x
@@ -4450,12 +4597,18 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     ina
 :   cmp #10
     bcs @next
-    lda #OBJ_SQUASH              ; kill: corpse + points; the ball expires
+    lda o_type,x                 ; kill: corpse (Chibibo) or gone (Nokobon); ball expires
+    cmp #OBJ_NOKO
+    bne :+
+    stz o_type,x
+    bra @pts
+:   lda #OBJ_SQUASH
     sta o_type,x
     lda #CHIB_TB
     sta o_vx,x
     lda #24
     sta o_tmr,x
+@pts:
     lda #$00
     ldx #$01
     jsr add_score
@@ -4520,8 +4673,14 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     beq @plath
     cmp #OBJ_CHIB
     beq @chib
+    cmp #OBJ_NOKO
+    beq @chib                    ; same walker engine (combat branches by type inside)
     cmp #OBJ_SQUASH
     beq @squash
+    cmp #OBJ_BOMB
+    beq @bomb
+    cmp #OBJ_BOOM
+    beq @boom
     jsr upd_mush                 ; OBJ_MUSH and OBJ_HEART (identical walker engine)
     bra @next
 @chib:
@@ -4529,6 +4688,12 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     bra @next
 @squash:
     jsr upd_squash
+    bra @next
+@bomb:
+    jsr upd_bomb
+    bra @next
+@boom:
+    jsr upd_boom
     bra @next
 @platv:
     jsr upd_platv
@@ -4560,8 +4725,9 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     inc oi
     lda oi
     cmp #8
-    bne @loop
-    rts
+    beq :+
+    jmp @loop
+:   rts
 .endproc
 
 ; upd_coin (X=slot): the block coin-pop -- rises 1px/frame, spin phase advances 1/frame,
@@ -4973,8 +5139,19 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     lda o_pvy,x
     sta rb_y
     lda o_pw,x
+    bpl @short
+    and #$7F                     ; TALL (16px) sprite: erase from 8px above, one extra row
+    sta rb_cols
+    lda o_pvy,x
+    sec
+    sbc #8
+    sta rb_y
+    ldy #2
+    bra @rows
+@short:
     sta rb_cols
     ldy #1
+@rows:
     lda o_pvy,x
     and #7
     beq :+
@@ -5024,11 +5201,17 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     sta o_pvx,x
     lda o_ndy,x
     sta o_pvy,x
-    lda #2                       ; drawn width: 2 cols; 3 popup; 4 platform
-    ldy o_type,x
+    lda #2                       ; drawn width: 2 cols; 3 popup/explosion; 4 platform;
+    ldy o_type,x                 ; bit7 = TALL (16px: the Nokobon)
     cpy #OBJ_POPUP
     bne :+
     lda #3
+:   cpy #OBJ_BOOM
+    bne :+
+    lda #3
+:   cpy #OBJ_NOKO
+    bne :+
+    lda #$82
 :   cpy #OBJ_PLATV
     bcc :+
     cpy #OBJ_PLATH+1
@@ -5189,12 +5372,25 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     beq @heart
     cmp #OBJ_CHIB
     beq @chib
-    cmp #OBJ_SQUASH
-    beq @squash
-    cmp #OBJ_STAR
-    beq @stard
-    cmp #OBJ_DEBRIS
-    beq @shard
+    cmp #OBJ_NOKO
+    bne :+
+    jmp @noko
+:   cmp #OBJ_BOMB
+    bne :+
+    jmp @bomb
+:   cmp #OBJ_BOOM
+    bne :+
+    jmp @boom
+:   cmp #OBJ_SQUASH
+    bne :+
+    jmp @squash
+:   cmp #OBJ_STAR
+    bne :+
+    jmp @stard
+:   cmp #OBJ_DEBRIS
+    bne :+
+    jmp @shard
+:
     ; --- mushroom: one 8x8 OBJ tile, drawn at the feet line (o_y + 8) ---
     lda spr_col
     sta dcol
@@ -5245,6 +5441,92 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     lda o_vx,x                   ; corpse tile rides in o_vx
     tax
     jsr draw_quad
+    rts
+@noko:
+    ldx oi
+    lda o_vx,x                   ; face the walk direction (tiles face right; original
+    bpl :+                       ; shows the $10 flip attr on its left-walking frames)
+    lda #1
+    bra :++
+:   lda #0
+:   sta do_flip
+    lda spr_col
+    sta dcol
+    ldx oi
+    lda o_y,x                    ; bottom tile at dy, shell/bomb tile at dy-8 (8x16)
+    clc
+    adc #8
+    sta dy
+    ldx #NOKO_B1
+    lda frame_count
+    and #8
+    beq :+
+    ldx #NOKO_B2
+:   jsr draw_quad
+    ldx oi
+    lda do_flip                  ; draw_quad clears it? no -- draw_obj_sprite did; keep set
+    pha
+    lda o_y,x
+    sta dy                       ; top half (dy-8+8 = o_y)
+    pla
+    sta do_flip
+    ldx #NOKO_T1
+    lda frame_count
+    and #8
+    beq :+
+    ldx #NOKO_T2
+:   jsr draw_quad
+    stz do_flip
+    rts
+@bomb:
+    lda spr_col
+    sta dcol
+    ldx oi
+    lda o_y,x
+    clc
+    adc #8
+    sta dy
+    lda o_tmr,x                  ; blink ~2Hz on the fuse timer
+    and #16
+    php
+    ldx #BOMB_TA
+    plp
+    beq :+
+    ldx #BOMB_TB
+:   jsr draw_quad
+    rts
+@boom:
+    lda spr_col
+    sta dcol
+    ldx oi
+    lda o_y,x
+    clc
+    adc #8
+    sta dy
+    lda o_tmr,x
+    and #4
+    php
+    ldx #BOOM_TA
+    plp
+    beq :+
+    ldx #BOOM_TB
+:   phx
+    stz do_flip
+    jsr draw_quad                ; left half
+    ldx oi
+    lda o_y,x
+    clc
+    adc #8
+    sta dy
+    lda spr_col
+    ina
+    ina
+    sta dcol                     ; right half = the same tile X-mirrored, 8px right
+    lda #1
+    sta do_flip
+    plx
+    jsr draw_quad
+    stz do_flip
     rts
 @stard:
     lda spr_col
@@ -5458,7 +5740,7 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     rts
 .endproc
 
-.segment "RODATA"
+.segment "LEVELS"            ; bank 0 ($8000, always mapped) -- FIXED is full
 row48_lo: .repeat 160, i
           .byte <(i*48)
           .endrepeat
