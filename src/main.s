@@ -122,6 +122,9 @@ combo_t:     .res 1          ; stomp-combo window ($ff9c): 50 frames
 combo_n:     .res 1          ; chain count ($ff9d): 0..3, doubles the value code
 death_anim:  .res 1          ; >0 = the death hop is playing (index+1 into death_curve)
 timeup:      .res 1          ; the clock ran out: after the hop, show " TIME UP " (state $3B)
+sfx_p:       .res 2          ; SFX stream pointer (0 hi = idle)
+sfx_wait:    .res 1          ; frames until the pending row applies
+sfx_used:    .res 1          ; channel mask the stream touched (for the end-silence)
 hud_row:     .res 1          ; put_hud target row (0 or 1)
 htmp:        .res 1          ; put_hud scratch (digit being blitted)
 rb_vx:       .res 1          ; restore_bg: VRAM pixel X of the region to repaint
@@ -276,6 +279,7 @@ main_loop:
     ; ==== FRAME-START RENDER (the beam is in the HUD rows for the first ~4096 cyc, and
     ; above any sprite for much longer: everything drawn here can't be caught mid-blit).
     ; Uses the state the LOGIC phase computed last frame. ====
+    jsr sfx_tick                 ; sound streams run every frame, all modes
     lda bonus_phase              ; the bonus game and pipe animations own their own drawing
     ora pipe_phase
     beq :+
@@ -746,6 +750,11 @@ main_loop:
 
 ; add_life / lose_life: BCD lives counter, clamped to [0,99]. Lives only grow on a 1-up
 ; (100 coins, or a heart power-up once the object engine lands) — never on a plain ?-block.
+.proc add_life_snd
+    lda #SFX_DFE0_08             ; 1UP trigger ($dfe0=$08, RE $1C33)
+    jsr sfx_play
+    ; falls through into add_life
+.endproc
 .proc add_life
     sed
     lda lives
@@ -892,6 +901,8 @@ main_loop:
     sta fall_v
     jmp @done
 @startjump:
+    lda #SFX_DFE0_01             ; the original's jump sound ($dfe0=$01, live-verified)
+    jsr sfx_play
     stz ride                      ; jumping leaves the platform
     lda #2                        ; seed the arc index at 2 (matches the game)
     sta arc_idx
@@ -996,6 +1007,8 @@ main_loop:
     sta spr_y
     cmp #160                      ; fell off the bottom (into a pit) -> request a respawn
     bcc @checkland                ;   (before spr_y wraps past 255 and reappears at the top)
+    lda #SFX_DFE8_02              ; the death jingle plays on pit deaths too
+    jsr sfx_play
     lda #1
     sta respawn_req
     rts
@@ -1962,6 +1975,112 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
     stz bonus_phase
     jmp next_level
 .endproc
+
+; --- SFX player: replays build-time captured register streams of the ORIGINAL's
+; sound effects (tools/extract_sfx.py). Row: delay, mask(b0 ch1/b1 ch2/b2 noise),
+; payload (3/3/1 bytes); delay $FF ends the stream. ---
+.proc sfx_play                   ; A = SFX id (see build/audio/sfx.inc)
+    tax
+    lda sfx_offsets_lo,x
+    clc
+    adc #<sfx_data
+    sta sfx_p
+    lda sfx_offsets_hi,x
+    adc #>sfx_data
+    sta sfx_p+1
+    stz sfx_wait
+    stz sfx_used
+    lda #%00001110               ; noise ctrl: enable + both speakers, 15-bit LFSR
+    sta CH4_CTRL
+    rts
+.endproc
+
+.proc sfx_tick
+    lda sfx_p+1
+    beq @idle
+    lda sfx_wait
+    beq @row
+    dec sfx_wait
+@idle:
+    rts
+@row:
+    lda (sfx_p)                  ; delay byte
+    cmp #$FF
+    beq @end
+    jsr @inc
+    lda (sfx_p)                  ; mask
+    sta tmpL
+    ora sfx_used
+    sta sfx_used
+    jsr @inc
+    lda tmpL
+    and #1
+    beq :+
+    lda (sfx_p)
+    sta CH1_FLO
+    jsr @inc
+    lda (sfx_p)
+    sta CH1_FHI
+    jsr @inc
+    lda (sfx_p)
+    sta CH1_VOLDUTY
+    ldy #$FF
+    sty CH1_LEN
+    jsr @inc
+:   lda tmpL
+    and #2
+    beq :+
+    lda (sfx_p)
+    sta CH2_FLO
+    jsr @inc
+    lda (sfx_p)
+    sta CH2_FHI
+    jsr @inc
+    lda (sfx_p)
+    sta CH2_VOLDUTY
+    ldy #$FF
+    sty CH2_LEN
+    jsr @inc
+:   lda tmpL
+    and #4
+    beq :+
+    lda (sfx_p)
+    sta CH4_FREQVOL
+    ldy #$FF
+    sty CH4_LEN
+    jsr @inc
+:   lda (sfx_p)                  ; next row's delay: 0 -> apply next frame minimum
+    cmp #$FF
+    beq @end
+    sta sfx_wait
+    rts
+@end:
+    lda sfx_used                 ; silence whatever the stream touched
+    and #1
+    beq :+
+    stz CH1_VOLDUTY
+:   lda sfx_used
+    and #2
+    beq :+
+    stz CH2_VOLDUTY
+:   lda sfx_used
+    and #4
+    beq :+
+    stz CH4_FREQVOL
+:   stz sfx_p+1
+    rts
+@inc:
+    inc sfx_p
+    bne :+
+    inc sfx_p+1
+:   rts
+.endproc
+
+.segment "LEVELS"
+.include "../build/audio/sfx.inc"
+sfx_data:
+    .incbin "../build/audio/sfx.bin"
+.segment "CODE"
 
 ; pause_strip: draw (paused=1) or clear (paused=0) the original's "♥PAUSE♥" window strip:
 ; tiles $2C,$84,P,A,U,S,E,$84,$2C at the screen bottom-right (row 18, cols 11-19). Clearing
@@ -4627,6 +4746,10 @@ fly_dy:
 ; Kills (ball/star) award the base code only.
 .proc award_stomp
     pha
+    lda #SFX_DFE0_03             ; stomp/kill chirp ($dfe0=$03 per the stomp path $090D)
+    jsr sfx_play
+    pla
+    pha
     lda combo_t
     bne @chain
     stz combo_n                  ; window expired: chain resets
@@ -4696,6 +4819,8 @@ fly_dy:
     stz mario_duck
     rts
 @die:
+    lda #SFX_DFE8_02             ; the death jingle ($dfe8=$02, RE $09F1)
+    jsr sfx_play
     lda #1                       ; enemy deaths play the HOP (RE states $03/$04); pit
     sta death_anim               ; deaths keep the direct fall path (state $01)
     stz mario_duck
@@ -4788,6 +4913,9 @@ death_curve:                     ; ROM $0C19 verbatim (signed y deltas + $7F end
     ldx oi
     dec o_tmr,x
     bne @tick
+    lda #SFX_DFF8_01             ; the bang (the explosion script's F9 01)
+    jsr sfx_play
+    ldx oi
     lda #OBJ_BOOM                ; fuse out -> the explosion (type $46), 16px wide:
     sta o_type,x                 ; shift left 4px so the cloud is centred on the bomb
     lda #BOOM_LIFE
@@ -5601,7 +5729,7 @@ title_tiles:                     ; the used tiles, SV-packed
     jsr spawn_popup
     bra @take
 @heart:
-    jsr add_life                 ; 1-up heart ($2b pickup -> $c0a3 in the original)
+    jsr add_life_snd             ; 1-up heart (jingle + count)
     lda #POP_1UP_L               ; floating "1UP"
     ldy #POP_1UP_R
     jsr spawn_popup

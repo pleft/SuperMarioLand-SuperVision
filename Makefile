@@ -21,7 +21,7 @@ $(ROM): $(OBJS) $(CFG)
 	$(LD) -C $(CFG) $(OBJS) -o $@
 	@echo "built $@ ($$(wc -c < $@) bytes)"
 
-build/main.o: src/main.s src/supervision.inc build/levels/title_map.bin build/gfx/title_tiles.svt
+build/main.o: src/main.s src/supervision.inc build/levels/title_map.bin build/gfx/title_tiles.svt build/audio/sfx.bin build/audio/sfx.inc
 	@mkdir -p build
 	$(AS) $(ASFLAGS) src/main.s -o $@
 
@@ -46,6 +46,8 @@ $(TABLES): tools/extract_tables.py $(ROM_IN)
 	python3 tools/extract_tables.py
 build/levels/title_map.bin build/gfx/title_tiles.svt: tools/extract_title.py $(ROM_IN)
 	python3 tools/extract_title.py
+build/audio/sfx.bin build/audio/sfx.inc: tools/extract_sfx.py $(ROM_IN)
+	python3 tools/extract_sfx.py
 
 clean:
 	rm -f $(OBJS) $(ROM)
