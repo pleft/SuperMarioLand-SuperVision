@@ -117,7 +117,6 @@ hurt_inv:    .res 1          ; post-hit mercy frames (no enemy damage while > 0)
 prev_vis:    .res 1          ; Mario appearance hash (facing^duck^big) at his last draw
 stream_pend: .res 1          ; margin columns still to stream after a shift (amortized 1/frame)
 scroll_vis:  .res 1          ; scroll value the line-16 IRQ latches (updated ONLY at frame start)
-pend_shift:  .res 1          ; 32px DMA shifts queued by logic, executed at the NEXT frame start
 m_dirty:     .res 1          ; Mario needs erase+redraw this frame
 hud_row:     .res 1          ; put_hud target row (0 or 1)
 htmp:        .res 1          ; put_hud scratch (digit being blitted)
@@ -271,18 +270,21 @@ main_loop:
     ; ==== FRAME-START RENDER (the beam is in the HUD rows for the first ~4096 cyc, and
     ; above any sprite for much longer: everything drawn here can't be caught mid-blit).
     ; Uses the state the LOGIC phase computed last frame. ====
-    lda scroll_s
-    sta scroll_vis               ; the line-16 IRQ latches this: scroll + DMA move together
     lda bonus_phase              ; the bonus game and pipe animations own their own drawing
     ora pipe_phase
     beq :+
+    lda scroll_s
+    sta scroll_vis
     jmp @skiprender
-:   lda pend_shift
+:   jsr scroll_apply             ; shift decision + DMA + fb_col0 + scroll_s, ALL here at
+    lda scroll_s                 ; frame start: pixels, coords and the scroll register mutate
+    sta scroll_vis               ; together, and the logic phase only ever sees coherent state
+    jsr render_all               ; sprites: overlap-safe erase set -> erases -> draws
+    lda shift_px                 ; a shift queues its 4 margin columns
     beq :+
-    stz pend_shift
-    jsr fb_shift8                ; the 32px DMA shift, while the beam is above the playfield
-:   jsr render_all               ; sprites: overlap-safe erase set -> erases -> draws
-    lda stream_pend
+    lda #4
+    sta stream_pend
+:   lda stream_pend
     beq :+
     jsr stream_one               ; one margin column per frame (right edge, mostly off-screen)
     dec stream_pend
@@ -378,14 +380,7 @@ main_loop:
     bcc @play
     jmp main_loop
 @play:
-    jsr scroll_update            ; camera bookkeeping; a needed shift is QUEUED (pend_shift),
-    lda shift_px                 ; the DMA itself runs at the next frame start
-    beq :+
-    lda #1
-    sta pend_shift
-    lda #4                       ; the shift also queues its 4 margin columns
-    sta stream_pend
-:   jmp main_loop
+    jmp main_loop                ; scrolling is applied at the next frame start (scroll_apply)
 .endproc
 
 ; ---------------------------------------------------------------------------
@@ -2461,7 +2456,6 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
 ; 4 in the 8-byte off-screen margin), starting at world column fb_col0.
 .proc render_background
     stz stream_pend              ; full re-render supersedes any queued margin columns
-    stz pend_shift               ; and any queued DMA shift
     ldx #0                       ; x = framebuffer column index 0..23
 @col:
     txa                          ; wcol = fb_col0 + x
@@ -2849,14 +2843,14 @@ CAM_MAX = (level0_cols - 20) * 8 ; max scroll: (level width - 20 visible cols) *
 .endproc
 
 ; ---------------------------------------------------------------------------
-; scroll_update: reconcile the hardware scroll with cam_x. The framebuffer holds
+; scroll_apply (FRAME START only): reconcile pixels+coords+scroll with cam_x. The framebuffer holds
 ; 24 columns (world cols fb_col0..fb_col0+23). We hardware-scroll across the 8-byte
 ; (32px) off-screen margin via XSCROLL; when the camera moves a full margin past
 ; fb_col0 we DMA-shift the framebuffer left 8 bytes (4 cols) and stream 4 fresh
 ; columns into the right margin. Scroll is byte-aligned (4px steps) so the status
 ; bar and Mario stay pixel-exact while reusing the byte-aligned blits.
 FB_MAX_COL = level0_cols - 24    ; last fb_col0 that keeps cols fb_col0..+23 in the level
-.proc scroll_update
+.proc scroll_apply
     stz shift_px                 ; track how far the framebuffer shifts this frame
 @loop:
     lda fb_col0                  ; tmpH:tmpL = fb_col0 * 8
@@ -5736,7 +5730,6 @@ HUD_SPLIT_LINE = 16              ; timer reload = split scanline (IPeriod=256 cy
     inc frame_count
     lda #1
     sta frame_flag
-    stz scroll_vis
     stz XSCROLL                  ; status-bar rows (0..15) render unscrolled
     lda #HUD_SPLIT_LINE           ; arm timer -> IRQ at scanline 16 (period = data * $100)
     sta IRQ_TIMER
