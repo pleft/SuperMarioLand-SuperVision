@@ -75,3 +75,20 @@ Fixes that brought the worst case to **61.6k (93%), zero frames over**:
   during a 32px DMA-shift frame → erases landed past the 48-byte row stride and bled
   across rows (full-width bands). Clamped at col 0 + hard tile-col < 24 guard in
   restore_bg. `restore_bg` also restores the dirt band (rows 16/17) as `$61` now.
+
+## Performance round [2026-07-04]: flicker eliminated
+Measured with the py65 cycle harness (900-frame hop-run through the enemy zone; budget
+65,574 cyc @ 61Hz): **worst frame 106,599 (162%, 12 missed deadlines) → 50,499 (77%, zero
+misses, zero frames >80%)**; mean 41%→34%.
+1. **Amortized column streaming** (the spike): the 32px shift frame drew all 4 margin columns
+   (64 blits). Now `stream_pend` queues them and `stream_one` draws ONE per frame — col +20 on
+   the shift frame itself (visible at scroll_s≥1), +21..23 land ahead of the camera.
+   `render_background` zeroes the queue.
+2. **`render_objects`** (single pass): per-slot erase+draw PAIRED (the erased "hole" lasts one
+   redraw, not the whole pass — that hole was the sprite flicker) + **dirty-skip** (skip both
+   when screen pos + anim token `frame_count&8` unchanged: 1px/3f walkers cost 0 on 2/3 frames,
+   platforms on 1/2, idle scenes nothing). Mario identically (prev pos/frame/facing^duck^big
+   hash; flash states force redraw; drawn last = on top).
+3. **`set_dst`**: dy*48 chain → `row48_lo/hi` 160-entry table (was 10% of the worst frame).
+Rules of thumb learned: measure with the WORST FRAME, not the mean; the deadline miss (not
+total load) is what flickers; pairing beats reordering.
