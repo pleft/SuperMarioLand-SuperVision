@@ -114,6 +114,8 @@ cam_dead:    .res 2          ; camera at the moment of death (checkpoint decisio
 spawn_idx:   .res 1          ; next spawn-table entry (x4 = byte offset; table < 64 entries)
 mario_shrink: .res 1         ; >0 = big->small shrink animation (mirror of mario_grow)
 hurt_inv:    .res 1          ; post-hit mercy frames (no enemy damage while > 0)
+prev_vis:    .res 1          ; Mario appearance hash (facing^duck^big) at his last draw
+stream_pend: .res 1          ; margin columns still to stream after a shift (amortized 1/frame)
 hud_row:     .res 1          ; put_hud target row (0 or 1)
 htmp:        .res 1          ; put_hud scratch (digit being blitted)
 rb_vx:       .res 1          ; restore_bg: VRAM pixel X of the region to repaint
@@ -175,6 +177,7 @@ o_pvy:       .res 8          ; last drawn VRAM pixel Y
 o_pdr:       .res 8          ; was drawn last frame?
 o_st:        .res 8          ; sub-state (star: vy ramp index; debris: jump-arc index)
 o_pw:        .res 8          ; last drawn width in tile cols (2 = one quad, 3 = popup pair)
+o_pfr:       .res 8          ; anim token at the last draw (flip/twinkle cadence dirty test)
 
 .segment "ZEROPAGE"
 
@@ -357,9 +360,38 @@ main_loop:
 :   sec
     sbc shift_px
     sta prev_vx
-    sta rb_vx                    ; erase old Mario at his (shifted) spot -- exact bounds:
-    lda prev_y                   ; a 4px-aligned 16px sprite spans at most 3 tile cols,
-    sta rb_y                     ; and 2 tile rows when row-aligned (standing), 3 in the air
+    sta prev_vx                  ; (keep prev in the shifted frame of reference)
+    jsr render_objects           ; objects: erase+draw PAIRED per slot, dirty-skipped
+    lda spr_x                    ; mario_vx = spr_x + scroll_s (drawn pinned under the scroll)
+    clc
+    adc scroll_s
+    sta mario_vx
+    lda shift_px                 ; --- Mario dirty test: skip erase+draw entirely when ---
+    bne @mdirty                  ; --- nothing about him changed this frame            ---
+    lda mario_grow
+    ora mario_shrink
+    ora mario_starT
+    ora hurt_inv
+    bne @mdirty                  ; any flash state -> appearance changes per frame
+    lda mario_vx
+    cmp prev_vx
+    bne @mdirty
+    lda spr_y
+    cmp prev_y
+    bne @mdirty
+    lda mario_frame
+    cmp prev_frame
+    bne @mdirty
+    lda mario_facing
+    eor mario_duck
+    eor mario_big
+    cmp prev_vis
+    beq @mdone                   ; unchanged -> zero sprite cost this frame
+@mdirty:
+    lda prev_vx                  ; erase at the last drawn spot, then draw IMMEDIATELY
+    sta rb_vx                    ; (pairing: the on-screen "hole" lasts one redraw, not
+    lda prev_y                   ; the whole object pass -- that hole was the flicker)
+    sta rb_y
     lda #3
     sta rb_cols
     ldy #2
@@ -369,24 +401,28 @@ main_loop:
     iny
 :   sty rb_rows
     jsr restore_bg
-    jsr erase_objects            ; erase the mushroom/coins at their old (shifted) spots
-    jsr draw_objects             ; mushroom/coins under Mario
-    lda spr_x                    ; mario_vx = spr_x + scroll_s (drawn pinned under the scroll)
-    clc
-    adc scroll_s
-    sta mario_vx
-    jsr draw_player              ; Mario drawn early, before his scanlines render
+    jsr draw_player
     lda mario_vx
     sta prev_vx
     lda spr_y
     sta prev_y
     lda mario_frame
     sta prev_frame
-    lda shift_px                 ; if we shifted this frame, refill the right margin LAST
+    lda mario_facing
+    eor mario_duck
+    eor mario_big
+    sta prev_vis
+@mdone:
+    lda shift_px                 ; a shift queues 4 margin columns; we stream ONE per frame
+    beq :+                       ; (4-at-once was a 106k-cycle spike frame = the scroll hitch;
+    lda #4                       ; col +20 is visible at scroll_s>=1 so it draws THIS frame,
+    sta stream_pend              ; +21..23 land ahead of the camera on the next 3 frames)
+:   lda stream_pend
     bne @stream
     jmp main_loop
 @stream:
-    jsr stream_cols
+    jsr stream_one
+    dec stream_pend
     jmp main_loop
 .endproc
 
@@ -2458,6 +2494,7 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
 ; render_background: draw the 24 columns resident in the framebuffer (20 visible +
 ; 4 in the 8-byte off-screen margin), starting at world column fb_col0.
 .proc render_background
+    stz stream_pend              ; full re-render supersedes any queued margin columns
     ldx #0                       ; x = framebuffer column index 0..23
 @col:
     txa                          ; wcol = fb_col0 + x
@@ -2914,9 +2951,11 @@ FB_MAX_COL = level0_cols - 24    ; last fb_col0 that keeps cols fb_col0..+23 in 
 
 ; stream_cols: draw the 4 new right-margin columns (fb_col0+20..+23) into the
 ; off-screen VRAM byte columns 40,42,44,46 after a shift.
-.proc stream_cols
-    ldx #0
-@l:
+.proc stream_one
+    lda #4                       ; x = 4 - stream_pend (0..3: which margin column this frame)
+    sec
+    sbc stream_pend
+    tax
     txa                          ; wcol = fb_col0 + 20 + x
     clc
     adc #20
@@ -2931,13 +2970,7 @@ FB_MAX_COL = level0_cols - 24    ; last fb_col0 that keeps cols fb_col0..+23 in 
     clc
     adc #40
     sta dbcol
-    phx
-    jsr draw_column
-    plx
-    inx
-    cpx #4
-    bne @l
-    rts
+    jmp draw_column
 .endproc
 
 ; fb_shift8: shift the PLAYFIELD (scanlines 16..159) left 8 bytes via the VRAM DMA.
@@ -4828,55 +4861,19 @@ riding_this:                     ; Z=1 if Mario rides slot oi
 .endproc
 
 ; erase_objects: repaint the background where each object was drawn last frame (shifted with
-; the DMA scroll like Mario). Always 3x3 tiles (covers the 16px sprite + sub-pixel spill).
-.proc erase_objects
+; render_objects: ONE pass over the slots -- each object's erase and redraw are PAIRED
+; (the on-screen hole lasts one redraw instead of the whole pass: that hole was the
+; flicker), and both are SKIPPED entirely when the sprite's screen position and its
+; animation token are unchanged (dirty-skip: a 1px/3f walker costs zero on 2 of 3
+; frames; the platforms on every other frame; an idle level costs nothing).
+.proc render_objects
     stz oi
 @loop:
-    ldx oi
-    lda o_pdr,x
-    beq @next
-    lda o_pvx,x
-    cmp shift_px                 ; drawn left of this frame's 32px DMA shift? the subtraction
-    bcs :+                       ; would WRAP (rb_vx ~224+ -> tile col past the 48-byte row
-    lda shift_px                 ; stride -> blits bleed across rows = bands/rectangles).
-:   sec                          ; clamp to col 0 so left-edge leftovers still get erased
-    sbc shift_px
-    sta rb_vx
-    lda o_pvy,x                  ; = the drawn dy (o_y+8)
-    sta rb_y
-    lda o_pw,x                   ; exact drawn width: 2 tile cols (one quad) or 3 (popup)
-    sta rb_cols
-    ldy #1                       ; and 1 tile row when row-aligned, 2 otherwise
-    lda o_pvy,x
-    and #7
-    beq :+
-    iny
-:   sty rb_rows
-    jsr restore_bg
-@next:
-    inc oi
-    lda oi
-    cmp #8
-    bne @loop
-    rts
-.endproc
-
-; draw_objects: draw every active slot at its on-screen position; record it for next erase.
-.proc draw_objects
-    stz oi
-@loop:
-    ldx oi
-    lda o_y,x                    ; top clip: items draw at dy=o_y+8; anything above the
-    clc                          ; playfield (dy<16 = the HUD rows, incl. o_y wrap-around)
-    adc #8                       ; is skipped so a high coin-pop can't stamp the HUD
-    cmp #16
-    bcc @off
-    cmp #153                     ; bottom clip: a quad at dy>152 would spill past line 160
-    bcs @off
     ldx oi
     lda o_type,x
-    beq @off
-    sec                          ; VRAM pixel X = o_x - cam_x + scroll_s
+    bne :+
+    jmp @notvis                  ; dead slot: erase any leftover image
+:   sec                          ; screen x = o_x - cam + scroll_s
     lda o_xl,x
     sbc cam_x
     sta tmpL
@@ -4890,20 +4887,54 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     bcc :+
     inc tmpH
 :   lda tmpH
-    bne @off                     ; off-screen (negative or > 255)
-    lda tmpL
+    beq :+
+    jmp @notvis                  ; off-screen left/right
+:   lda tmpL
     cmp #168
-    bcs @off
-    sta ovx
+    bcc :+
+    jmp @notvis
+:   ldx oi
+    lda o_y,x                    ; dy clip: 16..152 (HUD top / frame bottom)
+    clc
+    adc #8
+    cmp #16
+    bcs :+
+    jmp @notvis
+:   cmp #153
+    bcc :+
+    jmp @notvis
+:
+    sta tmpH2                    ; dy
+    lda tmpL
+    sta ovx                      ; screen x
+    ; --- dirty test ---
+    lda shift_px
+    bne @dirty                   ; the DMA shift moved every drawn pixel
+    lda o_pdr,x
+    beq @dirty                   ; not currently drawn
+    lda ovx
+    cmp o_pvx,x
+    bne @dirty
+    lda tmpH2
+    cmp o_pvy,x
+    bne @dirty
+    lda frame_count              ; anim token: flip/twinkle cadence (8-frame phases)
+    and #8
+    cmp o_pfr,x
+    bne @dirty
+    bra @next                    ; unchanged -> zero cost
+@dirty:
+    jsr @erase_old               ; PAIRED: erase then draw back-to-back
+    ldx oi
     jsr draw_obj_sprite
     ldx oi
     lda ovx
     sta o_pvx,x
-    lda o_y,x                    ; store the DRAWN top line (dy = o_y+8): the erase covers
-    clc                          ; the exact tile rows the quad touched (1 aligned, 2 not)
+    lda o_y,x
+    clc
     adc #8
     sta o_pvy,x
-    lda #2                       ; drawn width in tile cols: 2; 3 = popup; 4 = 24px platform
+    lda #2                       ; drawn width: 2 tile cols; 3 popup; 4 platform
     ldy o_type,x
     cpy #OBJ_POPUP
     bne :+
@@ -4914,19 +4945,50 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     bcs :+
     lda #4
 :   sta o_pw,x
+    lda frame_count
+    and #8
+    sta o_pfr,x
     lda #1
     sta o_pdr,x
     bra @next
-@off:
+@notvis:
+    jsr @erase_old
     ldx oi
     stz o_pdr,x
 @next:
     inc oi
     lda oi
     cmp #8
-    bne @loop
+    beq @done
+    jmp @loop
+@done:
+    rts
+@erase_old:
+    ldx oi
+    lda o_pdr,x
+    beq @eno
+    lda o_pvx,x
+    cmp shift_px                 ; clamp: no wrap below col 0 (the bands bug)
+    bcs :+
+    lda shift_px
+:   sec
+    sbc shift_px
+    sta rb_vx
+    lda o_pvy,x                  ; = the drawn dy
+    sta rb_y
+    lda o_pw,x
+    sta rb_cols
+    ldy #1
+    lda o_pvy,x
+    and #7
+    beq :+
+    iny
+:   sty rb_rows
+    jsr restore_bg
+@eno:
     rts
 .endproc
+
 
 ; draw_obj_sprite: draw object oi at (ovx, o_y) — mushroom = 1 OBJ tile, coin = 1 BG tile.
 .proc draw_obj_sprite
@@ -5222,40 +5284,26 @@ riding_this:                     ; Z=1 if Mario rides slot oi
 
 ; set_dst: dst_ptr = $4000 + dy*48 + dcol.
 .proc set_dst
-    lda dy
-    sta dst_ptr
-    stz dst_ptr+1
-    ldx #4                       ; dst_ptr = dy*16
-:   asl dst_ptr
-    rol dst_ptr+1
-    dex
-    bne :-
-    lda dst_ptr                  ; save dy*16
-    sta tmpL
-    lda dst_ptr+1
-    sta tmpH
-    asl dst_ptr                  ; dy*32
-    rol dst_ptr+1
-    lda dst_ptr                  ; dy*48 = dy*32 + dy*16
-    clc
-    adc tmpL
-    sta dst_ptr
-    lda dst_ptr+1
-    adc tmpH
-    sta dst_ptr+1
-    lda dst_ptr                  ; + dcol
+    ldx dy                       ; dst = $4000 + dy*48 + dcol, via a 160-entry dy*48 table
+    lda row48_lo,x               ; (was a shift/add chain -- 10% of the worst frame)
     clc
     adc dcol
     sta dst_ptr
-    lda dst_ptr+1
-    adc #0
-    sta dst_ptr+1
-    lda dst_ptr+1                ; + $4000 base
-    clc
+    lda row48_hi,x
     adc #$40
     sta dst_ptr+1
     rts
 .endproc
+
+.segment "RODATA"
+row48_lo: .repeat 160, i
+          .byte <(i*48)
+          .endrepeat
+row48_hi: .repeat 160, i
+          .byte >(i*48)
+          .endrepeat
+.segment "CODE"
+
 
 ; ---------------------------------------------------------------------------
 ; sprite_blit_tile: like blit_tile but TRANSPARENT (GB colour 0 = see-through).
