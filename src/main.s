@@ -1628,6 +1628,33 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
     rts
 .endproc
 
+; b_fixhud: repaint the bonus lives counter (row 4: head $E4 @7, x $2B @9, digits @10-11)
+; -- the hop's erase box reaches row 4; repainting keeps it intact AND live as lives tick.
+.proc b_fixhud
+    lda #4
+    sta b_row
+    lda #7
+    sta b_col
+    lda #$E4
+    jsr bput
+    lda #9
+    sta b_col
+    lda #$2B
+    jsr bput
+    lda #10
+    sta b_col
+    lda lives
+    lsr
+    lsr
+    lsr
+    lsr
+    jsr bput
+    inc b_col
+    lda lives
+    and #$0F
+    jmp bput
+.endproc
+
 ; bonus_frame: one frame of the bonus game (called instead of the normal play loop).
 .proc bonus_frame
     lda bonus_phase
@@ -1847,6 +1874,7 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
     stz mario_frame              ; step 11: standing beat between hops
     jsr b_erase
     jsr b_fixfloor
+    jsr b_fixhud
     jsr draw_player
     stz b_gap
     rts
@@ -1855,6 +1883,7 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
     sta mario_frame
     jsr b_erase
     jsr b_fixfloor
+    jsr b_fixhud
     dec spr_y
     jsr draw_player
     inc b_gap
@@ -1871,6 +1900,7 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
     sta mario_frame
     jsr b_erase
     jsr b_fixfloor
+    jsr b_fixhud
     inc spr_y
     jsr draw_player
     inc b_gap
