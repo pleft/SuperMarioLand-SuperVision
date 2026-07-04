@@ -3140,6 +3140,13 @@ BOOM_TA    = $9D                 ; explosion cloud (drawn + X-mirrored pair)
 BOOM_TB    = $9E
 BOMB_FUSE  = 63                  ; trace-exact: stomp f694 -> explosion f757 (~1.0s)
 BOOM_LIFE  = 44                  ; trace: >=43 frames live (capture ended mid-cloud)
+OBJ_FLY    = 17                  ; the Fly (SML type $0E): sits, then hops toward Mario
+FLY_TL     = $A0                 ; 16x16 metasprite, frame A: A0 A1 / B0 B1
+FLY_BL     = $B0
+FLY_TL2    = $A2                 ; frame B
+FLY_BL2    = $B2
+FLY_SQ     = $A8                 ; flattened corpse pair $A8+$A9 (param $2C)
+FLY_SIT    = 55                  ; trace: ~55 grounded frames between hops
 STAR_TA    = $86                 ; star twinkles between $86 and $85 (param $19 list)
 STAR_TB    = $85
 BALL_TILE  = $60                 ; superball = 1 OBJ tile (mGBA OAM trace)
@@ -3912,11 +3919,15 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     cmp cam_x
     bcs @done                    ; STRICT: fires only once the camera passes the column
 @fire:
-    lda spawn_table+3,y          ; type: Chibibo $00 and Nokobon $04 so far
+    lda spawn_table+3,y          ; type: Chibibo $00, Nokobon $04, Fly $0E
     beq @chib
     cmp #$04
-    bne @skip
+    bne :+
     jsr spawn_noko
+    bra @skip
+:   cmp #$0E
+    bne @skip
+    jsr spawn_fly
     bra @skip
 @chib:
     jsr spawn_chib
@@ -3971,6 +3982,31 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     sta o_vx,x
     stz o_st,x
     stz o_tmr,x
+@full:
+    rts
+.endproc
+
+.proc spawn_fly
+    phy
+    jsr find_free_obj
+    ply
+    bcs @full
+    lda #OBJ_FLY
+    sta o_type,x
+    lda cam_x                    ; trace: enters at OAM 199 = world cam+191
+    clc
+    adc #191
+    sta o_xl,x
+    lda cam_x+1
+    adc #0
+    sta o_xh,x
+    lda spawn_table+2,y
+    sta o_y,x
+    lda #$FF                     ; faces/hops left initially
+    sta o_vx,x
+    stz o_st,x                   ; state: 0 = sitting
+    lda #FLY_SIT
+    sta o_tmr,x
 @full:
     rts
 .endproc
@@ -4115,6 +4151,106 @@ riding_this:                     ; Z=1 if Mario rides slot oi
 @domove:
     jsr mush_xmove
 @combat:
+    jmp enemy_contact
+.endproc
+
+; upd_fly: the Fly (trace-derived): sits ~55f buzzing, then a 48-frame hop toward
+; Mario -- 15px arc (y-deltas every 3rd frame from fly_arc), 1px per 2 frames of
+; drift in the hop direction (chosen at hop start, tracking Mario).
+.proc upd_fly
+    ldx oi
+    lda o_xl,x                   ; off-screen-left cull, like the walkers
+    clc
+    adc #20
+    sta tmpL3
+    lda o_xh,x
+    adc #0
+    sta tmpH3
+    lda tmpH3
+    cmp cam_x+1
+    bcc @cull
+    bne :+
+    lda tmpL3
+    cmp cam_x
+    bcs :+
+@cull:
+    stz o_type,x
+    rts
+:   lda o_st,x
+    bne @hop
+    dec o_tmr,x                  ; --- sitting: count down to the next hop ---
+    bne @contact
+    lda #1                       ; launch: pick the direction toward Mario NOW (F0 60)
+    sta o_st,x
+    stz o_tmr,x                  ; hop phase 0..47
+    lda cam_x                    ; mario world x
+    clc
+    adc spr_x
+    sta tmpL2
+    lda cam_x+1
+    adc #0
+    sta tmpH2
+    lda tmpL2                    ; enemy - mario: borrow -> mario is right of it
+    cmp o_xl,x
+    lda tmpH2
+    sbc o_xh,x
+    bcc @faceL
+    lda #1                       ; hop right
+    sta o_vx,x
+    bra @contact
+@faceL:
+    lda #$FF                     ; hop left
+    sta o_vx,x
+    bra @contact
+@hop:
+    lda o_tmr,x                  ; --- hopping: phase 0..47 ---
+    cmp #48
+    bcc :+
+    stz o_st,x                   ; landed: back to sitting
+    lda #FLY_SIT
+    sta o_tmr,x
+    bra @contact
+:   tay
+    and #1                       ; x drift: 1px every 2 frames, in the hop direction
+    bne @ystep
+    lda o_vx,x
+    bmi @xl
+    lda o_xl,x
+    clc
+    adc #1
+    sta o_xl,x
+    bcc @ystep
+    inc o_xh,x
+    bra @ystep
+@xl:
+    lda o_xl,x
+    sec
+    sbc #1
+    sta o_xl,x
+    bcs @ystep
+    dec o_xh,x
+@ystep:
+    lda fly_dy,y                 ; per-frame y delta (the 15px trace arc, 0 between steps)
+    beq @nody
+    clc
+    adc o_y,x
+    sta o_y,x
+@nody:
+    inc o_tmr,x
+@contact:
+    jmp enemy_contact
+
+; trace f2436-2481: rise 4,4,2,2,1,1,1 / hover (+1 drift) / fall 1,1,2,2,4,4 -- one
+; step every 3rd frame, 48 frames total, deltas sum to zero.
+fly_dy:
+    .byte 256-4,0,0, 256-4,0,0, 256-2,0,0, 256-2,0,0, 256-1,0,0, 256-1,0,0, 256-1,0,0
+    .byte 0,0,0, 1,0,0, 0,0,0
+    .byte 1,0,0, 1,0,0, 2,0,0, 2,0,0, 4,0,0, 4,0,0
+.endproc
+
+; enemy_contact: shared enemy-vs-Mario resolution (walkers + the fly): bottom cull,
+; overlap test, star kill, position-rule stomp (result branched by type), side hurt.
+.proc enemy_contact
     ldx oi
     lda o_y,x                    ; cull once fallen off the bottom
     cmp #160
@@ -4160,10 +4296,13 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     sta tmpH3
 @pdx:
     lda tmpH3
-    bne @done
-    lda tmpL3
+    beq :+
+    jmp @done
+:   lda tmpL3
     cmp #10
-    bcs @done
+    bcc :+
+    jmp @done
+:
     lda spr_y                    ; y overlap: |spr_y - o_y| < 14 (his feet vs its feet)
     sec
     sbc o_y,x
@@ -4185,12 +4324,25 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     lda o_type,x
     cmp #OBJ_NOKO
     beq @sbomb
+    cmp #OBJ_FLY
+    beq @sfly
     lda #OBJ_SQUASH              ; Chibibo -> squashed corpse ($91)
     sta o_type,x
     lda #CHIB_TB
     sta o_vx,x
     lda #32
     sta o_tmr,x
+    stz o_st,x
+    bra @sboth
+@sfly:
+    lda #OBJ_SQUASH              ; Fly -> flattened 2-tile corpse ($A8+$A9)
+    sta o_type,x
+    lda #FLY_SQ
+    sta o_vx,x
+    lda #32
+    sta o_tmr,x
+    lda #1                       ; pair flag: squash draws two tiles
+    sta o_st,x
     bra @sboth
 @sbomb:
     lda #OBJ_BOMB                ; Nokobon -> the TICKING BOMB (RE $3186: $04 -> $05)
@@ -4215,8 +4367,10 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     rts
 @kill:
     ldx oi                       ; star kill: gone + points, no bounce (dead-flip type
-    lda o_type,x                 ; equivalents $11/$12 just leave the screen)
+    lda o_type,x                 ; equivalents $11/$12/$15 just leave the screen)
     cmp #OBJ_NOKO
+    beq @kgone
+    cmp #OBJ_FLY
     beq @kgone
     lda #OBJ_SQUASH
     sta o_type,x
@@ -4224,6 +4378,7 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     sta o_vx,x
     lda #24
     sta o_tmr,x
+    stz o_st,x
     bra @kpts
 @kgone:
     stz o_type,x
@@ -4585,6 +4740,8 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     cmp #OBJ_CHIB
     beq :+
     cmp #OBJ_NOKO
+    beq :+
+    cmp #OBJ_FLY
     bne @next
 :   ldy oi                       ; dx = |ball - enemy| (16-bit)
     lda o_xl,y
@@ -4615,10 +4772,12 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     ina
 :   cmp #10
     bcs @next
-    lda o_type,x                 ; kill: corpse (Chibibo) or gone (Nokobon); ball expires
+    lda o_type,x                 ; kill: corpse (Chibibo) or gone (Nokobon/Fly); ball expires
     cmp #OBJ_NOKO
-    bne :+
-    stz o_type,x
+    beq :+
+    cmp #OBJ_FLY
+    bne :++
+:   stz o_type,x
     bra @pts
 :   lda #OBJ_SQUASH
     sta o_type,x
@@ -4640,8 +4799,9 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     inc oi2
     lda oi2
     cmp #8
-    bne @loop
-    rts
+    beq :+
+    jmp @loop
+:   rts
 .endproc
 
 ; spawn_coin: a coin pops straight up from the block and falls away (~24 frames).
@@ -4670,8 +4830,9 @@ riding_this:                     ; Z=1 if Mario rides slot oi
 @loop:
     ldx oi
     lda o_type,x
-    beq @next
-    cmp #OBJ_COIN
+    bne :+
+    jmp @next
+:   cmp #OBJ_COIN
     beq @coin
     cmp #OBJ_FLOWER
     beq @flower
@@ -4699,6 +4860,8 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     beq @bomb
     cmp #OBJ_BOOM
     beq @boom
+    cmp #OBJ_FLY
+    beq @fly
     jsr upd_mush                 ; OBJ_MUSH and OBJ_HEART (identical walker engine)
     bra @next
 @chib:
@@ -4712,6 +4875,9 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     bra @next
 @boom:
     jsr upd_boom
+    bra @next
+@fly:
+    jsr upd_fly
     bra @next
 @platv:
     jsr upd_platv
@@ -5230,6 +5396,9 @@ riding_this:                     ; Z=1 if Mario rides slot oi
 :   cpy #OBJ_NOKO
     bne :+
     lda #$82
+:   cpy #OBJ_FLY
+    bne :+
+    lda #$83                     ; 16 wide + tall
 :   cpy #OBJ_PLATV
     bcc :+
     cpy #OBJ_PLATH+1
@@ -5399,6 +5568,9 @@ riding_this:                     ; Z=1 if Mario rides slot oi
 :   cmp #OBJ_BOOM
     bne :+
     jmp @boom
+:   cmp #OBJ_FLY
+    bne :+
+    jmp @fly
 :   cmp #OBJ_SQUASH
     bne :+
     jmp @squash
@@ -5459,6 +5631,23 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     lda o_vx,x                   ; corpse tile rides in o_vx
     tax
     jsr draw_quad
+    ldx oi
+    lda o_st,x                   ; pair flag (fly corpse): second tile 8px right
+    beq @sqd
+    lda o_y,x
+    clc
+    adc #8
+    sta dy
+    lda spr_col
+    ina
+    ina
+    sta dcol
+    ldx oi
+    lda o_vx,x
+    ina                          ; $A8 -> $A9
+    tax
+    jsr draw_quad
+@sqd:
     rts
 @noko:
     ldx oi
@@ -5543,6 +5732,81 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     lda #1
     sta do_flip
     plx
+    jsr draw_quad
+    stz do_flip
+    rts
+@fly:
+    ldx oi
+    lda o_vx,x                   ; face the hop direction (tiles face left natively)
+    bmi :+
+    lda #1
+    bra :++
+:   lda #0
+:   sta tmpH3                    ; facing (do_flip per quad; draw_quad preserves it? set each)
+    lda frame_count              ; wing buzz (matches the dirty-skip anim token cadence)
+    and #8
+    beq :+
+    lda #2                       ; frame B tile offset ($A2/$B2)
+:   sta tmpL3
+    ; TL
+    ldx oi
+    lda o_y,x
+    sta dy                       ; top row at o_y (bottom row at o_y+8, feet line)
+    lda spr_col
+    sta dcol
+    lda tmpH3
+    sta do_flip
+    lda #FLY_TL
+    clc
+    adc tmpL3
+    tax
+    jsr draw_quad
+    ; TR
+    ldx oi
+    lda o_y,x
+    sta dy
+    lda spr_col
+    ina
+    ina
+    sta dcol
+    lda tmpH3
+    sta do_flip
+    lda #FLY_TL+1
+    clc
+    adc tmpL3
+    tax
+    jsr draw_quad
+    ; BL
+    ldx oi
+    lda o_y,x
+    clc
+    adc #8
+    sta dy
+    lda spr_col
+    sta dcol
+    lda tmpH3
+    sta do_flip
+    lda #FLY_BL
+    clc
+    adc tmpL3
+    tax
+    jsr draw_quad
+    ; BR
+    ldx oi
+    lda o_y,x
+    clc
+    adc #8
+    sta dy
+    lda spr_col
+    ina
+    ina
+    sta dcol
+    lda tmpH3
+    sta do_flip
+    lda #FLY_BL+1
+    clc
+    adc tmpL3
+    tax
     jsr draw_quad
     stz do_flip
     rts

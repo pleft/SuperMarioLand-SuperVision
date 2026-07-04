@@ -11,6 +11,8 @@ chardata:
     .incbin "build/gfx/w1_obj_8000.svt"      ; 256 tiles
 
 ; BG tiles ($5032->$9000): used by level tiles $00-$7F (LCDC.4=0, $8800 signed mode).
+; In BANK0 (always mapped) -- FIXED ran out of room as the engine grew.
+.segment "LEVELS"
 .export bg_chardata
 bg_chardata:
     .incbin "build/gfx/w1_bg_9000.svt"        ; 128 tiles
