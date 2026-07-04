@@ -1799,7 +1799,8 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
     beq @flower
     and #$0F                     ; tile $01/$02/$03 = that many lives
     sta b_awn
-    lda #40
+    stz b_gap                    ; hop step 0 (b_gap reused as the joy-hop counter)
+    lda #30
     sta b_awt
 @wdone:
     rts
@@ -1814,14 +1815,63 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
 @award:
     dec b_awt
     bne @adone
+    lda #4                       ; the JOY HOP (harness: 1px per 4 frames, 5px amplitude,
+    sta b_awt                    ; the life lands at the APEX, one standing beat between)
     lda b_awn
-    beq @exit
-    jsr add_life                 ; one 1-UP per beat
-    dec b_awn
-    lda #40
-    sta b_awt
-@adone:
+    ora b_gap                    ; b_gap = hop step 0..11 (reused; walk/climb are done)
+    beq @exit0
+    lda b_gap
+    cmp #5
+    bcc @rise
+    beq @apex
+    cmp #11
+    bcc @fall
+    ; step 11: standing beat between hops
+    stz mario_frame
+    jsr b_erase
+    jsr b_fixfloor
+    jsr draw_player
+    stz b_gap
     rts
+@rise:
+    lda #3                       ; jump pose while airborne
+    sta mario_frame
+    jsr b_erase
+    jsr b_fixfloor
+    dec spr_y
+    jsr draw_player
+    inc b_gap
+    rts
+@apex:
+    lda b_awn
+    beq :+
+    jsr add_life                 ; the life is granted at the hop's apex
+    dec b_awn
+:   inc b_gap
+    rts
+@fall:
+    lda #3
+    sta mario_frame
+    jsr b_erase
+    jsr b_fixfloor
+    inc spr_y
+    jsr draw_player
+    inc b_gap
+    rts
+@exit0:
+    lda #70                      ; the observed ~70-frame tail pause, then leave
+    sta b_awt
+    lda #$FF
+    sta b_gap
+@adone:
+    lda b_gap
+    cmp #$FF
+    bne :+
+    lda b_awt
+    cmp #1
+    bne :+
+    jmp @exit
+:   rts
 @exit:
     stz bonus_phase
     jmp next_level
