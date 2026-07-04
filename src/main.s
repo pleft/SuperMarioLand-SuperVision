@@ -1068,29 +1068,23 @@ main_loop:
     dex
 :   stz cam_x
     stz cam_x+1
-    cpx #7                       ; quantize (cab math: checkpoint cam = (C-12)*8, every
-    bcc @have                    ; 2 segments): <7 -> 0
-    ldy #<320
-    sty cam_x
-    ldy #>320
-    sty cam_x+1
-    cpx #11                      ; <11 -> 320
-    bcc @have
+    cpx #7                       ; quantize (cab = 12 + cam/16, trace-calibrated: checkpoint
+    bcc @have                    ; cam = (C-12)*16): <7 -> 0
     ldy #<640
     sty cam_x
     ldy #>640
     sty cam_x+1
-    cpx #15                      ; <15 -> 640
+    cpx #11                      ; <11 -> 640
     bcc @have
-    ldy #<960
-    sty cam_x
-    ldy #>960
-    sty cam_x+1
-    cpx #19                      ; <19 -> 960
-    bcc @have
-    ldy #<1280                   ; else 1280 (seg 19; 23 -> 1600 past 1-1's practical range)
+    ldy #<1280
     sty cam_x
     ldy #>1280
+    sty cam_x+1
+    cpx #15                      ; <15 -> 1280
+    bcc @have
+    ldy #<1920                   ; else 1920 (seg 15+; later checkpoints past 1-1's range)
+    sty cam_x
+    ldy #>1920
     sty cam_x+1
 @have:
     lda cam_x                    ; fb_col0 = cam/8
@@ -1973,29 +1967,23 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
     dex
 :   stz cam_x
     stz cam_x+1
-    cpx #7                       ; quantize (cab math: checkpoint cam = (C-12)*8, every
-    bcc @have                    ; 2 segments): <7 -> 0
-    ldy #<320
-    sty cam_x
-    ldy #>320
-    sty cam_x+1
-    cpx #11                      ; <11 -> 320
-    bcc @have
+    cpx #7                       ; quantize (cab = 12 + cam/16, trace-calibrated: checkpoint
+    bcc @have                    ; cam = (C-12)*16): <7 -> 0
     ldy #<640
     sty cam_x
     ldy #>640
     sty cam_x+1
-    cpx #15                      ; <15 -> 640
+    cpx #11                      ; <11 -> 640
     bcc @have
-    ldy #<960
-    sty cam_x
-    ldy #>960
-    sty cam_x+1
-    cpx #19                      ; <19 -> 960
-    bcc @have
-    ldy #<1280                   ; else 1280 (seg 19; 23 -> 1600 past 1-1's practical range)
+    ldy #<1280
     sty cam_x
     ldy #>1280
+    sty cam_x+1
+    cpx #15                      ; <15 -> 1280
+    bcc @have
+    ldy #<1920                   ; else 1920 (seg 15+; later checkpoints past 1-1's range)
+    sty cam_x
+    ldy #>1920
     sty cam_x+1
 @have:
     lda cam_x                    ; fb_col0 = cam/8
@@ -3934,9 +3922,9 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     bcs @full
     lda #OBJ_CHIB
     sta o_type,x
-    lda cam_x                    ; world x = cam + 192 (enters from the right margin)
+    lda cam_x                    ; world x = cam + 180 (original enters at OAM x 188)
     clc
-    adc #192
+    adc #180
     sta o_xl,x
     lda cam_x+1
     adc #0

@@ -231,7 +231,7 @@ def main():
                 t = sp["type"]
                 if t & 0x80 or t in (0x0A, 0x0B) or sp["col"] >= 0xFF:
                     continue
-                fire = max(0, (sp["col"] - 12)) * 8
+                fire = max(0, (sp["col"] - 12)) * 16   # cab = 12 + cam/16 (trace-calibrated)
                 oy = max(0, sp["y"] - 24)
                 f.write(bytes([fire & 0xFF, fire >> 8, oy, t]))
             f.write(bytes([0xFF, 0xFF]))
