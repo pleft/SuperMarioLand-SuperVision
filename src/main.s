@@ -120,6 +120,7 @@ scroll_vis:  .res 1          ; scroll value the line-16 IRQ latches (updated ONL
 m_dirty:     .res 1          ; Mario needs erase+redraw this frame
 combo_t:     .res 1          ; stomp-combo window ($ff9c): 50 frames
 combo_n:     .res 1          ; chain count ($ff9d): 0..3, doubles the value code
+death_anim:  .res 1          ; >0 = the death hop is playing (index+1 into death_curve)
 hud_row:     .res 1          ; put_hud target row (0 or 1)
 htmp:        .res 1          ; put_hud scratch (digit being blitted)
 rb_vx:       .res 1          ; restore_bg: VRAM pixel X of the region to repaint
@@ -314,6 +315,10 @@ main_loop:
 @nopause:
     lda paused
     beq :+
+    jmp main_loop
+:   lda death_anim               ; the death hop owns the frame (everything else frozen)
+    beq :+
+    jsr death_frame
     jmp main_loop
 :   lda bonus_phase              ; bonus game running? it owns the whole frame
     beq :+
@@ -2976,7 +2981,10 @@ FB_MAX_COL = level0_cols - 24    ; last fb_col0 that keeps cols fb_col0..+23 in 
 ; draw_player: blit Mario's 16x16 standing metasprite (tiles $20,$21,$30,$31 -
 ; captured from the GB shadow OAM $C00C) at (spr_col, spr_y), transparent.
 .proc draw_player
-    lda star_flash               ; star invincibility: Mario blinks (skip the draw this phase;
+    lda death_anim               ; dying? the DEAD pose: tiles $0F/$1F + their X-mirrors
+    beq :+                       ; (RE State_03 builds exactly this 16x16 OAM group)
+    jmp @dead
+:   lda star_flash               ; star invincibility: Mario blinks (skip the draw this phase;
     beq :+                       ; the erase runs every frame regardless, so nothing goes stale)
     rts
 :   lda hurt_inv                 ; post-hit mercy: blink too
@@ -3087,6 +3095,73 @@ FB_MAX_COL = level0_cols - 24    ; last fb_col0 that keeps cols fb_col0..+23 in 
     sta dy
     ldx pose_br
     jsr draw_quad
+    rts
+@dead:
+    lda spr_y                    ; 4 mirrored quads at Mario's spot; the bottom clip
+    cmp #153                     ; hides rows past the frame as he falls out
+    bcs @dbot
+    lda mario_vx
+    and #3
+    sta spr_subx
+    lda mario_vx
+    lsr
+    lsr
+    sta dcol
+    lda spr_y
+    sta dy
+    stz do_flip
+    ldx #$0F
+    jsr draw_quad
+    lda mario_vx
+    lsr
+    lsr
+    ina
+    ina
+    sta dcol
+    lda spr_y
+    sta dy
+    lda #1
+    sta do_flip
+    ldx #$0F
+    jsr draw_quad
+@dbot:
+    lda spr_y
+    clc
+    adc #8
+    cmp #153
+    bcs @ddone
+    cmp #16
+    bcc @ddone
+    lda mario_vx
+    and #3
+    sta spr_subx
+    lda mario_vx
+    lsr
+    lsr
+    sta dcol
+    lda spr_y
+    clc
+    adc #8
+    sta dy
+    stz do_flip
+    ldx #$1F
+    jsr draw_quad
+    lda mario_vx
+    lsr
+    lsr
+    ina
+    ina
+    sta dcol
+    lda spr_y
+    clc
+    adc #8
+    sta dy
+    lda #1
+    sta do_flip
+    ldx #$1F
+    jsr draw_quad
+@ddone:
+    stz do_flip
     rts
 .endproc
 
@@ -4474,11 +4549,46 @@ fly_dy:
     stz mario_duck
     rts
 @die:
-    lda #1
-    sta respawn_req
+    lda #1                       ; enemy deaths play the HOP (RE states $03/$04); pit
+    sta death_anim               ; deaths keep the direct fall path (state $01)
+    stz mario_duck
+    stz ride
 @no:
     rts
 .endproc
+
+; death_frame: one frame of the death hop (RE State_04 @ $0BC9): y += death_curve[i]
+; (38 eased entries, ~21px rise), then +2/frame after the $7F terminator, until the
+; sprite leaves the screen -> the normal death pause + checkpoint respawn.
+.proc death_frame
+    ldx death_anim
+    lda death_curve-1,x
+    cmp #$7F
+    beq @fall
+    clc
+    adc spr_y
+    sta spr_y
+    inc death_anim
+    rts
+@fall:
+    lda spr_y
+    clc
+    adc #2
+    sta spr_y
+    cmp #168
+    bcc :+
+    stz death_anim
+    jmp do_respawn
+:   rts
+.endproc
+
+.segment "LEVELS"
+death_curve:                     ; ROM $0C19 verbatim (signed y deltas + $7F end)
+    .byte $FE,$FE,$FE,$FF,$FF,$FF,$FF,$FF,$FF,$FF,$FF,$FF,$FF,$FF,$FF,$FF
+    .byte $00,$FF,$00,$00,$FF,$00,$00,$00,$01,$00,$00,$01,$00,$01,$01,$01
+    .byte $01,$01,$01,$01,$01,$01,$7F
+.segment "CODE"
+
 
 ; upd_bomb: the stomped Nokobon's shell ticks (~2.4s, blinking) then explodes.
 ; Touching the ticking bomb is HARMLESS (RE: its $3186 row is all zeros).
