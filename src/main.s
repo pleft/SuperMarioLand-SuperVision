@@ -3335,8 +3335,14 @@ FLOWER_RISE = 7                  ; emerge: rise 7px out of the block, then sit (
 ; --- star ($2c -> type $2C rise, morph $34 bounce; RE'd from the AI scripts @ $38C3/$3964) ---
 ; The $34 script encodes the hop as a per-update vy ramp (up 3,2,1,1,0 then falling) with
 ; X speed 1 throughout; floor contact restarts the ramp; walls reverse X.
-star_vy: .byte $FD,$FE,$FF,$FF,$00,$01,$01,$02,$03   ; -3..-1 up, 0 apex, +1..+3 fall (hold +3)
-STAR_VY_END = 8                                       ; last index (held until floor)
+; the star's scripted arc (RE $3964): decelerating rise, accelerating fall (x drifts
+; +1/update), then the $30 tail = Y+3 with X STOPPED for 5 states, loop -- each cycle
+; net-sinks 15px: the star passes through terrain and leaves the screen.
+star_ay: .byte $FD,$FE,$FE,$FF,$FF,$FF,$00,$00,$00,$00,$01,$01,$01,$02,$02,$03
+         .byte $03,$03,$03,$03,$03
+star_ax: .byte 1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1
+         .byte 0,0,0,0,0
+STAR_ARC_N = 21
 
 ; spawn_star: rise straight out of the block (script: 2 updates x 4px), then bounce forward.
 .proc spawn_star
@@ -3376,52 +3382,38 @@ STAR_VY_END = 8                                       ; last index (held until f
     sta o_y,x
     jmp @consume
 @bounce:
-    lda o_st,x                   ; y += star_vy[st]
+    lda o_y,x                    ; RE (phys $34 = $0C: NO floor-response bits): the star
+    cmp #160                     ; NEVER collides with terrain -- the arc is pure script,
+    bcc :+                       ; net-sinking each loop until it leaves the screen
+    cmp #240
+    bcs :+
+    stz o_type,x                 ; fell out -> gone (the original's off-screen cull)
+    rts
+:   lda o_st,x                   ; y += star_ay[st] (the scripted arc, looping)
     tay
-    lda star_vy,y
-    pha
+    lda star_ay,y
     clc
     adc o_y,x
     sta o_y,x
-    pla
-    bmi @ramp                    ; rising: no floor check
-    lda o_xl,x                   ; falling: solid floor at the centre column / feet row?
-    clc
-    adc #4
-    sta feet_col
-    lda o_xh,x
-    adc #0
-    sta feet_col+1
-    lsr feet_col+1
-    ror feet_col
-    lsr feet_col+1
-    ror feet_col
-    lsr feet_col+1
-    ror feet_col
-    lda o_y,x
-    lsr
-    lsr
-    lsr
-    sta mrow
-    jsr read_solid
-    beq @ramp2
-    ldx oi                       ; floor: snap on top + restart the hop ramp
-    lda mrow
-    asl
-    asl
-    asl
-    sta o_y,x
-    stz o_st,x
-    bra @xmove
-@ramp:
-    ldx oi
-@ramp2:
-    ldx oi
-    lda o_st,x
-    cmp #STAR_VY_END
-    bcs @xmove
+    lda star_ax,y                ; x moves only during the arc part ($30 tail = Y3 X0)
+    beq @noax
     inc o_st,x
+    bra @xmove
+@noax:
+    ldy o_st,x
+    iny
+    cpy #STAR_ARC_N
+    bcc :+
+    ldy #0                       ; script FF: the arc loops (each cycle sinks further)
+:   tya
+    sta o_st,x
+    bra @consume2
 @xmove:
+    ldy o_st,x
+    cpy #STAR_ARC_N
+    bcc @xmove2
+    stz o_st,x
+@xmove2:
     lda o_vx,x                   ; wall ahead (one row above the feet) -> reverse
     bmi @wleft
     lda o_xl,x
@@ -3465,6 +3457,7 @@ STAR_VY_END = 8                                       ; last index (held until f
     bra @consume
 @wmove:
     jsr mush_xmove
+@consume2:
 @consume:
     ldx oi                       ; Mario overlap -> invincibility (same AABB as the mushroom)
     lda cam_x
