@@ -900,7 +900,15 @@ main_loop:
     stz fall_v
     jmp @done
 @ascend:
-    ldx arc_idx
+    lda pad_held                  ; VARIABLE JUMP (harness-measured vs the original: releasing
+    and #GB_A                     ; A leaves only the deceleration tail of the ascent -- each
+    bne :+                        ; 2 held frames ~ +4px, saturating at the full 33px)
+    lda arc_idx
+    cmp #JREL_IDX
+    bcs :+
+    lda #JREL_IDX
+    sta arc_idx
+:   ldx arc_idx
     lda jumparc,x
     cmp #$7F                      ; apex marker -> start descending
     beq @apex
@@ -3212,6 +3220,7 @@ POP_1000_R = $57                 ; "00"
 POP_1UP_L  = $5E                 ; "1U"        (popup value $ff -> tiles $5E,$5F)
 POP_1UP_R  = $5F                 ; "P."
 HEART_TILE = $84                 ; heart = 1 OBJ tile (metasprite param $17)
+JREL_IDX   = 13                  ; A released mid-rise -> arc index skips here (calibrated)
 OBJ_CHIB   = 12                  ; Chibibo/Goombo (SML type $00): leftward walker
 OBJ_SQUASH = 13                  ; squashed enemy corpse: static tile (in o_vx), short timer
 CHIB_TA    = $90                 ; Chibibo walk frames (metasprite params $00/$01)

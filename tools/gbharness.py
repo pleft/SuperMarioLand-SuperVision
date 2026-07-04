@@ -68,3 +68,23 @@ class GB:
 
     def stop(self):
         self.pb.stop()
+
+    def auto_right(self, frames, cheat_star=False, log=None):
+        """Drive right with stall-detection auto-jumps. Returns per-frame camera deltas."""
+        self.hold("right")
+        deltas = []
+        stall = 0; jf = -99; prev = self.m[0xFFA4]
+        for f in range(frames):
+            if cheat_star: self.m[0xC0D3] = 0xF8
+            if f == jf + 22: self.pb.button_release("a")
+            cur = self.m[0xFFA4]
+            d = (cur - prev) & 0xFF
+            if d > 128: d = 0
+            deltas.append(d); prev = cur
+            stall = stall + 1 if d == 0 else 0
+            if stall > 6 and f > jf + 30:
+                self.pb.button_press("a"); jf = f; stall = 0
+            self.pb.tick()
+            if log is not None: log(f)
+        self.pb.button_release("a")
+        return deltas
