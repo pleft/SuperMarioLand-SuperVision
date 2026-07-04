@@ -238,6 +238,8 @@ o_nfl:       .res 8          ; bit0 = dirty, bit1 = visible (render_all flags)
 
     jsr build_revpix             ; pixel-reverse lookup for horizontal sprite flip
     jsr clear_vram
+    jsr title_screen             ; the SML title (extracted at build time); waits for Start
+    jsr clear_vram
     lda #<level0_map             ; start on the surface map
     sta map_base
     lda #>level0_map
@@ -4723,6 +4725,81 @@ death_curve:                     ; ROM $0C19 verbatim (signed y deltas + $7F end
     stz o_type,x
 :   rts
 .endproc
+
+; title_screen: the original's title, dumped at build time by tools/extract_title.py
+; (PyBoy boots the user's ROM and captures the rendered tilemap + tiles). 18 GB rows
+; centered on the SV's 20 (rows 1-18). Static; exits on Start.
+.proc title_screen
+    stz tmpL3                    ; row 0..17
+@row:
+    stz tmpH3                    ; col 0..19
+@col:
+    lda tmpL3                    ; src index = row*20 + col
+    asl
+    asl
+    sta tmpL
+    lda tmpL3
+    clc
+    adc tmpL
+    asl
+    asl
+    clc
+    adc tmpH3
+    tay
+    lda title_map,y              ; packed tile index
+    sta tmpH
+    stz src_ptr+1                ; src = title_tiles + idx*16
+    lda tmpH
+    asl
+    rol src_ptr+1
+    asl
+    rol src_ptr+1
+    asl
+    rol src_ptr+1
+    asl
+    rol src_ptr+1
+    clc
+    adc #<title_tiles
+    sta src_ptr
+    lda src_ptr+1
+    adc #>title_tiles
+    sta src_ptr+1
+    lda tmpH3                    ; dst: dcol = col*2, dy = (row+1)*8
+    asl
+    sta dcol
+    lda tmpL3
+    ina
+    asl
+    asl
+    asl
+    sta dy
+    jsr set_dst
+    jsr blit_tile
+    inc tmpH3
+    lda tmpH3
+    cmp #20
+    bne @col
+    inc tmpL3
+    lda tmpL3
+    cmp #18
+    bne @row
+@wait:
+    lda frame_flag               ; hold until Start is pressed
+    beq @wait
+    stz frame_flag
+    jsr read_input
+    lda pad_pressed
+    and #GB_START
+    beq @wait
+    rts
+.endproc
+
+.segment "LEVELS"
+title_map:                       ; 20x18 remapped indices (build artifact, rule 5)
+    .incbin "build/levels/title_map.bin"
+title_tiles:                     ; the used tiles, SV-packed
+    .incbin "build/gfx/title_tiles.svt"
+.segment "CODE"
 
 ; ball_active: C=1 if a superball is already live (only one at a time, per the original).
 .proc ball_active
