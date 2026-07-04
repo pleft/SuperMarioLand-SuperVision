@@ -1791,34 +1791,53 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
     lda spr_x
     cmp #128
     bcc @wdone
-    lda #5                       ; reached the prize
-    sta bonus_phase
-    ldx b_floor
+    lda #5                       ; reached the prize -> walk BACK to the centre ladder
+    sta bonus_phase              ; (original: Mario celebrates at the top-middle, under
+    ldx b_floor                  ; the lives counter -- user screenshot + OAM capture)
     lda b_prz,x
     cmp #$E5                     ; flower?
     beq @flower
     and #$0F                     ; tile $01/$02/$03 = that many lives
     sta b_awn
-    stz b_gap                    ; hop step 0 (b_gap reused as the joy-hop counter)
-    lda #30
-    sta b_awt
 @wdone:
     rts
 @flower:
-    lda #1                       ; flower: the superball power (grows small Mario too)
-    sta mario_superball
-    sta mario_big
-    stz b_awn
+    lda #10                      ; flower: awarded IN PLACE at the pedestal
+    sta bonus_phase
+    lda #1
+    sta mario_superball          ; the superball power always
+    lda mario_big
+    bne :+
+    lda #$50                     ; small -> the grow flash plays at the pedestal
+    sta mario_grow
+:   stz b_awn
     lda #120
     sta b_awt
     rts
 @award:
+    lda bonus_phase
+    cmp #5
+    bne :+
+    jmp @wback
+:   cmp #9
+    bne :+
+    jmp @cl2top
+:   cmp #10
+    bne :+
+    jmp @flowert
+:   cmp #11
+    bne :+
+    dec b_awt                    ; the celebration's tail pause
+    bne @adone
+    jmp @exit
+:
+    ; ---- phase 8: the JOY HOP at the top-centre (1px/4f, life at the APEX) ----
     dec b_awt
     bne @adone
-    lda #4                       ; the JOY HOP (harness: 1px per 4 frames, 5px amplitude,
-    sta b_awt                    ; the life lands at the APEX, one standing beat between)
+    lda #4
+    sta b_awt
     lda b_awn
-    ora b_gap                    ; b_gap = hop step 0..11 (reused; walk/climb are done)
+    ora b_gap
     beq @exit0
     lda b_gap
     cmp #5
@@ -1826,15 +1845,14 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
     beq @apex
     cmp #11
     bcc @fall
-    ; step 11: standing beat between hops
-    stz mario_frame
+    stz mario_frame              ; step 11: standing beat between hops
     jsr b_erase
     jsr b_fixfloor
     jsr draw_player
     stz b_gap
     rts
 @rise:
-    lda #3                       ; jump pose while airborne
+    lda #3
     sta mario_frame
     jsr b_erase
     jsr b_fixfloor
@@ -1845,7 +1863,7 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
 @apex:
     lda b_awn
     beq :+
-    jsr add_life                 ; the life is granted at the hop's apex
+    jsr add_life
     dec b_awn
 :   inc b_gap
     rts
@@ -1859,19 +1877,99 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
     inc b_gap
     rts
 @exit0:
-    lda #70                      ; the observed ~70-frame tail pause, then leave
+    lda #11                      ; ~70-frame tail pause in its own phase, then leave
+    sta bonus_phase
+    lda #70
     sta b_awt
-    lda #$FF
-    sta b_gap
 @adone:
-    lda b_gap
-    cmp #$FF
+    rts
+    ; ---- phase 5: walk back left to the centre ladder column (x=80) ----
+@wback:
+    lda spr_x
+    cmp #81
+    bcc @atladder
+    lda #1                       ; face left, walk pose
+    sta mario_facing
+    lda frame_count
+    and #8
+    lsr
+    lsr
+    lsr
+    ina
+    sta mario_frame              ; alternate walk frames 1/2
+    jsr b_erase
+    jsr b_fixfloor
+    dec spr_x
+    jsr draw_player
+    rts
+@atladder:
+    lda b_floor                  ; on the top floor already? straight to the hop
+    beq @hopinit
+    stz tmpL3                    ; draw the ladders for every gap between here and the top
+:   lda #0
+    ldy tmpL3
+    jsr b_ladder_cell
+    inc tmpL3
+    lda tmpL3
+    cmp b_floor
+    bne :-
+    lda #9
+    sta bonus_phase
+    rts
+@hopinit:
+    lda #8
+    sta bonus_phase
+    stz b_gap
+    lda #4
+    sta b_awt
+    stz mario_facing
+    rts
+    ; ---- phase 9: climb the ladders to the top floor ----
+@cl2top:
+    lda #3                       ; climb-ish pose
+    sta mario_frame
+    jsr b_erase
+    lda spr_y                    ; current gap = (spr_y-41)/24
+    sec
+    sbc #41
+    ldy #0
+:   cmp #24
+    bcc :+
+    sbc #24
+    iny
+    bra :-
+:   sty b_gap
+    jsr b_fixgap
+    lda #0
+    ldy b_gap
+    jsr b_ladder_cell            ; keep the ladder intact behind him
+    dec spr_y
+    jsr draw_player
+    lda spr_y
+    cmp #40
+    bne @cdone2
+    stz b_floor
+    bra @hopinit
+@cdone2:
+    rts
+    ; ---- phase 10: the flower -- Mario STAYS at the pedestal (user-observed); if he
+    ; was small, the GROW FLASH plays right there, then the pause and out ----
+@flowert:
+    lda mario_grow
+    beq @ftimer
+    dec mario_grow               ; the 80-frame big<->small flash (draw_player renders it)
     bne :+
-    lda b_awt
-    cmp #1
-    bne :+
+    inc mario_big                ; flash done -> big (superball was granted at the trigger)
+:   jsr b_erase
+    jsr b_fixfloor
+    jsr draw_player
+    rts
+@ftimer:
+    dec b_awt
+    bne @adone2
     jmp @exit
-:   rts
+@adone2:
+    rts
 @exit:
     stz bonus_phase
     jmp next_level
