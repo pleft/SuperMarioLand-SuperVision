@@ -110,3 +110,19 @@ matters is WHERE THE BEAM IS when a byte changes. Three structural fixes (53288e
 Metrics: worst frame 88% budget, 0 over; combat frame-identical; ride-overlap scenario clean.
 LESSON: on beam-racing displays, measure WHEN bytes change relative to the beam, not how many
 cycles a frame costs. Render early from last state; never let an erase outlive its draw window.
+
+## Performance round — final state [2026-07-04, user-verified "looks perfect"]
+Round 2's first build corrupted VRAM: the deferred DMA let `fb_col0` run ahead of the pixels
+during the logic phase, so every mid-logic VRAM writer (block bounce, coin effects) landed
+32px off. Final architecture (3a9e0e4): **`scroll_apply` runs the entire shift pipeline —
+decision, DMA, `fb_col0`, `shift_px`, `scroll_s` — atomically at FRAME START**, before
+`render_all`; the logic phase only moves `cam_x`. **Invariant: pixels, coordinates, and the
+scroll register must never disagree across a phase boundary.**
+Frame layout: NMI → scroll_apply → scroll_vis latch (line-16 IRQ reads it) → render_all
+(4-pass overlap-safe, dirty-skip) → stream_one (1 margin col/frame) → draw_hud → logic.
+Post-round fixes (9c5caa2), both from user reports:
+- Checkpoint respawn horde: a leftover `stz spawn_idx` in do_respawn wiped the spawn-list
+  fast-forward → the whole list re-fired while walking. Removed.
+- One-off "multi-coin block launched no coins": enemies never despawned off-screen-left,
+  exhausting the 8 slots → spawn requests silently dropped. upd_chib culls at cam−20
+  (the original culls screen exits).
