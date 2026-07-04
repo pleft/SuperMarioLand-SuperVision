@@ -3335,14 +3335,17 @@ FLOWER_RISE = 7                  ; emerge: rise 7px out of the block, then sit (
 ; --- star ($2c -> type $2C rise, morph $34 bounce; RE'd from the AI scripts @ $38C3/$3964) ---
 ; The $34 script encodes the hop as a per-update vy ramp (up 3,2,1,1,0 then falling) with
 ; X speed 1 throughout; floor contact restarts the ramp; walls reverse X.
-; the star's scripted arc (RE $3964): decelerating rise, accelerating fall (x drifts
-; +1/update), then the $30 tail = Y+3 with X STOPPED for 5 states, loop -- each cycle
-; net-sinks 15px: the star passes through terrain and leaves the screen.
-star_ay: .byte $FD,$FE,$FE,$FF,$FF,$FF,$00,$00,$00,$00,$01,$01,$01,$02,$02,$03
-         .byte $03,$03,$03,$03,$03
-star_ax: .byte 1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1
-         .byte 0,0,0,0,0
-STAR_ARC_N = 21
+; the star's flight, TRACE-EXACT (/tmp/sml_star.txt): ONE symmetric eased arc -- 19px
+; rise over ~42 frames, mirrored fall, x drifting 1px/3 frames -- then X freezes and
+; it sinks 1px/frame straight down through everything until off-screen. No loop.
+; Entries are per object-update (30Hz); x moves on 2 of 3 updates (0.33px/f).
+star_ay: .byte $FE,$FE,$FF, $FE,$FF,$FF, $FE,$FF,$FF, $FF,$FF,$00, $FF,$FF,$00
+         .byte $FF,$00,$00, $FF,$00,$00
+         .byte $00,$00,$01, $00,$00,$01, $00,$01,$01, $00,$01,$01, $01,$01,$02
+         .byte $01,$01,$02, $01,$02,$02
+star_ax: .byte 1,1,0,1,1,0,1,1,0,1,1,0,1,1,0,1,1,0,1,1,0
+         .byte 1,1,0,1,1,0,1,1,0,1,1,0,1,1,0,1,1,0,1,1,0
+STAR_ARC_N = 42
 
 ; spawn_star: rise straight out of the block (script: 2 updates x 4px), then bounce forward.
 .proc spawn_star
@@ -3389,30 +3392,25 @@ STAR_ARC_N = 21
     bcs :+
     stz o_type,x                 ; fell out -> gone (the original's off-screen cull)
     rts
-:   lda o_st,x                   ; y += star_ay[st] (the scripted arc, looping)
-    tay
-    lda star_ay,y
+:   ldy o_st,x                   ; arc done? sink 1px/frame, x frozen (trace: dead vertical)
+    cpy #STAR_ARC_N
+    bcc :+
+    lda o_y,x
+    clc
+    adc #2
+    sta o_y,x
+    bra @consume2
+:   lda star_ay,y                ; y += star_ay[st] (the traced arc)
     clc
     adc o_y,x
     sta o_y,x
-    lda star_ax,y                ; x moves only during the arc part ($30 tail = Y3 X0)
+    lda star_ax,y                ; x drifts on 2 of 3 updates during the arc
     beq @noax
     inc o_st,x
-    bra @xmove
+    bra @xmove2
 @noax:
-    ldy o_st,x
-    iny
-    cpy #STAR_ARC_N
-    bcc :+
-    ldy #0                       ; script FF: the arc loops (each cycle sinks further)
-:   tya
-    sta o_st,x
+    inc o_st,x
     bra @consume2
-@xmove:
-    ldy o_st,x
-    cpy #STAR_ARC_N
-    bcc @xmove2
-    stz o_st,x
 @xmove2:
     lda o_vx,x                   ; wall ahead (one row above the feet) -> reverse
     bmi @wleft
