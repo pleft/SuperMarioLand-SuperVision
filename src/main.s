@@ -4034,6 +4034,14 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     sta o_vx,x
     bra @combat
 @wmove:
+    ldx oi                       ; ORIGINAL walk speed = 1px per 3 FRAMES (trace: 24px/72f
+    inc o_st,x                   ; on the ground) = 2 moves per 3 object-updates
+    lda o_st,x
+    cmp #3
+    bcc @domove
+    stz o_st,x
+    bra @combat
+@domove:
     jsr mush_xmove
 @combat:
     ldx oi
