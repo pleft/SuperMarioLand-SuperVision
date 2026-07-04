@@ -121,6 +121,7 @@ m_dirty:     .res 1          ; Mario needs erase+redraw this frame
 combo_t:     .res 1          ; stomp-combo window ($ff9c): 50 frames
 combo_n:     .res 1          ; chain count ($ff9d): 0..3, doubles the value code
 death_anim:  .res 1          ; >0 = the death hop is playing (index+1 into death_curve)
+timeup:      .res 1          ; the clock ran out: after the hop, show " TIME UP " (state $3B)
 hud_row:     .res 1          ; put_hud target row (0 or 1)
 htmp:        .res 1          ; put_hud scratch (digit being blitted)
 rb_vx:       .res 1          ; restore_bg: VRAM pixel X of the region to repaint
@@ -2608,7 +2609,7 @@ TIMER_RATE = 40                  ; frames per clock unit (SML's $da00 sub-counte
     rts
 :   lda #TIMER_RATE
     sta timer_sub
-    lda timer                    ; already 000? clamp (time-up death TODO)
+    lda timer
     ora timer+1
     bne :+
     rts
@@ -2623,7 +2624,15 @@ TIMER_RATE = 40                  ; frames per clock unit (SML's $da00 sub-counte
     cld
     lda #1
     sta hud_dirty
-    rts
+    lda timer                    ; hit 000? TIME-UP death: the hop plays (harness: state
+    ora timer+1                  ; $03 fires with $da1d=$FF regardless of size/star),
+    bne :+                       ; then the " TIME UP " strip, then the reload
+    lda #1
+    sta timeup
+    sta death_anim
+    stz mario_duck
+    stz ride
+:   rts
 .endproc
 
 ; hud_init: set the clock to 400 and a fresh sub-counter (boot + level restart).
@@ -4569,8 +4578,53 @@ fly_dy:
     cmp #168
     bcc :+
     stz death_anim
+    lda timeup
+    beq @resp
+    stz timeup
+    jsr timeup_strip             ; " TIME UP " bottom-right for 160 frames (harness-exact)
+@resp:
     jmp do_respawn
 :   rts
+.endproc
+
+; timeup_strip: the state-$3B/$3C sequence -- the 9 tiles from ROM $1D14 (" TIME UP ")
+; in the PAUSE window position (bottom-right, screen-anchored), held 160 frames
+; ($ffa6=$A0). The respawn's full re-render cleans it up.
+.proc timeup_strip
+    lda scroll_s
+    lsr
+    lsr
+    clc
+    adc #22                      ; screen x 88 (the pause strip's spot), byte-granular
+    sta tmpH3
+    stz b_i
+@loop:
+    lda b_i
+    asl
+    clc
+    adc tmpH3
+    sta dcol
+    lda #144
+    sta dy
+    jsr set_dst
+    ldx b_i
+    lda @txt,x
+    jsr get_tile_src
+    jsr blit_tile
+    inc b_i
+    lda b_i
+    cmp #9
+    bne @loop
+    lda #160
+    sta tmpL3
+@wait:
+    lda frame_flag
+    beq @wait
+    stz frame_flag
+    dec tmpL3
+    bne @wait
+    rts
+@txt: .byte $2C,$1D,$12,$16,$0E,$2C,$1E,$19,$2C   ; the exact $1D14 bytes: " TIME UP "
 .endproc
 
 .segment "LEVELS"
