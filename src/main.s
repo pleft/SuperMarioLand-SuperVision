@@ -1464,11 +1464,15 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
     lda b_i
     cmp #10
     bne :-
-    lda #4                       ; --- lives: head icon + count at row 4 ---
-    sta b_row
+    lda #4                       ; --- lives: head icon + x + count at row 4 (original
+    sta b_row                    ; tilemap row: E4 2C 2B 00 02 at cols 7-11) ---
     lda #7
     sta b_col
     lda #$E4
+    jsr bput
+    lda #9
+    sta b_col
+    lda #$2B                     ; the "x" -- was missing at init (only b_fixhud drew it)
     jsr bput
     lda #10
     sta b_col
