@@ -92,3 +92,21 @@ misses, zero frames >80%)**; mean 41%→34%.
 3. **`set_dst`**: dy*48 chain → `row48_lo/hi` 160-entry table (was 10% of the worst frame).
 Rules of thumb learned: measure with the WORST FRAME, not the mean; the deadline miss (not
 total load) is what flickers; pairing beats reordering.
+
+## Performance round 2 [2026-07-04]: race-the-beam architecture
+Round 1 cut cycles but the user still saw flicker + hitching, plus NEW sprite-wipes-sprite
+corruption. The cycle counter measures the wrong thing — with a per-scanline core, what
+matters is WHERE THE BEAM IS when a byte changes. Three structural fixes (53288ed):
+1. **Frame-start rendering**: NMI → render phase (DMA shift, scroll latch, all sprite
+   erases+draws from LAST frame's state, one margin column, HUD) → logic phase. Sprites land
+   before the beam leaves the HUD rows; a late frame shows the intact previous image, never a
+   hole. (1 frame input→display latency, standard.)
+2. **DMA/scroll coherence**: the mid-frame DMA shift with next-frame XSCROLL compensation made
+   the screen bottom jump 32px for one frame every 32px of scroll (THE hitch). Now logic queues
+   (`pend_shift`), frame start executes DMA + latches `scroll_vis` (IRQ reads it) together.
+3. **`render_all` 4-pass**: classify dirty → propagate dirtiness across overlapping rects
+   (slots×slots + Mario, coarse 32×28 boxes, 2 rounds) → erase all dirty → draw all dirty,
+   Mario last. Fixes pairing's overlap corruption while keeping dirty-skip economics.
+Metrics: worst frame 88% budget, 0 over; combat frame-identical; ride-overlap scenario clean.
+LESSON: on beam-racing displays, measure WHEN bytes change relative to the beam, not how many
+cycles a frame costs. Render early from last state; never let an erase outlive its draw window.
