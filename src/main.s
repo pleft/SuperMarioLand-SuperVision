@@ -3138,8 +3138,8 @@ BOMB_TA    = $9A                 ; bomb blink tiles
 BOMB_TB    = $9B
 BOOM_TA    = $9D                 ; explosion cloud (drawn + X-mirrored pair)
 BOOM_TB    = $9E
-BOMB_FUSE  = 144                 ; ~2.4s tick (script: 2 waits + 8 blinks; trace-tune later)
-BOOM_LIFE  = 40
+BOMB_FUSE  = 63                  ; trace-exact: stomp f694 -> explosion f757 (~1.0s)
+BOOM_LIFE  = 44                  ; trace: >=43 frames live (capture ended mid-cloud)
 STAR_TA    = $86                 ; star twinkles between $86 and $85 (param $19 list)
 STAR_TB    = $85
 BALL_TILE  = $60                 ; superball = 1 OBJ tile (mGBA OAM trace)
