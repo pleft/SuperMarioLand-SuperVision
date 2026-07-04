@@ -136,9 +136,19 @@ def capture(gb, mailbox, value, frames=180):
     log = install_hooks(gb)
     log.writes = []
     m[mailbox] = value
+    end = frames
+    started = False
     for f in range(frames):
         log.frame = f
         gb.run(1)
+        # the driver's channel-ownership flags: bit7 set while the SFX plays
+        flags = (m[0xDF1F] | m[0xDF2F] | m[0xDF3F] | m[0xDF4F]) & 0x80
+        if flags: started = True
+        elif started:
+            end = f + 1
+            break
+    log.writes = [w for w in log.writes if w[0] <= end]
+    frames = end
     # rebuild per-frame register STATE from the true write log
     shadow = {a: 0 for a in range(0xFF10, 0xFF27)}
     samples = []
