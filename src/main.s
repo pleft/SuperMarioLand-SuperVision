@@ -1133,7 +1133,7 @@ main_loop:
     sta mc_colh
     stz mario_shrink
     stz hurt_inv
-    stz spawn_idx                 ; respawn: enemies re-fire... see below (fast-forwarded)
+    ; (spawn_idx was already fast-forwarded to the checkpoint above -- do NOT reset it)
     jsr clear_objects             ; drop any live mushroom/coins
     jsr clear_tile_mod            ; reset bumped/broken blocks for the fresh attempt
     stz shift_px
@@ -3937,7 +3937,25 @@ riding_this:                     ; Z=1 if Mario rides slot oi
 ; RE ($08C7): stomp iff Mario's y is 4+ px above the enemy's (within the x window);
 ; stomp -> squash + fixed bounce + "100"; side -> hurt (big: shrink, small: death).
 .proc upd_chib
-    lda frame_count
+    ldx oi                       ; walked off-screen-left? despawn (original: screen-exit
+    lda o_xl,x                   ; culls the slot -- keeping them alive exhausted slots and
+    clc                          ; even silently ate multi-coin spawn requests)
+    adc #20
+    sta tmpL3
+    lda o_xh,x
+    adc #0
+    sta tmpH3
+    lda tmpH3
+    cmp cam_x+1
+    bcc @cull
+    bne :+
+    lda tmpL3
+    cmp cam_x
+    bcs :+
+@cull:
+    stz o_type,x
+    rts
+:   lda frame_count
     lsr
     bcs :+
     jmp @combat                  ; movement at 30Hz; combat EVERY frame
