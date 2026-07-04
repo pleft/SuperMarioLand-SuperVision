@@ -99,7 +99,7 @@ goal_top:    .res 1          ; 1 = Mario exited through the TOP door (bonus game
 plats_on:    .res 1          ; end-area moving platforms spawned (one-shot)
 ride:        .res 1          ; 0 = not riding; else (slot+1) of the platform under Mario
 bonus_phase: .res 1          ; bonus game: 0 off, 2 play, 3 walk, 5 award
-b_tick:      .res 1          ; 3-frame tick divider ($da22)
+b_tick:      .res 1          ; 4-frame tick divider ($da22; harness-calibrated)
 b_ladder:    .res 1          ; ladder cycle counter 1..6 ($da27); odd = visible at gap (n-1)/2
 b_floor:     .res 1          ; Mario's floor 0..3 (top..bottom)
 b_prz:       .res 4          ; the 4 prize tiles top..bottom (rotated ring)
@@ -1712,8 +1712,8 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
 @tick:
     inc b_tick
     lda b_tick
-    cmp #3
-    beq :+
+    cmp #4                       ; harness-measured vs the original: ~4 frames visible +
+    beq :+                       ; ~4 blank per gap slot, 24-frame full cycle (was 3/18)
     rts
 :   stz b_tick
     lda b_ladder                 ; erase the currently shown ladder (odd) / advance
