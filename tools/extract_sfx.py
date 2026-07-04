@@ -96,13 +96,57 @@ def synth_noise(samples, div_i, vol_i):
                 rows[f] = ((min(15, shift) << 4) | vol,)
     return rows
 
+def find_write_sites(rom):
+    """Bank-3 code addresses of `ldh [c],a` (E2) and `ldh [$10-$26],a` (E0 xx)."""
+    sites = []
+    base = 3 * 0x4000
+    for i in range(0x4000 - 1):
+        op = rom[base + i]
+        gb_addr = 0x4000 + i
+        if op == 0xE2:
+            sites.append((gb_addr, None))
+        elif op == 0xE0 and 0x10 <= rom[base + i + 1] <= 0x26:
+            sites.append((gb_addr, 0xFF00 | rom[base + i + 1]))
+    return sites
+
+class WriteLog:
+    def __init__(self, pb):
+        self.pb = pb; self.frame = 0; self.writes = []
+    def cb(self, target):
+        rf = self.pb.register_file
+        addr = target if target is not None else (0xFF00 | rf.C)
+        if 0xFF10 <= addr <= 0xFF26:
+            self.writes.append((self.frame, addr, rf.A))
+
+_hooked = {}
+def install_hooks(gb):
+    if _hooked.get('done'): return _hooked['log']
+    rom = open(os.path.join(os.path.dirname(__file__), "..", "super-mario-land-gb.gb"), "rb").read()
+    log = WriteLog(gb.pb)
+    for gb_addr, target in find_write_sites(rom):
+        try:
+            gb.pb.hook_register(3, gb_addr, log.cb, target)
+        except Exception:
+            pass
+    _hooked['done'] = True; _hooked['log'] = log
+    return log
+
 def capture(gb, mailbox, value, frames=180):
     m = gb.m
+    log = install_hooks(gb)
+    log.writes = []
     m[mailbox] = value
-    samples = []
-    for _ in range(frames):
+    for f in range(frames):
+        log.frame = f
         gb.run(1)
-        samples.append(tuple(m[a] for a in range(0xFF10, 0xFF27)))
+    # rebuild per-frame register STATE from the true write log
+    shadow = {a: 0 for a in range(0xFF10, 0xFF27)}
+    samples = []
+    wi = 0; ws = log.writes
+    for f in range(frames):
+        while wi < len(ws) and ws[wi][0] <= f:
+            _, a, v = ws[wi]; shadow[a] = v; wi += 1
+        samples.append(tuple(shadow[a] for a in range(0xFF10, 0xFF27)))
     return samples
 
 def encode(samples, quiet):
@@ -116,17 +160,21 @@ def encode(samples, quiet):
     for f, r in ch2.items(): events.setdefault(f, {})['2'] = r
     for f, r in noi.items(): events.setdefault(f, {})['n'] = r
     if not events: return b""
-    out = bytearray(); last = 0
+    out = bytearray(); last = 0; pf1 = None; pf2 = None
     for f in sorted(events):
         ev = events[f]
-        mask = (1 if '1' in ev else 0) | (2 if '2' in ev else 0) | (4 if 'n' in ev else 0)
-        out.append(min(254, f - last)); out.append(mask)
+        m = 0; pay = bytearray()
         if '1' in ev:
-            F, vd = ev['1']; out += bytes([F & 0xFF, F >> 8, vd])
+            F, vd = ev['1']
+            if F == pf1: m |= 0x10; pay.append(vd)          # vol-only row
+            else: m |= 0x01; pay += bytes([F & 0xFF, F >> 8, vd]); pf1 = F
         if '2' in ev:
-            F, vd = ev['2']; out += bytes([F & 0xFF, F >> 8, vd])
+            F, vd = ev['2']
+            if F == pf2: m |= 0x20; pay.append(vd)
+            else: m |= 0x02; pay += bytes([F & 0xFF, F >> 8, vd]); pf2 = F
         if 'n' in ev:
-            out += bytes([ev['n'][0]])
+            m |= 0x04; pay.append(ev['n'][0])
+        out.append(min(254, f - last)); out.append(m); out += pay
         last = f
     out.append(0xFF)
     return bytes(out)
@@ -139,9 +187,9 @@ def main():
     m[0xDFE8] = 0x10                     # stop the music
     for _ in range(40): gb.run(1)
     quiet = tuple(m[a] for a in range(0xFF10, 0xFF27))
-    wanted = [("dfe0", 0xDFE0, v) for v in range(1, 9)] + \
-             [("dff8", 0xDFF8, v) for v in range(1, 4)] + \
-             [("dfe8", 0xDFE8, v) for v in (1, 2, 3, 4, 8)]
+    wanted = [("dfe0", 0xDFE0, v) for v in (1, 2, 3, 4, 7, 8)] + \
+             [("dff8", 0xDFF8, v) for v in (1, 2, 3)] + \
+             [("dfe8", 0xDFE8, v) for v in (2,)]     # the death jingle; more with the music
     blob = bytearray(); table = []
     for name, mb, v in wanted:
         samples = capture(gb, mb, v)

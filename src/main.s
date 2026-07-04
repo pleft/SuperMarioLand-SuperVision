@@ -2006,10 +2006,19 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
 @row:
     lda (sfx_p)                  ; delay byte
     cmp #$FF
-    beq @end
-    jsr @inc
+    bne :+
+    jmp @end
+:   jsr @inc
     lda (sfx_p)                  ; mask
     sta tmpL
+    and #$0F
+    sta tmpH
+    lda tmpL
+    lsr
+    lsr
+    lsr
+    lsr
+    ora tmpH
     ora sfx_used
     sta sfx_used
     jsr @inc
@@ -2048,6 +2057,18 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
     sta CH4_FREQVOL
     ldy #$FF
     sty CH4_LEN
+    jsr @inc
+:   lda tmpL                     ; vol-only rows (freq unchanged: envelope steps)
+    and #$10
+    beq :+
+    lda (sfx_p)
+    sta CH1_VOLDUTY
+    jsr @inc
+:   lda tmpL
+    and #$20
+    beq :+
+    lda (sfx_p)
+    sta CH2_VOLDUTY
     jsr @inc
 :   lda (sfx_p)                  ; next row's delay: 0 -> apply next frame minimum
     cmp #$FF
