@@ -5444,8 +5444,8 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     rts
 @noko:
     ldx oi
-    lda o_vx,x                   ; face the walk direction (tiles face right; original
-    bpl :+                       ; shows the $10 flip attr on its left-walking frames)
+    lda o_vx,x                   ; face the walk direction (the tiles face LEFT natively;
+    bmi :+                       ; mirror only when walking right)
     lda #1
     bra :++
 :   lda #0
