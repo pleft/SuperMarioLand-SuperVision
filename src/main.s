@@ -4730,24 +4730,20 @@ death_curve:                     ; ROM $0C19 verbatim (signed y deltas + $7F end
 ; (PyBoy boots the user's ROM and captures the rendered tilemap + tiles). 18 GB rows
 ; centered on the SV's 20 (rows 1-18). Static; exits on Start.
 .proc title_screen
+    lda #<title_map              ; 16-bit walk over the 360-byte map (row*20+col
+    sta feet_col                 ; overflowed 8 bits past row 12 -> doubled image)
+    lda #>title_map
+    sta feet_col+1
     stz tmpL3                    ; row 0..17
 @row:
     stz tmpH3                    ; col 0..19
 @col:
-    lda tmpL3                    ; src index = row*20 + col
-    asl
-    asl
-    sta tmpL
-    lda tmpL3
-    clc
-    adc tmpL
-    asl
-    asl
-    clc
-    adc tmpH3
-    tay
-    lda title_map,y              ; packed tile index
+    lda (feet_col)               ; packed tile index
     sta tmpH
+    inc feet_col
+    bne :+
+    inc feet_col+1
+:
     stz src_ptr+1                ; src = title_tiles + idx*16
     lda tmpH
     asl
