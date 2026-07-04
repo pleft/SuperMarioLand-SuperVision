@@ -3973,7 +3973,7 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     clc
     adc #2
     sta o_y,x
-    bra @combat
+    jmp @combat
 @grounded:
     ldx oi                       ; snap + walk with wall reversal (mushroom pattern)
     lda mrow
@@ -3981,6 +3981,17 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     asl
     asl
     sta o_y,x
+    dec mrow                     ; BURIED? (body row solid too -- e.g. a spawn inside raised
+    jsr read_solid               ; terrain): rise one row per update until clear, don't walk
+    beq @clear
+    ldx oi
+    lda o_y,x
+    sec
+    sbc #8
+    sta o_y,x
+    jmp @combat
+@clear:
+    ldx oi
     lda o_vx,x
     bmi @wleft
     lda o_xl,x
