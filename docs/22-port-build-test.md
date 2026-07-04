@@ -126,3 +126,21 @@ Post-round fixes (9c5caa2), both from user reports:
 - One-off "multi-coin block launched no coins": enemies never despawned off-screen-left,
   exhausting the 8 slots → spawn requests silently dropped. upd_chib culls at cam−20
   (the original culls screen exits).
+
+## Self-audit round 1 [2026-07-04]: PyBoy harness vs the port
+Method: drive/measure the ORIGINAL headless, diff against the port (py65). Findings:
+- **FIX #1 — VARIABLE JUMP HEIGHT** (the big one): the original shortens the jump when A is
+  released (measured: hold 2f=13px, 4f=17, 6f=21, 8f=25, 12f=32, ≥16f=33=full; airtime scales
+  27..49f). The port always flew the full arc. Fix: on release during ascent, `arc_idx` skips
+  to the deceleration tail (`JREL_IDX=13`, sweep-calibrated: total error 2px over 6 holds).
+- **FIX #2 — bonus ladder cadence**: original ≈4f visible + 4f blank per gap (24f cycle);
+  port ticked 3f (18f). `b_tick` 3→4. Gap cyclic order (bottom→top→middle) matches.
+- **CONFIRMED**: full jump 33px/48-49f both; prize wheel = fixed ring [3,1,2,flower] rotated
+  by entry timing (same set/order/mechanism both); timer 40 f/unit both; walk top speed ≈1px/f
+  (speedtab is ROM-extracted); enemy speeds/spawns (previously trace-validated).
+- Techniques: state-forcing $ffb3=$12 renders the original's bonus screen for layout diffing
+  (Mario placement needs the legit door chain — walk/climb speeds still unmeasured); SCX reads
+  mid-frame alias to the HUD split's 0 — use $ffa4/cab for camera measurements.
+- OPEN for round 2: legit top-door run (bonus walk/climb/award timings, and whether the
+  original's bonus TIMES OUT if A is never pressed); a scripted full-level playthrough of the
+  PORT as a regression harness.
