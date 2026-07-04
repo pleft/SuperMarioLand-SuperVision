@@ -221,6 +221,20 @@ def main():
         with open(os.path.join(out, f"level_{lvl:02d}_blocks.bin"), "wb") as f:
             for b in blocks:
                 f.write(bytes([b["col"] & 0xFF, b["col"] >> 8, b["row"], b["value"]]))
+        # enemy spawn table: [fire_cam(16), o_y, type] per NORMAL-mode entry, $FFFF-terminated.
+        # fire_cam = the camera x at which the original's column counter (starts 12) reaches
+        # the entry col: (col-12)*8, clamped >= 0. o_y = the object feet line in port coords
+        # (GB spawn y = (pos&$1F)*8+$10; port o_y = that - 24). Platforms $0A/$0B are managed
+        # by dedicated code; hard-mode entries (type bit7) are skipped.
+        with open(os.path.join(out, f"level_{lvl:02d}_spawns.bin"), "wb") as f:
+            for sp in spawns:
+                t = sp["type"]
+                if t & 0x80 or t in (0x0A, 0x0B) or sp["col"] >= 0xFF:
+                    continue
+                fire = max(0, (sp["col"] - 12)) * 8
+                oy = max(0, sp["y"] - 24)
+                f.write(bytes([fire & 0xFF, fire >> 8, oy, t]))
+            f.write(bytes([0xFF, 0xFF]))
         summary.append((lvl, f"{world}-{lvl%3+1}", bank, f"${seg_tab:04X}",
                         len(cols), len(rooms), len(pipes), len(spawns)))
 

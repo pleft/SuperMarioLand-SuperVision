@@ -31,3 +31,7 @@ block_table:                                  ; 4 bytes/block: col(16), row, con
     .incbin "build/levels/level_00_blocks.bin"
 block_table_end:
 block_count = (block_table_end - block_table) / 4
+
+.export spawn_table
+spawn_table:                                  ; 4 bytes/entry: fire_cam(16), o_y, type;
+    .incbin "build/levels/level_00_spawns.bin" ; $FFFF-terminated (enemy spawn list)

@@ -12,6 +12,7 @@
 .import mario_poses          ; 4 poses x 4 tiles (metasprite tiles from ROM $4C37)
 .import mario_big_poses      ; 5 big-Mario poses x 4 tiles (stand,walkA,walkB,jump,duck)
 .import statusbar_tiles      ; 2x20 status-bar template (ROM $3F9C)
+.import spawn_table          ; enemy spawns: [fire_cam(16), o_y, type] per entry, $FFFF end
 .import level0_cols          ; World 1-1 width in columns (from the level binary size)
 .import room_ptrs            ; table of underground room map pointers
 .import pipe_table, pipe_count ; pipe entries: entry_col(16), room, resume_col(16)
@@ -110,6 +111,9 @@ b_i:         .res 1          ; loop counter safe across bput (set_dst clobbers X
 b_gap:       .res 1          ; the locked ladder's gap 0..2 (between floors gap..gap+1)
 paused:      .res 1          ; 1 = game paused (Start toggles)
 cam_dead:    .res 2          ; camera at the moment of death (checkpoint decision)
+spawn_idx:   .res 1          ; next spawn-table entry (x4 = byte offset; table < 64 entries)
+mario_shrink: .res 1         ; >0 = big->small shrink animation (mirror of mario_grow)
+hurt_inv:    .res 1          ; post-hit mercy frames (no enemy damage while > 0)
 hud_row:     .res 1          ; put_hud target row (0 or 1)
 htmp:        .res 1          ; put_hud scratch (digit being blitted)
 rb_vx:       .res 1          ; restore_bg: VRAM pixel X of the region to repaint
@@ -285,6 +289,19 @@ main_loop:
     jmp main_loop
 :   jsr update_objects           ; platforms keep patrolling during the clear (trace-verified)
     jmp @play
+:   lda hurt_inv                 ; post-hit mercy ticks down (Mario blinks)
+    beq :+
+    dec hurt_inv
+:   lda mario_shrink             ; big->small shrink running? freeze + flash like the grow
+    beq :+
+    dec mario_shrink
+    bne @shf
+    stz mario_big                ; shrink done: small, powers lost, mercy window
+    stz mario_superball
+    lda #90
+    sta hurt_inv
+@shf:
+    jmp @play
 :   lda mario_grow               ; small->big grow running? freeze the action, just flash
     bne @growing
     lda mc_tmr                   ; multi-coin window ticks every frame ($c0ce)
@@ -308,6 +325,7 @@ main_loop:
     jsr jump_player              ; A = jump (real arc); updates spr_y while airborne
     jsr goal_check               ; walked through the goal door? start the clear sequence
     jsr plats_check              ; entering the end area? spawn the two moving platforms
+    jsr spawn_check              ; enemy spawn list (fires at the camera's right edge)
     jsr coin_collect             ; grab floating coins Mario walked/jumped into
     jsr update_objects           ; mushroom/coin physics + mushroom pickup
     jsr animate_player           ; pick the pose
@@ -1079,6 +1097,25 @@ main_loop:
     ror fb_col0
     lsr fb_col0+1
     ror fb_col0
+    stz spawn_idx                ; fast-forward the spawn list to the checkpoint (else all
+@sff:                            ; earlier entries would fire at once on the first frame)
+    lda spawn_idx
+    asl
+    asl
+    tay
+    lda spawn_table+1,y
+    cmp #$FF
+    beq @sffd
+    cmp cam_x+1
+    bcc @sfn
+    bne @sffd
+    lda spawn_table,y
+    cmp cam_x
+    bcs @sffd
+@sfn:
+    inc spawn_idx
+    bra @sff
+@sffd:
     stz scroll_s
     stz prev_scroll_s
     stz XSCROLL
@@ -1100,6 +1137,9 @@ main_loop:
     stz mc_tmr                    ; reset the multi-coin block (level restarts fresh)
     lda #$FF
     sta mc_colh
+    stz mario_shrink
+    stz hurt_inv
+    stz spawn_idx                 ; respawn: enemies re-fire... see below (fast-forwarded)
     jsr clear_objects             ; drop any live mushroom/coins
     jsr clear_tile_mod            ; reset bumped/broken blocks for the fresh attempt
     stz shift_px
@@ -1956,6 +1996,25 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
     ror fb_col0
     lsr fb_col0+1
     ror fb_col0
+    stz spawn_idx                ; fast-forward the spawn list to the checkpoint (else all
+@sff:                            ; earlier entries would fire at once on the first frame)
+    lda spawn_idx
+    asl
+    asl
+    tay
+    lda spawn_table+1,y
+    cmp #$FF
+    beq @sffd
+    cmp cam_x+1
+    bcc @sfn
+    bne @sffd
+    lda spawn_table,y
+    cmp cam_x
+    bcs @sffd
+@sfn:
+    inc spawn_idx
+    bra @sff
+@sffd:
     stz scroll_s
     stz prev_scroll_s
     stz XSCROLL
@@ -1975,6 +2034,9 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
     stz mc_tmr
     lda #$FF
     sta mc_colh
+    stz spawn_idx
+    stz mario_shrink
+    stz hurt_inv
     jsr clear_objects
     jsr clear_tile_mod
     stz shift_px
@@ -2918,6 +2980,10 @@ FB_MAX_COL = level0_cols - 24    ; last fb_col0 that keeps cols fb_col0..+23 in 
     lda star_flash               ; star invincibility: Mario blinks (skip the draw this phase;
     beq :+                       ; the erase runs every frame regardless, so nothing goes stale)
     rts
+:   lda hurt_inv                 ; post-hit mercy: blink too
+    and #2
+    beq :+
+    rts
 :                                ; (during the goal sequence Mario stays VISIBLE, standing
                                  ;  framed in the door arch -- original-accurate)
     lda mario_vx                 ; sub-pixel offset within the byte (VRAM pixel X = spr_x + scroll_s)
@@ -2931,7 +2997,8 @@ FB_MAX_COL = level0_cols - 24    ; last fb_col0 that keeps cols fb_col0..+23 in 
     asl
     asl                          ; *4 = byte offset into the pose table
     tax
-    lda mario_grow               ; growing? flash big<->small every 4 frames (RE: $ffa6 bit2)
+    lda mario_grow               ; growing (or shrinking)? flash big<->small every 4 frames
+    ora mario_shrink
     beq @sizesel
     and #$04
     bne @big                     ; timer bit2 set -> big tiles this frame
@@ -3060,6 +3127,12 @@ POP_1000_R = $57                 ; "00"
 POP_1UP_L  = $5E                 ; "1U"        (popup value $ff -> tiles $5E,$5F)
 POP_1UP_R  = $5F                 ; "P."
 HEART_TILE = $84                 ; heart = 1 OBJ tile (metasprite param $17)
+OBJ_CHIB   = 12                  ; Chibibo/Goombo (SML type $00): leftward walker
+OBJ_SQUASH = 13                  ; squashed enemy corpse: static tile (in o_vx), short timer
+CHIB_TA    = $90                 ; Chibibo walk frames (metasprite params $00/$01)
+CHIB_TB    = $91
+POP_100_L  = $59                 ; "100" popup = value $01 -> tiles $59,$58 (bank2 $5892)
+POP_100_R  = $58
 STAR_TA    = $86                 ; star twinkles between $86 and $85 (param $19 list)
 STAR_TB    = $85
 BALL_TILE  = $60                 ; superball = 1 OBJ tile (mGBA OAM trace)
@@ -3814,6 +3887,272 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     rts
 .endproc
 
+; --- ENEMIES (stage 1: Chibibo, SML type $00) ---------------------------------
+; spawn_check: fire spawn-table entries whose fire_cam <= cam_x. An enemy enters at the
+; screen's right edge (world x = cam + 192, the streaming margin), at the entry's o_y.
+.proc spawn_check
+    lda spawn_idx
+    asl
+    asl
+    tay
+    lda spawn_table+1,y          ; fire_cam hi ($FF = end of table)
+    cmp #$FF
+    beq @done
+    cmp cam_x+1
+    bcc @fire
+    bne @done
+    lda spawn_table,y
+    cmp cam_x
+    bcc @fire
+    bne @done
+@fire:
+    lda spawn_table+3,y          ; type: only Chibibo ($00) handled so far
+    bne @skip
+    jsr spawn_chib
+@skip:
+    inc spawn_idx
+    bra spawn_check              ; several entries can share a fire column
+@done:
+    rts
+.endproc
+
+.proc spawn_chib                 ; Y = table byte offset (preserved by find_free_obj? no ->
+    phy                          ; save it)
+    jsr find_free_obj
+    ply
+    bcs @full
+    lda #OBJ_CHIB
+    sta o_type,x
+    lda cam_x                    ; world x = cam + 192 (enters from the right margin)
+    clc
+    adc #192
+    sta o_xl,x
+    lda cam_x+1
+    adc #0
+    sta o_xh,x
+    lda spawn_table+2,y          ; feet line from the table
+    sta o_y,x
+    lda #$FF                     ; walks LEFT (toward Mario), 1px/update
+    sta o_vx,x
+    stz o_st,x
+    stz o_tmr,x
+@full:
+    rts
+.endproc
+
+; upd_chib: the Chibibo walker -- mushroom-style movement (every other frame) + COMBAT.
+; RE ($08C7): stomp iff Mario's y is 4+ px above the enemy's (within the x window);
+; stomp -> squash + fixed bounce + "100"; side -> hurt (big: shrink, small: death).
+.proc upd_chib
+    lda frame_count
+    lsr
+    bcs :+
+    jmp @combat                  ; movement at 30Hz; combat EVERY frame
+:   ldx oi
+    lda o_xl,x                   ; feet_col = (o_x + 4) >> 3
+    clc
+    adc #4
+    sta feet_col
+    lda o_xh,x
+    adc #0
+    sta feet_col+1
+    lsr feet_col+1
+    ror feet_col
+    lsr feet_col+1
+    ror feet_col
+    lsr feet_col+1
+    ror feet_col
+    lda o_y,x
+    lsr
+    lsr
+    lsr
+    sta mrow
+    jsr read_solid
+    bne @grounded
+    ldx oi                       ; airborne: fall 2px/update
+    lda o_y,x
+    clc
+    adc #2
+    sta o_y,x
+    bra @combat
+@grounded:
+    ldx oi                       ; snap + walk with wall reversal (mushroom pattern)
+    lda mrow
+    asl
+    asl
+    asl
+    sta o_y,x
+    lda o_vx,x
+    bmi @wleft
+    lda o_xl,x
+    clc
+    adc #8
+    sta feet_col
+    lda o_xh,x
+    adc #0
+    sta feet_col+1
+    bra @wchk
+@wleft:
+    lda o_xl,x
+    sec
+    sbc #1
+    sta feet_col
+    lda o_xh,x
+    sbc #0
+    sta feet_col+1
+@wchk:
+    lsr feet_col+1
+    ror feet_col
+    lsr feet_col+1
+    ror feet_col
+    lsr feet_col+1
+    ror feet_col
+    ldx oi
+    lda o_y,x
+    lsr
+    lsr
+    lsr
+    dea                          ; body row (one above the feet)
+    sta mrow
+    jsr read_solid
+    beq @wmove
+    ldx oi                       ; wall -> reverse
+    lda o_vx,x
+    eor #$FF
+    ina
+    sta o_vx,x
+    bra @combat
+@wmove:
+    jsr mush_xmove
+@combat:
+    ldx oi
+    lda o_y,x                    ; cull once fallen off the bottom
+    cmp #160
+    bcc :+
+    cmp #240
+    bcs :+
+    stz o_type,x
+    rts
+:   lda cam_x                    ; |mario_center - enemy_center| < 10 ?
+    clc
+    adc spr_x
+    sta tmpL2
+    lda cam_x+1
+    adc #0
+    sta tmpH2
+    lda tmpL2
+    clc
+    adc #8
+    sta tmpL2
+    bcc :+
+    inc tmpH2
+:   lda o_xl,x
+    clc
+    adc #4
+    sta tmpL3
+    lda o_xh,x
+    adc #0
+    sta tmpH3
+    sec
+    lda tmpL2
+    sbc tmpL3
+    sta tmpL3
+    lda tmpH2
+    sbc tmpH3
+    sta tmpH3
+    bpl @pdx
+    sec
+    lda #0
+    sbc tmpL3
+    sta tmpL3
+    lda #0
+    sbc tmpH3
+    sta tmpH3
+@pdx:
+    lda tmpH3
+    bne @done
+    lda tmpL3
+    cmp #10
+    bcs @done
+    lda spr_y                    ; y overlap: |spr_y - o_y| < 14 (his feet vs its feet)
+    sec
+    sbc o_y,x
+    bpl :+
+    eor #$FF
+    ina
+:   cmp #14
+    bcs @done
+    lda mario_starT              ; star -> instant kill
+    bne @kill
+    lda spr_y                    ; STOMP TEST (RE $08C7): Mario at least 4px above
+    clc
+    adc #4
+    cmp o_y,x
+    bcc @stomp
+    ; --- side contact: hurt Mario ---
+    lda hurt_inv
+    bne @done
+    lda mario_grow
+    ora mario_shrink
+    bne @done
+    lda mario_big
+    beq @die
+    lda #$50                     ; big -> the 80-frame shrink flash (mirror of grow)
+    sta mario_shrink
+    stz mario_duck
+    rts
+@die:
+    lda #1                       ; small -> death (144f pause + checkpoint respawn)
+    sta respawn_req
+    rts
+@stomp:
+    ldx oi                       ; enemy -> squashed corpse
+    lda #OBJ_SQUASH
+    sta o_type,x
+    lda #CHIB_TB                 ; squash frame (RE: type $01 shows param $02 = tile $91)
+    sta o_vx,x
+    lda #32
+    sta o_tmr,x
+    lda #1                       ; Mario's fixed stomp bounce: a short hop
+    sta jump_state
+    lda #14
+    sta arc_idx
+    stz fall_v
+    stz ride
+    lda #$00                     ; +100 and the "100" popup
+    ldx #$01
+    jsr add_score
+    lda #POP_100_L
+    ldy #POP_100_R
+    jsr spawn_popup
+@done:
+    rts
+@kill:
+    ldx oi                       ; star kill: corpse + points, no bounce
+    lda #OBJ_SQUASH
+    sta o_type,x
+    lda #CHIB_TB
+    sta o_vx,x
+    lda #24
+    sta o_tmr,x
+    lda #$00
+    ldx #$01
+    jsr add_score
+    lda #POP_100_L
+    ldy #POP_100_R
+    jsr spawn_popup
+    rts
+.endproc
+
+; upd_squash: a squashed corpse -- sits still, then vanishes.
+.proc upd_squash
+    ldx oi
+    dec o_tmr,x
+    bne :+
+    stz o_type,x
+:   rts
+.endproc
+
 ; ball_active: C=1 if a superball is already live (only one at a time, per the original).
 .proc ball_active
     ldx #7
@@ -4018,7 +4357,10 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     lda #BALL_SPD
     sta o_vy,x
 @edge:
-    ldx oi                       ; off-screen? expire (Y off top/bottom, or X out of view)
+    jsr ball_hits                ; superball vs enemies (the ball vanishes on a kill)
+    ldx oi
+    lda o_type,x
+    beq @done2
     lda o_y,x
     cmp #160
     bcs @expire
@@ -4036,6 +4378,68 @@ riding_this:                     ; Z=1 if Mario rides slot oi
 @expire:
     ldx oi
     stz o_type,x
+@done2:
+    rts
+.endproc
+
+; ball_hits: scan for an enemy overlapping the ball (slot oi): |dx|<10, |dy|<10 ->
+; squash the enemy (+100 & popup) and expire the ball (SML: it vanishes on a kill).
+.proc ball_hits
+    stz oi2
+@loop:
+    ldx oi2
+    lda o_type,x
+    cmp #OBJ_CHIB
+    bne @next
+    ldy oi                       ; dx = |ball - enemy| (16-bit)
+    lda o_xl,y
+    sec
+    sbc o_xl,x
+    sta tmpL3
+    lda o_xh,y
+    sbc o_xh,x
+    beq @dxok                    ; hi 0 -> non-negative small
+    cmp #$FF
+    bne @next                    ; |dx| >= 256
+    lda tmpL3                    ; negative: negate
+    eor #$FF
+    ina
+    sta tmpL3
+    beq @next
+@dxok:
+    lda tmpL3
+    cmp #10
+    bcs @next
+    ldy oi                       ; dy
+    lda o_y,y
+    ldx oi2
+    sec
+    sbc o_y,x
+    bpl :+
+    eor #$FF
+    ina
+:   cmp #10
+    bcs @next
+    lda #OBJ_SQUASH              ; kill: corpse + points; the ball expires
+    sta o_type,x
+    lda #CHIB_TB
+    sta o_vx,x
+    lda #24
+    sta o_tmr,x
+    lda #$00
+    ldx #$01
+    jsr add_score
+    lda #POP_100_L
+    ldy #POP_100_R
+    jsr spawn_popup
+    ldx oi
+    stz o_type,x
+    rts
+@next:
+    inc oi2
+    lda oi2
+    cmp #8
+    bne @loop
     rts
 .endproc
 
@@ -4084,7 +4488,17 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     beq @platv
     cmp #OBJ_PLATH
     beq @plath
+    cmp #OBJ_CHIB
+    beq @chib
+    cmp #OBJ_SQUASH
+    beq @squash
     jsr upd_mush                 ; OBJ_MUSH and OBJ_HEART (identical walker engine)
+    bra @next
+@chib:
+    jsr upd_chib
+    bra @next
+@squash:
+    jsr upd_squash
     bra @next
 @platv:
     jsr upd_platv
@@ -4530,6 +4944,10 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     jmp @plat
 :   cmp #OBJ_HEART
     beq @heart
+    cmp #OBJ_CHIB
+    beq @chib
+    cmp #OBJ_SQUASH
+    beq @squash
     cmp #OBJ_STAR
     beq @stard
     cmp #OBJ_DEBRIS
@@ -4554,6 +4972,33 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     adc #8
     sta dy
     ldx #HEART_TILE
+    jsr draw_quad
+    rts
+@chib:
+    lda spr_col
+    sta dcol
+    ldx oi
+    lda o_y,x
+    clc
+    adc #8
+    sta dy
+    ldx #CHIB_TA                 ; 2-frame walk ($90/$91)
+    lda frame_count
+    and #8
+    beq :+
+    ldx #CHIB_TB
+:   jsr draw_quad
+    rts
+@squash:
+    lda spr_col
+    sta dcol
+    ldx oi
+    lda o_y,x
+    clc
+    adc #8
+    sta dy
+    lda o_vx,x                   ; corpse tile rides in o_vx
+    tax
     jsr draw_quad
     rts
 @stard:
