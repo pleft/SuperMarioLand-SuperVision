@@ -118,6 +118,8 @@ prev_vis:    .res 1          ; Mario appearance hash (facing^duck^big) at his la
 stream_pend: .res 1          ; margin columns still to stream after a shift (amortized 1/frame)
 scroll_vis:  .res 1          ; scroll value the line-16 IRQ latches (updated ONLY at frame start)
 m_dirty:     .res 1          ; Mario needs erase+redraw this frame
+combo_t:     .res 1          ; stomp-combo window ($ff9c): 50 frames
+combo_n:     .res 1          ; chain count ($ff9d): 0..3, doubles the value code
 hud_row:     .res 1          ; put_hud target row (0 or 1)
 htmp:        .res 1          ; put_hud scratch (digit being blitted)
 rb_vx:       .res 1          ; restore_bg: VRAM pixel X of the region to repaint
@@ -328,6 +330,9 @@ main_loop:
 :   lda hurt_inv                 ; post-hit mercy ticks down (Mario blinks)
     beq :+
     dec hurt_inv
+:   lda combo_t                  ; stomp-combo window ($ff9c) ticks down
+    beq :+
+    dec combo_t
 :   lda mario_shrink             ; big->small shrink running? freeze + flash like the grow
     beq :+
     dec mario_shrink
@@ -4321,6 +4326,8 @@ fly_dy:
     jmp hurt_mario               ; side contact
 @stomp:
     ldx oi
+    lda #$01                     ; base value code (RE $0A29 by phys byte2>>6):
+    sta tmpH2                    ; walkers class 0 = 100
     lda o_type,x
     cmp #OBJ_NOKO
     beq @sbomb
@@ -4335,6 +4342,8 @@ fly_dy:
     stz o_st,x
     bra @sboth
 @sfly:
+    lda #$04                     ; fly class 1 = 400
+    sta tmpH2
     lda #OBJ_SQUASH              ; Fly -> flattened 2-tile corpse ($A8+$A9)
     sta o_type,x
     lda #FLY_SQ
@@ -4357,21 +4366,23 @@ fly_dy:
     sta arc_idx
     stz fall_v
     stz ride
-    lda #$00                     ; +100 and the "100" popup
-    ldx #$01
-    jsr add_score
-    lda #POP_100_L
-    ldy #POP_100_R
-    jsr spawn_popup
+    lda tmpH2                    ; value code saved at @stomp entry (fly 400, walkers 100)
+    jsr award_stomp              ; combo-chained score + the right popup tag
 @done:
     rts
 @kill:
     ldx oi                       ; star kill: gone + points, no bounce (dead-flip type
-    lda o_type,x                 ; equivalents $11/$12/$15 just leave the screen)
+    lda #$01                     ; equivalents $11/$12/$15 just leave the screen)
+    sta tmpH2
+    lda o_type,x
     cmp #OBJ_NOKO
     beq @kgone
     cmp #OBJ_FLY
-    beq @kgone
+    bne :+
+    lda #$04
+    sta tmpH2
+    bra @kgone
+:
     lda #OBJ_SQUASH
     sta o_type,x
     lda #CHIB_TB
@@ -4383,13 +4394,70 @@ fly_dy:
 @kgone:
     stz o_type,x
 @kpts:
-    lda #$00
-    ldx #$01
+    lda tmpH2                    ; base value code, no chain on kills
+    jmp award_kill
+.endproc
+
+; award_stomp / award_kill: score + popup from the VALUE CODE (RE $0A29 class table
+; + the bank2 popup engine's code->tiles/points map). A = base code ($01/$04/$08/$50).
+; Stomps run the COMBO chain ($ff9c/$ff9d): within the 50-frame window the code is
+; shifted left by the chain count (max 3): 100-200-400-800, fly 400-800-1000-2000.
+; Kills (ball/star) award the base code only.
+.proc award_stomp
+    pha
+    lda combo_t
+    bne @chain
+    stz combo_n                  ; window expired: chain resets
+    bra @go
+@chain:
+    lda combo_n
+    cmp #3
+    bcs @go
+    inc combo_n
+@go:
+    lda #50
+    sta combo_t
+    pla
+    cmp #$50                     ; 5000 never doubles (cp $50 in the original)
+    bcs award_kill
+    ldy combo_n
+    beq award_kill
+:   asl
+    dey
+    bne :-
+    ; fall through
+.endproc
+.proc award_kill
+    pha
+    tax                          ; add the code as BCD hundreds (the original's amount
+    lda #$00                     ; chain is literally D=code, E=00)
     jsr add_score
-    lda #POP_100_L
-    ldy #POP_100_R
-    jsr spawn_popup
-    rts
+    pla
+    ; code -> popup tiles: left $59+step, right $58; >= $10 -> left $59+step, right $57
+    ldy #$58
+    cmp #$10
+    bcc :+
+    ldy #$57
+    lsr                          ; $10/$20/$40/$50/$80 -> $01/$02/$04/$05/$08
+    lsr
+    lsr
+    lsr
+:   ldx #$59                     ; left tile by code: $01->$59 .. $08->$5D
+    cmp #$02
+    bcc @have
+    ldx #$5A
+    cmp #$04
+    bcc @have
+    ldx #$5B
+    cmp #$05
+    bcc @have
+    ldx #$5C
+    cmp #$08
+    bcc @have
+    ldx #$5D
+@have:
+    txa
+    jmp spawn_popup              ; A = left tile, Y = right tile
 .endproc
 
 ; hurt_mario: shared side-contact/explosion damage (RE: big -> shrink flash + powers
@@ -4772,11 +4840,15 @@ fly_dy:
     ina
 :   cmp #10
     bcs @next
+    lda #$01                     ; value code: walkers 100
+    sta tmpH2
     lda o_type,x                 ; kill: corpse (Chibibo) or gone (Nokobon/Fly); ball expires
     cmp #OBJ_NOKO
     beq :+
     cmp #OBJ_FLY
     bne :++
+    lda #$04                     ; fly 400
+    sta tmpH2
 :   stz o_type,x
     bra @pts
 :   lda #OBJ_SQUASH
@@ -4786,12 +4858,8 @@ fly_dy:
     lda #24
     sta o_tmr,x
 @pts:
-    lda #$00
-    ldx #$01
-    jsr add_score
-    lda #POP_100_L
-    ldy #POP_100_R
-    jsr spawn_popup
+    lda tmpH2                    ; base value code (set per type below)
+    jsr award_kill
     ldx oi
     stz o_type,x
     rts

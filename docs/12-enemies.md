@@ -137,3 +137,21 @@ each + own X-mirror, **44 frames**, contact hurts ($3186 byte2=$FF). Ball/star k
 per 3 frames), drifts 1px/2f, ~24px/hop, ~103f period. Stomp → flattened pair `$A8+$A9`
 (OBJ_SQUASH pair flag in o_st). Engine notes: shared `enemy_contact` proc (cull/overlap/star/
 stomp-by-type/hurt); tall/wide erase via o_pw bit7 + width; bg_chardata → bank 0 (FIXED full).
+
+## Enemy SCORES + popup tags + the stomp COMBO — RE'd exactly [2026-07-04]
+(Was wrongly hardcoded 100-for-everything; the user caught the fly at 400.)
+- **Base value** = phys byte2 bits 6-7 → class table `$0A29` = `01 04 08 50` (value CODES in
+  BCD hundreds): class 0 = 100 (Chibibo `$00`, Nokobon `$00`), class 1 = 400 (Fly byte2 `$41`),
+  class 2 = 800, class 3 = 5000.
+- **Stomp combo** (`$ff9c` 50-frame window, `$ff9d` chain 0..3, code re-read fresh then
+  `sla`×chain; codes ≥ $50 never double): 100→200→400→800; fly 400→800→1000→2000.
+- **Code → points**: the code IS the score in BCD hundreds (second chain in the bank2 popup
+  engine confirms: DE=$0100 stepping with the code). Port: `add_score(lo=0, hi=code)`.
+- **Code → popup tiles** (bank2 `$5892` engine): left = `$59`+step ($01/$02/$04/$05/$08 →
+  step 0-4), right = `$58` ("00"); codes ≥ $10 shift right glyph to `$57` ("000") with the
+  same left progression; `$FE` = 1UP = `$5E/$5F`.
+- Port procs: `award_stomp` (chains, combo_t/combo_n) / `award_kill` (base only — ball & star).
+  py65: fly stomp = 400 ✓; chained chibibo right after = 200 (total 600) ✓.
+- **AI VM opcode `$F9 nn` decoded** (was missing from the table): writes nn to `$dff8` =
+  SOUND trigger (the `$FA nn` below it writes `$dfe0`). The explosion's `F9 01` = its bang —
+  audio phase, not visual.
