@@ -403,3 +403,13 @@ openings block him.
   the " TIME UP " variant ($1D14) — wire with time-up death later.
 - **Small Mario = 12px box** (wall test skips his top body row): passes under head-row
   overhangs; big Mario blocks. User-verified on the pipe ledge + room corridors.
+
+## Star correction [2026-07-04, user-caught]: NO terrain collision
+The port's floor-bounce was an early improvisation. The ROM: live star `$34` phys byte0 =
+`$0C` — the Y-collision-response bits (`&$30`) are ZERO (the mushroom's `$24` has them; it
+lands). The real motion = the script at `$3964`: decelerating rise / accelerating fall with
++1 x-drift, then the `$30` tail (Y+3, X **stopped**) ×5 states, looping — each cycle net-sinks
+~15px: the star arcs THROUGH terrain and exits the screen. Wall-reverse ($04 bit) is real and
+kept. Port: `star_ay/star_ax` looping tables, off-screen cull, no floor test.
+LESSON (again): every behavior must trace to a phys byte or script — "it bounces" was memory,
+not RE.
