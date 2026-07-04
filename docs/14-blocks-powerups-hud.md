@@ -413,3 +413,13 @@ lands). The real motion = the script at `$3964`: decelerating rise / acceleratin
 kept. Port: `star_ay/star_ax` looping tables, off-screen cull, no floor test.
 LESSON (again): every behavior must trace to a phys byte or script — "it bounces" was memory,
 not RE.
+
+## TIME UP + title screen [2026-07-04, both harness-verified]
+**TIME UP** (PyBoy capture, forced clock 001): timer 0 → the DEATH HOP (state $03, $da1d=$FF,
+kills regardless of size/star) → " TIME UP " ($1D14's 9 tiles) in the PAUSE window position
+(bottom-right — NOT the GAME OVER scroll) for exactly 160 frames → reload: lives--, checkpoint,
+clock 400. Port: tick_timer→timeup+death_anim; death_frame exit → timeup_strip → do_respawn.
+**Title screen**: extract_title.py boots the ROM in PyBoy at build time and dumps the rendered
+map+tiles (114, compact-remapped, SV-packed → bank0). Drawn centered (GB 18 rows on SV 20),
+holds for Start; game_over→reset→title = the original's flow. The TOP score display shows the
+captured zeros (top-score tracking = future nicety).
