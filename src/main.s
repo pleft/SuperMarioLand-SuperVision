@@ -1791,9 +1791,11 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
     lda spr_x
     cmp #128
     bcc @wdone
-    lda #5                       ; reached the prize -> walk BACK to the centre ladder
-    sta bonus_phase              ; (original: Mario celebrates at the top-middle, under
-    ldx b_floor                  ; the lives counter -- user screenshot + OAM capture)
+    lda #5                       ; reached the prize -> stand there ~68 frames, then the
+    sta bonus_phase              ; original does a hard CUT to the top-centre and hops
+    lda #68                      ; (harness capture: (128,128) f116-183 -> (88,56) f184)
+    sta b_awt
+    ldx b_floor
     lda b_prz,x
     cmp #$E5                     ; flower?
     beq @flower
@@ -1819,9 +1821,6 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
     cmp #5
     bne :+
     jmp @wback
-:   cmp #9
-    bne :+
-    jmp @cl2top
 :   cmp #10
     bne :+
     jmp @flowert
@@ -1883,78 +1882,29 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
     sta b_awt
 @adone:
     rts
-    ; ---- phase 5: walk back left to the centre ladder column (x=80) ----
+    ; ---- phase 5: stand at the pedestal ~68 frames, then the CUT to the top-centre ----
 @wback:
-    lda spr_x
-    cmp #81
-    bcc @atladder
-    lda #1                       ; face left, walk pose
-    sta mario_facing
-    lda frame_count
-    and #8
-    lsr
-    lsr
-    lsr
-    ina
-    sta mario_frame              ; alternate walk frames 1/2
-    jsr b_erase
-    jsr b_fixfloor
-    dec spr_x
-    lda spr_x                    ; keep the draw position in sync (the bug: Mario kept
-    sta mario_vx                 ; being DRAWN at the stale pedestal x while spr_x walked)
+    dec b_awt
+    beq @cut
+    rts
+@cut:
+    stz mario_frame              ; erase him at the pedestal, repaint the floor there,
+    jsr b_erase                  ; and reappear at the top-centre in one frame -- exactly
+    jsr b_fixfloor               ; the original's hard cut (no walk, no climb)
+    lda #80
+    sta spr_x
+    sta mario_vx
+    lda #40
+    sta spr_y
+    stz b_floor
+    stz mario_facing
+    jsr b_fixfloor               ; (top floor cells under the new spot)
     jsr draw_player
-    rts
-@atladder:
-    lda b_floor                  ; on the top floor already? straight to the hop
-    beq @hopinit
-    stz tmpL3                    ; draw the ladders for every gap between here and the top
-:   lda #0
-    ldy tmpL3
-    jsr b_ladder_cell
-    inc tmpL3
-    lda tmpL3
-    cmp b_floor
-    bne :-
-    lda #9
-    sta bonus_phase
-    rts
-@hopinit:
     lda #8
     sta bonus_phase
     stz b_gap
     lda #4
     sta b_awt
-    stz mario_facing
-    lda spr_x
-    sta mario_vx
-    rts
-    ; ---- phase 9: climb the ladders to the top floor ----
-@cl2top:
-    lda #3                       ; climb-ish pose
-    sta mario_frame
-    jsr b_erase
-    lda spr_y                    ; current gap = (spr_y-41)/24
-    sec
-    sbc #41
-    ldy #0
-:   cmp #24
-    bcc :+
-    sbc #24
-    iny
-    bra :-
-:   sty b_gap
-    jsr b_fixgap
-    lda #0
-    ldy b_gap
-    jsr b_ladder_cell            ; keep the ladder intact behind him
-    dec spr_y
-    jsr draw_player
-    lda spr_y
-    cmp #40
-    bne @cdone2
-    stz b_floor
-    bra @hopinit
-@cdone2:
     rts
     ; ---- phase 10: the flower -- Mario STAYS at the pedestal (user-observed); if he
     ; was small, the GROW FLASH plays right there, then the pause and out ----
