@@ -1,47 +1,38 @@
-# Rule 5: never commit copyrighted / ROM-derived material.
-
-# The user's source ROM (any GB ROM in the tree)
-*.gb
-*.gbc
-
-# Disassembly output that contains verbatim ROM bytes
-disasm/
-
-# Working copy of the symbol file that mgbdis auto-loads (generated from symbols/sml.sym,
-# which IS tracked — it holds our hand-authored RE labels, not ROM bytes).
-/super-mario-land-gb.sym
-
-# Extracted / converted game data (build artifacts derived from the ROM)
-build/
-extracted/
-*.2bpp
-*.1bpp
-*.pal
-*.chr
-*.lvl
 
 # Build outputs
-*.sv
-*.o
-*.lst
-*.map
-
+# Disassembly output that contains verbatim ROM bytes
 # Editor / OS noise
-.DS_Store
-
-# MAME emulator artifacts (it writes config/nvram into CWD subdirs)
-/cfg/svision.cfg
-/cfg/default.cfg
-/cfg/*.cfg.bak
-
-# Emulator snapshots / state (MAME writes snap/<driver>/)
-snap/
-
-# Local Claude Code settings (machine-specific)
-.claude/
-
 # Emulator save files (battery SRAM / states) — runtime artifacts, ROM-adjacent
+# Emulator snapshots / state (MAME writes snap/<driver>/)
+# Extracted / converted game data (build artifacts derived from the ROM)
+# Local Claude Code settings (machine-specific)
+# MAME emulator artifacts (it writes config/nvram into CWD subdirs)
+# Rule 5: never commit copyrighted / ROM-derived material.
+# The user's source ROM (any GB ROM in the tree)
+# Working copy of the symbol file that mgbdis auto-loads (generated from symbols/sml.sym,
+# which IS tracked — it holds our hand-authored RE labels, not ROM bytes).
+*.1bpp
+*.2bpp
+*.chr
+*.gb
+*.gbc
+*.lst
+*.lvl
+*.map
+*.o
+*.pal
+*.s0
 *.sav
 *.srm
 *.ss0
-*.s0
+*.sv
+.DS_Store
+.claude/
+/cfg/*.cfg.bak
+/cfg/default.cfg
+/cfg/svision.cfg
+/super-mario-land-gb.sym
+build/
+disasm/
+extracted/
+snap/
