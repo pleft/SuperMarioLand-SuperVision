@@ -96,3 +96,30 @@ Reproduce: the 10-slot table, the spawn-from-column-list mechanic, the shared
 ballistic physics (already documented), and the script VM + per-type scripts
 (extract the script bytes from the ROM at build time, rule 5). Behavior is fully
 table/script-driven → ports cleanly to the 65C02 with the same data.
+
+## PORT: spawn system + Chibibo — DONE, user-verified [2026-07-04]
+**The spawn counter law (trace-calibrated, zero error): `$c0ab = 12 + camera/16`** — it ticks
+every SIXTEEN pixels (every OTHER column), not per column. An entry (col `C`) fires when the
+counter PASSES `C` → port fire_cam = `(C−12)*16` (STRICT compare: nothing spawns while idle).
+Spawn X = camera+180 (original enters at OAM 188); o_y = GB y − 24. Extractor emits
+`level_NN_spawns.bin` `[fire_cam16, o_y, type]`, skipping hard-mode (bit7) + platform entries.
+Consequence re-derived: the DEATH CHECKPOINTS = `(C_seed−12)*16` = cameras **0/640/1280/1920**.
+Verified fires vs the original: 2nd Chibibo 336 (orig spawned cam 346), the pair 448/464 —
+entering above the r5 bricks (cols 79-81) and staircasing down brick→pipe-top→ledge, exactly
+the original.
+
+**Chibibo (type $00)**: walks left **1px per 3 frames** (trace: 24px/72f; fall 1px/frame),
+wall-reverse, walks off ledges. Walk anim = **tile `$90` mirrored** (params $00/$01 = same
+tile ± flip attr); **`$91` = the squash frame only** (using it as a walk frame looks like
+hopping). Buried-spawn guard: feet+body rows both solid → rise 1 row/update until clear.
+
+**Combat (RE `$08C7` + the `$3186` result table)**: stomp = Mario's y 4+ px above the enemy's
+(position, not velocity) → squash (type+1 via the table: $00→$01, $04→$05 bomb, $0E→$0F) +
+fixed bounce + 100 (+popup `$59/$58`); side contact → star kills / big **shrinks** (`$ff99=3`,
+80f flash = grow mirrored, powers lost, mercy blink after) / small dies. Unstompable flag =
+phys byte1 bit7. Superball kills (ball vanishes). Table byte4 = projectile-kill result types
+($11/$12/$15 = the dead-flip variants).
+
+**TODO next**: Nokobon $04 (tiles $96-$99; squash = BOMB type $05: blink $9A/$9B then explode)
++ fly $0E (params $28/$29 16px metasprites; spawn cab 83 @ x=199; death chain 0E→0F→15→0D
+captured in the traces); death-hop animation; flashing-with-enemies check (perf).
