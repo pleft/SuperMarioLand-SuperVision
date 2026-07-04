@@ -422,4 +422,7 @@ clock 400. Port: tick_timer→timeup+death_anim; death_frame exit → timeup_str
 **Title screen**: extract_title.py boots the ROM in PyBoy at build time and dumps the rendered
 map+tiles (114, compact-remapped, SV-packed → bank0). Drawn centered (GB 18 rows on SV 20),
 holds for Start; game_over→reset→title = the original's flow. The TOP score display shows the
-captured zeros (top-score tracking = future nicety).
+captured zeros (top-score tracking = future nicety). **USER-VERIFIED on Potator** (pixel-clean:
+signboard logo, Mario on the post, TOP/START/©1989 rows). Post-fix: the map index `row*20+col`
+overflowed 8 bits past row 12 (doubled image) → a 16-bit pointer walk. LESSON: any index over
+a >255-byte table needs 16-bit math — the same class as the earlier popup/level-col bugs.
