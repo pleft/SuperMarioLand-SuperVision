@@ -4087,6 +4087,24 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     sta o_vx,x
     bra @combat
 @wmove:
+    ldx oi
+    lda o_type,x                 ; the Nokobon TURNS AT LEDGES (user-verified vs 1-2 in the
+    cmp #OBJ_NOKO                ; original: it patrols platforms without falling off --
+    bne @wm2                     ; phys byte0 bit0, $07 vs the Chibibo's $06)
+    lda o_y,x                    ; floor row in the AHEAD column (feet_col still holds it)
+    lsr
+    lsr
+    lsr
+    sta mrow
+    jsr read_solid
+    bne @wm2                     ; ground ahead -> keep walking
+    ldx oi                       ; edge -> reverse
+    lda o_vx,x
+    eor #$FF
+    ina
+    sta o_vx,x
+    bra @combat
+@wm2:
     ldx oi                       ; ORIGINAL walk speed = 1px per 3 FRAMES (trace: 24px/72f
     inc o_st,x                   ; on the ground) = 2 moves per 3 object-updates
     lda o_st,x
