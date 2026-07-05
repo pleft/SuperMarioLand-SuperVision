@@ -5214,6 +5214,10 @@ title_tiles:                     ; the used tiles, SV-packed
     bcs @full
     lda #OBJ_BALL
     sta o_type,x
+    phx                          ; sfx_play clobbers X (the ball's slot)
+    lda #SFX_DFE0_02             ; the superball throw (user-ID'd: id 1)
+    jsr sfx_play
+    plx
     lda cam_x                    ; o_x = Mario world X (cam_x + spr_x)
     clc
     adc spr_x
