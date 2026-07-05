@@ -165,23 +165,28 @@ def capture(gb, mailbox, value, frames=180):
     m[mailbox] = value
     end = frames
     started = False
+    owned = set()
     for f in range(frames):
         log.frame = f
         gb.run(1)
-        # the driver's channel-ownership flags: bit7 set while the SFX plays
+        # per-channel ownership: the driver sets bit7 while an SFX holds a channel
+        if m[0xDF1F] & 0x80: owned.add(1)
+        if m[0xDF2F] & 0x80: owned.add(2)
+        if m[0xDF3F] & 0x80: owned.add(3)
+        if m[0xDF4F] & 0x80: owned.add(4)
         flags = (m[0xDF1F] | m[0xDF2F] | m[0xDF3F] | m[0xDF4F]) & 0x80
         if flags: started = True
         elif started:
             end = f + 1
             break
     log.writes = [w for w in log.writes if w[0] <= end]
-    return list(log.writes), end
+    return list(log.writes), end, owned
 
-def encode(writes, frames):
-    ch1 = simulate_square(writes, 0xFF13, 0xFF14, 0xFF12, 0xFF11, 0xFF10, frames)
-    ch2 = simulate_square(writes, 0xFF18, 0xFF19, 0xFF17, 0xFF16, None, frames)
-    ch3 = simulate_wave(writes, frames)
-    noi = simulate_noise(writes, frames)
+def encode(writes, frames, owned):
+    ch1 = simulate_square(writes, 0xFF13, 0xFF14, 0xFF12, 0xFF11, 0xFF10, frames) if 1 in owned else {}
+    ch2 = simulate_square(writes, 0xFF18, 0xFF19, 0xFF17, 0xFF16, None, frames) if 2 in owned else {}
+    ch3 = simulate_wave(writes, frames) if 3 in owned else {}
+    noi = simulate_noise(writes, frames) if 4 in owned else {}
     # top 2 tone channels by energy onto the SV squares
     def energy(rows): return sum(v for (_, v, _) in rows.values())
     ranked = sorted([("s", ch1), ("s", ch2), ("w", ch3)], key=lambda kv: -energy(kv[1]))[:2]
@@ -229,8 +234,10 @@ def main():
              [("dfe8", 0xDFE8, v) for v in (2,)]     # the death jingle; more with the music
     blob = bytearray(); table = []
     for name, mb, v in wanted:
-        writes, frames = capture(gb, mb, v)
-        enc = encode(writes, frames)
+        writes, frames, owned = capture(gb, mb, v)
+        if mb == 0xDFE8:                 # jingles play via the MUSIC path: no ownership
+            owned = {1, 2, 3, 4}         # flags; take all channels, full window
+        enc = encode(writes, frames, owned)
         m[0xDFE8] = 0x10                 # re-silence between captures
         for _ in range(30): gb.run(1)
         label = f"{name}_{v:02X}"
