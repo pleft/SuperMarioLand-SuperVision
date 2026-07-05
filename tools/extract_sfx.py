@@ -105,9 +105,21 @@ def gb2sv_wave_freq(x):
     F = int(round(125000.0 / f)) - 1
     return max(0, min(2047, F))
 
+def gb_noise_to_sv(nr43):
+    """GB: freq = 262144 / (r * 2^(s+1)), r=0 counts as 0.5 (NR43 = s<<4 | w<<3 | r).
+    Potator noise (sound.c): freq = 4e6 / (8 << N). Pick N minimizing the freq error."""
+    s = (nr43 >> 4) & 0xF; r = nr43 & 7
+    gb = 262144.0 / ((r if r else 0.5) * (1 << (s + 1)))
+    best, bn = None, 0
+    for N in range(16):
+        sv = 4_000_000.0 / (8 << N)
+        e = abs(sv - gb)
+        if best is None or e < best: best, bn = e, N
+    return bn
+
 def simulate_noise(writes, frames=180):
     rows = {}
-    vol = 0; env_dir = 0; env_per = 0; env_ctr = 0; shift = 0
+    vol = 0; vol_init = 0; env_dir = 0; env_per = 0; env_ctr = 0; svn = 0
     wl = [(f, a, v) for f, a, v in writes if a in (0xFF21, 0xFF22, 0xFF23)]
     wi = 0
     for f in range(frames):
@@ -118,9 +130,9 @@ def simulate_noise(writes, frames=180):
                 vol_init = v >> 4; vol = vol_init
                 env_dir = (v >> 3) & 1; env_per = v & 7; env_ctr = 0; emit = True
             elif a == 0xFF22:
-                shift = (v >> 4) & 0xF; emit = True
+                svn = gb_noise_to_sv(v); emit = True
             elif a == 0xFF23 and (v & 0x80):
-                env_ctr = 0; vol = vol_init if 'vol_init' in dir() else vol; emit = True
+                env_ctr = 0; vol = vol_init; emit = True
         if env_per and vol > 0:
             env_ctr += 1
             if env_ctr >= env_per:
@@ -128,7 +140,7 @@ def simulate_noise(writes, frames=180):
                 vol = min(15, vol + 1) if env_dir else max(0, vol - 1)
                 emit = True
         if emit:
-            rows[f] = ((min(15, shift) << 4) | min(15, vol),)
+            rows[f] = ((svn << 4) | min(15, vol),)
     return rows
 
 def find_write_sites(rom):
