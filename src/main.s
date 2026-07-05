@@ -789,6 +789,8 @@ main_loop:
 ; break_brick: big Mario head-bonks a brick ($82) -> smash it (mod bit makes read_map_tile
 ; return $2C = blank/passable) and score.
 .proc break_brick
+    lda #SFX_DFF8_02             ; the shards smash (user-ID'd: noise effect)
+    jsr sfx_play
     jsr mod_set
     lda feet_col
     sta wcol
@@ -1863,6 +1865,8 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
     bne :+
     lda #$50                     ; small -> the grow flash plays at the pedestal
     sta mario_grow
+    lda #SFX_DFE0_04             ; the powerup-pickup sound (user-ID'd)
+    jsr sfx_play
 :   stz b_awn
     lda #120
     sta b_awt
@@ -3635,8 +3639,9 @@ FLOWER_RISE = 7                  ; emerge: rise 7px out of the block, then sit (
 ; Only spawned when Mario is ALREADY big (small Mario gets a mushroom instead). RE'd from an
 ; mGBA trace (tools/trace_flower.lua): type $2D rises ~7px over ~20 frames while flashing, then
 ; morphs to $2E and sits animating in place; physics byte0=$00 => no gravity, no wall bounce.
-.proc spawn_item_snd             ; item-emerge sound: UNATTRIBUTED (silent until observed
-    rts                          ; -- the $05 static guess was wrong per the user's ear)
+.proc spawn_item_snd             ; the item-emerge sound (user-ID'd: id 8 = $dfe0=$0B)
+    lda #SFX_DFE0_0B
+    jmp sfx_play
 .endproc
 .proc spawn_flower
     jsr spawn_item_snd
@@ -4763,6 +4768,11 @@ fly_dy:
     stz ride
     lda tmpH2                    ; value code saved at @stomp entry (fly 400, walkers 100)
     jsr award_stomp              ; combo-chained score + the right popup tag
+    lda tmpH2
+    cmp #4
+    bne @done
+    lda #SFX_DFF8_03             ; the fly's death sound (user-ID'd) overrides the thud
+    jsr sfx_play
 @done:
     rts
 @kill:
@@ -4868,6 +4878,8 @@ fly_dy:
     bne @no
     lda mario_big
     beq @die
+    lda #SFX_DFE0_06             ; the shrink sound (user-ID'd: big Mario hit)
+    jsr sfx_play
     lda #$50
     sta mario_shrink
     stz mario_duck
@@ -5644,6 +5656,8 @@ title_tiles:                     ; the used tiles, SV-packed
     ina
 :   cmp #16
     bcs @done
+    lda #SFX_DFE0_04             ; the powerup-pickup sound (user-ID'd: mushroom/flower)
+    jsr sfx_play
     lda #1
     sta mario_superball          ; picked up: grant the Superball ability (B fires superballs)
     lda #$00                     ; +1000
@@ -5813,6 +5827,8 @@ title_tiles:                     ; the used tiles, SV-packed
     beq @heart
     lda mario_big
     bne @score                   ; already big -> just score, no grow
+    lda #SFX_DFE0_04             ; the powerup-pickup sound (user-ID'd)
+    jsr sfx_play
     lda #$50
     sta mario_grow               ; start the 80-frame small->big grow (RE: original sets $ffa6=$50)
     stz mario_duck
