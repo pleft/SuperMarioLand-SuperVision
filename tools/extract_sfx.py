@@ -198,9 +198,25 @@ def encode(writes, frames, owned):
     ch2 = simulate_square(writes, 0xFF18, 0xFF19, 0xFF17, 0xFF16, None, frames) if 2 in owned else {}
     ch3 = simulate_wave(writes, frames) if 3 in owned else {}
     noi = simulate_noise(writes, frames) if 4 in owned else {}
-    # top 2 tone channels by energy onto the SV squares
+    # 3 tonal channels -> the SV's 2 squares: drop DOUBLING lines first (channels
+    # playing the same rhythm, e.g. the wave doubling the melody in octaves),
+    # then rank the distinct lines by energy.
     def energy(rows): return sum(v for (_, v, _) in rows.values())
-    ranked = sorted([("s", ch1), ("s", ch2), ("w", ch3)], key=lambda kv: -energy(kv[1]))[:2]
+    def rhythm(rows): return frozenset(rows.keys())
+    cands = [("s", ch1), ("s", ch2), ("w", ch3)]
+    cands = [c for c in cands if c[1]]
+    drop = None
+    for i in range(len(cands)):
+        for j in range(i + 1, len(cands)):
+            a, b = rhythm(cands[i][1]), rhythm(cands[j][1])
+            if a and b and len(a & b) / max(1, min(len(a), len(b))) > 0.7:
+                # doubles: drop the wave one (keep the square timbre), else the quieter
+                pair = [cands[i], cands[j]]
+                pair.sort(key=lambda kv: (kv[0] != "w", energy(kv[1])))
+                drop = pair[0]
+    if drop is not None and len(cands) > 2:
+        cands = [c for c in cands if c is not drop]
+    ranked = sorted(cands, key=lambda kv: -energy(kv[1]))[:2]
     def to_sv(kind, rows):
         out = {}
         for f, (x, v, d) in rows.items():
