@@ -223,7 +223,7 @@ def encode(writes, frames, owned):
             F = gb2sv_wave_freq(x) if kind == "w" else gb2sv_freq(x)
             out[f] = (F, (0x40 if v else 0) | (d << 4) | min(15, v))
         return out
-    ch1 = to_sv(*ranked[0])
+    ch1 = to_sv(*ranked[0]) if len(ranked) > 0 else {}
     ch2 = to_sv(*ranked[1]) if len(ranked) > 1 else {}
     events = {}
     for f, r in ch1.items(): events.setdefault(f, {})['1'] = r
