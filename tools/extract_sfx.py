@@ -270,34 +270,36 @@ def encode(writes, frames, owned):
     out.append(0xFF)
     return bytes(out)
 
+def fresh():
+    gb = GB(state="w1_open.state") if os.path.exists(
+        os.path.join(os.path.dirname(__file__), "..", "build", "states", "w1_open.state")) else GB()
+    gb.m[0xDFE8] = 0x10                  # stop the music
+    for _ in range(40): gb.run(1)
+    return gb
+
 def main():
     os.makedirs(OUT, exist_ok=True)
-    gb = GB(state=os.path.join("w1_open.state")) if os.path.exists(
-        os.path.join(os.path.dirname(__file__), "..", "build", "states", "w1_open.state")) else GB()
-    m = gb.m
-    m[0xDFE8] = 0x10                     # stop the music
-    for _ in range(40): gb.run(1)
-    wanted = [("dfe0", 0xDFE0, v) for v in (1, 2, 3, 4, 7, 8)] + \
+    wanted = [("dfe0", 0xDFE0, v) for v in (1, 2, 3, 4, 5, 6, 7, 8, 0x0B)] + \
              [("dff8", 0xDFF8, v) for v in (1, 2, 3)] + \
              [("dfe8", 0xDFE8, v) for v in (2,)]     # the death jingle; more with the music
     blob = bytearray(); table = []
     for name, mb, v in wanted:
+        gb = fresh()                     # DETERMINISTIC: a fresh session per capture
+        _hooked.clear()                  # (re-hook the new PyBoy instance)
         writes, frames, owned = capture(gb, mb, v)
+        gb.stop()
         if mb == 0xDFE8:                 # jingles play via the MUSIC path: no ownership
             owned = {1, 2, 3}            # flags; tonal channels only -- the noise writes
                                          # during a jingle are the SILENCED level music's
                                          # percussion still being serviced (user-verified:
                                          # the original's death jingle has NO drums)
         enc = encode(writes, frames, owned)
-        m[0xDFE8] = 0x10                 # re-silence between captures
-        for _ in range(30): gb.run(1)
         label = f"{name}_{v:02X}"
         if len(enc) <= 3:                # empty capture
             table.append((label, -1)); continue
         table.append((label, len(blob)))
         blob += enc
         print(f"SFX {label}: {len(enc)} bytes")
-    gb.stop()
     with open(os.path.join(OUT, "sfx.bin"), "wb") as f:
         f.write(bytes(blob))
     with open(os.path.join(OUT, "sfx.inc"), "w") as f:

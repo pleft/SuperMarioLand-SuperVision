@@ -586,6 +586,8 @@ main_loop:
 ;   block stays live (drawn as a brick $82) for a hard 255-frame window from the FIRST bonk,
 ;   coins per bonk, then converts to used on the first bonk after expiry (RE: Jump_000_1888).
 .proc hit_qblock
+    lda #SFX_DFE0_02             ; block bump (candidate id -- user-ear to confirm)
+    jsr sfx_play
     jsr find_block               ; multi-coin? register the cell FIRST, so the hop below
     bcc @reg_done                ; already shows the brick ($82) even on the very first bonk
     cmp #$c0
@@ -695,6 +697,8 @@ main_loop:
 
 ; award_coin: +1 coin (BCD), +100 score, and a 1-up on the 100th coin.
 .proc award_coin
+    lda #SFX_DFE0_07             ; coin chime (candidate id -- user-ear to confirm)
+    jsr sfx_play
     lda #$00
     ldx #$01                     ; a coin is worth +100 points (SML Call_000_1bff)
     jsr add_score
@@ -793,6 +797,8 @@ main_loop:
     lda feet_col+1
     sta wcol+1
     jsr redraw_one               ; redraw as blank
+    lda #SFX_DFE0_0B             ; brick smash ($0B: the blank-tile+sound routine at $0E71)
+    jsr sfx_play
     jsr spawn_debris4            ; burst into 4 shards (2 arcs x 2 directions)
     lda #$50                     ; +50 points
     ldx #$00
@@ -1857,6 +1863,8 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
     bne :+
     lda #$50                     ; small -> the grow flash plays at the pedestal
     sta mario_grow
+    lda #SFX_DFE0_06
+    jsr sfx_play
 :   stz b_awn
     lda #120
     sta b_awt
@@ -2917,6 +2925,8 @@ TIMER_RATE = 40                  ; frames per clock unit (SML's $da00 sub-counte
     lda timer                    ; hit 000? TIME-UP death: the hop plays (harness: state
     ora timer+1                  ; $03 fires with $da1d=$FF regardless of size/star),
     bne :+                       ; then the " TIME UP " strip, then the reload
+    lda #SFX_DFE8_02             ; the death jingle plays on time-up too
+    jsr sfx_play
     lda #1
     sta timeup
     sta death_anim
@@ -3586,6 +3596,9 @@ FLOWER_RISE = 7                  ; emerge: rise 7px out of the block, then sit (
 ; then drop + walk. The 1-up heart uses the IDENTICAL engine in the original (types $2A/$2B
 ; share the $28/$29 physics + script; only the sprite param differs).
 .proc spawn_walker
+    pha
+    jsr spawn_item_snd
+    pla
     sta tmpH
     jsr find_free_obj
     bcs @full
@@ -3611,7 +3624,12 @@ FLOWER_RISE = 7                  ; emerge: rise 7px out of the block, then sit (
 ; Only spawned when Mario is ALREADY big (small Mario gets a mushroom instead). RE'd from an
 ; mGBA trace (tools/trace_flower.lua): type $2D rises ~7px over ~20 frames while flashing, then
 ; morphs to $2E and sits animating in place; physics byte0=$00 => no gravity, no wall bounce.
+.proc spawn_item_snd             ; shared: the item-emerge sound ($1801 region: $dfe0=$05)
+    lda #SFX_DFE0_05
+    jmp sfx_play
+.endproc
 .proc spawn_flower
+    jsr spawn_item_snd
     jsr find_free_obj
     bcs @full
     lda #OBJ_FLOWER
@@ -3649,6 +3667,7 @@ STAR_ARC_N = 42
 
 ; spawn_star: rise straight out of the block (script: 2 updates x 4px), then bounce forward.
 .proc spawn_star
+    jsr spawn_item_snd
     jsr find_free_obj
     bcs @full
     lda #OBJ_STAR
@@ -5745,6 +5764,8 @@ title_tiles:                     ; the used tiles, SV-packed
     bne @score                   ; already big -> just score, no grow
     lda #$50
     sta mario_grow               ; start the 80-frame small->big grow (RE: original sets $ffa6=$50)
+    lda #SFX_DFE0_06             ; the grow sound ($0B71 region: grow start writes $dfe0=$06)
+    jsr sfx_play
     stz mario_duck
 @score:
     lda #$00
