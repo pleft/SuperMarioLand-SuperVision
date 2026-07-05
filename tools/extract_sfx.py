@@ -55,9 +55,10 @@ def simulate_square(writes, lo_a, hi_a, vol_a, len_a, sweep_a=None, frames=180):
                 emit = True
             elif a == len_a:
                 duty = (v >> 6) & 3; length = v & 63
+                len_frames = (64 - length) * 59.7 / 256.0   # NRx1 write reloads the counter
             elif sweep_a is not None and a == sweep_a:
                 sw_per = (v >> 4) & 7; sw_dir = (v >> 3) & 1; sw_shift = v & 7
-        if len_en and vol > 0:
+        if len_en and vol > 0 and len_frames > 0:        # countdown only when ARMED
             len_frames -= 1.0
             if len_frames <= 0:
                 vol = 0; emit = True                     # the hw length counter cut
@@ -202,7 +203,12 @@ def encode(writes, frames, owned):
     # playing the same rhythm, e.g. the wave doubling the melody in octaves),
     # then rank the distinct lines by energy.
     def energy(rows): return sum(v for (_, v, _) in rows.values())
-    def rhythm(rows): return frozenset(rows.keys())
+    def rhythm(rows):
+        on = []; px = None
+        for f in sorted(rows):
+            x = rows[f][0]
+            if x != px: on.append(f); px = x
+        return frozenset(on)                       # NOTE onsets, not envelope rows
     cands = [("s", ch1), ("s", ch2), ("w", ch3)]
     cands = [c for c in cands if c[1]]
     drop = None
