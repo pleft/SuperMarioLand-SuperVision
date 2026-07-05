@@ -140,8 +140,11 @@ def simulate_noise(writes, frames=180):
                 vol = min(15, vol + 1) if env_dir else max(0, vol - 1)
                 emit = True
         if emit:
-            rows[f] = ((svn << 4) | min(15, vol),)
-    return rows
+            v = (vol + 1) // 2               # NOISE MIX LEVEL: Potator mixes all channels
+            rows[f] = ((svn << 4) | min(15, v),)   # at equal raw weight; the GB's percussion
+    return rows                                    # sits deeper in its 4-voice bipolar mix.
+                                                   # 50% is the energy-equivalent default --
+                                                   # the one deliberate MIX knob (not RE).
 
 def find_write_sites(rom):
     """Bank-3 code addresses of `ldh [c],a` (E2) and `ldh [$10-$26],a` (E0 xx)."""
