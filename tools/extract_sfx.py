@@ -280,6 +280,7 @@ def fresh():
 def main():
     os.makedirs(OUT, exist_ok=True)
     wanted = [("dfe0", 0xDFE0, v) for v in (1, 2, 3, 4, 5, 6, 7, 8, 0x0B)] + \
+             [("dff0", 0xDFF0, 1)] + \
              [("dff8", 0xDFF8, v) for v in (1, 2, 3)] + \
              [("dfe8", 0xDFE8, v) for v in (2,)]     # the death jingle; more with the music
     blob = bytearray(); table = []

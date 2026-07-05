@@ -586,8 +586,6 @@ main_loop:
 ;   block stays live (drawn as a brick $82) for a hard 255-frame window from the FIRST bonk,
 ;   coins per bonk, then converts to used on the first bonk after expiry (RE: Jump_000_1888).
 .proc hit_qblock
-    lda #SFX_DFE0_02             ; block bump (candidate id -- user-ear to confirm)
-    jsr sfx_play
     jsr find_block               ; multi-coin? register the cell FIRST, so the hop below
     bcc @reg_done                ; already shows the brick ($82) even on the very first bonk
     cmp #$c0
@@ -697,8 +695,8 @@ main_loop:
 
 ; award_coin: +1 coin (BCD), +100 score, and a 1-up on the 100th coin.
 .proc award_coin
-    lda #SFX_DFE0_07             ; coin chime (candidate id -- user-ear to confirm)
-    jsr sfx_play
+    lda #SFX_DFF0_01             ; the coin chime (wave-channel effect, hook-attributed:
+    jsr sfx_play                 ; seq $6F3B fires on the coin-block bonk)
     lda #$00
     ldx #$01                     ; a coin is worth +100 points (SML Call_000_1bff)
     jsr add_score
@@ -797,8 +795,6 @@ main_loop:
     lda feet_col+1
     sta wcol+1
     jsr redraw_one               ; redraw as blank
-    lda #SFX_DFE0_0B             ; brick smash ($0B: the blank-tile+sound routine at $0E71)
-    jsr sfx_play
     jsr spawn_debris4            ; burst into 4 shards (2 arcs x 2 directions)
     lda #$50                     ; +50 points
     ldx #$00
@@ -953,6 +949,8 @@ main_loop:
     beq @qblock
     cmp #$82                      ; $82 = breakable brick
     beq @brick
+    lda #SFX_DFE0_03              ; plain solid/used block: the THUD (hook-attributed:
+    jsr sfx_play                  ; the used-block bonk fires $dfe0=$03 -- shared w/ stomp)
     bra @bonk
 @qblock:
     jsr hit_qblock                ; spawn coin or mushroom per the content table
@@ -973,6 +971,8 @@ main_loop:
     bne @smash
     lda #$82
     jsr spawn_bounce
+    lda #SFX_DFE0_03              ; small Mario bonking a brick: the same thud
+    jsr sfx_play
     bra @bonk
 @smash:
     jsr break_brick               ; big Mario smashes it
@@ -1863,8 +1863,6 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
     bne :+
     lda #$50                     ; small -> the grow flash plays at the pedestal
     sta mario_grow
-    lda #SFX_DFE0_06
-    jsr sfx_play
 :   stz b_awn
     lda #120
     sta b_awt
@@ -1990,6 +1988,19 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
 ; payload (3/3/1 bytes); delay $FF ends the stream. ---
 .proc sfx_play                   ; A = SFX id (see build/audio/sfx.inc)
     tax
+    lda sfx_used                 ; silence the interrupted stream's channels first --
+    and #1                       ; an orphaned noise channel otherwise drones forever
+    beq :+                       ; (user-caught: jump during the explosion)
+    stz CH1_VOLDUTY
+:   lda sfx_used
+    and #2
+    beq :+
+    stz CH2_VOLDUTY
+:   lda sfx_used
+    and #4
+    beq :+
+    stz CH4_FREQVOL
+:
     lda sfx_offsets_lo,x
     clc
     adc #<sfx_data
@@ -3624,9 +3635,8 @@ FLOWER_RISE = 7                  ; emerge: rise 7px out of the block, then sit (
 ; Only spawned when Mario is ALREADY big (small Mario gets a mushroom instead). RE'd from an
 ; mGBA trace (tools/trace_flower.lua): type $2D rises ~7px over ~20 frames while flashing, then
 ; morphs to $2E and sits animating in place; physics byte0=$00 => no gravity, no wall bounce.
-.proc spawn_item_snd             ; shared: the item-emerge sound ($1801 region: $dfe0=$05)
-    lda #SFX_DFE0_05
-    jmp sfx_play
+.proc spawn_item_snd             ; item-emerge sound: UNATTRIBUTED (silent until observed
+    rts                          ; -- the $05 static guess was wrong per the user's ear)
 .endproc
 .proc spawn_flower
     jsr spawn_item_snd
@@ -5764,8 +5774,6 @@ title_tiles:                     ; the used tiles, SV-packed
     bne @score                   ; already big -> just score, no grow
     lda #$50
     sta mario_grow               ; start the 80-frame small->big grow (RE: original sets $ffa6=$50)
-    lda #SFX_DFE0_06             ; the grow sound ($0B71 region: grow start writes $dfe0=$06)
-    jsr sfx_play
     stz mario_duck
 @score:
     lda #$00
