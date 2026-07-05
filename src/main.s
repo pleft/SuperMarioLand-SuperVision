@@ -1042,6 +1042,7 @@ main_loop:
 :   lda frame_flag
     beq :-
     stz frame_flag
+    jsr sfx_tick                 ; the death jingle keeps playing through the pause
     dec tmpL3
     bne :-
     lda lives                    ; dying with no spare lives -> GAME OVER
@@ -2185,6 +2186,7 @@ sfx_data:
     lda frame_flag
     beq @wait1
     stz frame_flag
+    jsr sfx_tick
     rts
 @text:
     stz b_i
@@ -4916,6 +4918,7 @@ fly_dy:
     lda frame_flag
     beq @wait
     stz frame_flag
+    jsr sfx_tick
     dec tmpL3
     bne @wait
     rts
