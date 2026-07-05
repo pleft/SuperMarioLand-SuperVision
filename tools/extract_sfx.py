@@ -31,8 +31,9 @@ def simulate_square(writes, lo_a, hi_a, vol_a, len_a, sweep_a=None, frames=180):
     """Interpret one GB square channel from the WRITE log. Slides don't retrigger;
     the envelope restarts only on NRx2 writes or NRx4 bit7. Returns {frame:(gbfreq_x, vol, duty)}."""
     rows = {}
-    x = 0; duty = 2; vol = 0; env_dir = 0; env_per = 0; env_ctr = 0
+    x = 0; duty = 2; vol = 0; vol_init = 0; env_dir = 0; env_per = 0; env_ctr = 0
     sw_per = 0; sw_dir = 0; sw_shift = 0; sw_ctr = 0.0
+    length = 0; len_en = 0; len_frames = 0.0
     wl = [(f, a, v) for f, a, v in writes if a in (lo_a, hi_a, vol_a, len_a, sweep_a)]
     wi = 0
     for f in range(frames):
@@ -43,17 +44,23 @@ def simulate_square(writes, lo_a, hi_a, vol_a, len_a, sweep_a=None, frames=180):
                 x = (x & 0x700) | v; emit = True
             elif a == hi_a:
                 x = (x & 0xFF) | ((v & 7) << 8); emit = True
+                len_en = (v >> 6) & 1
                 if v & 0x80:
                     env_ctr = 0; sw_ctr = 0.0            # retrigger
                     vol = vol_init
+                    len_frames = (64 - length) * 59.7 / 256.0  # length ticks at 256Hz
             elif a == vol_a:
                 vol_init = v >> 4; vol = vol_init
                 env_dir = (v >> 3) & 1; env_per = v & 7; env_ctr = 0
                 emit = True
             elif a == len_a:
-                duty = (v >> 6) & 3
+                duty = (v >> 6) & 3; length = v & 63
             elif sweep_a is not None and a == sweep_a:
                 sw_per = (v >> 4) & 7; sw_dir = (v >> 3) & 1; sw_shift = v & 7
+        if len_en and vol > 0:
+            len_frames -= 1.0
+            if len_frames <= 0:
+                vol = 0; emit = True                     # the hw length counter cut
         if env_per and vol > 0:
             env_ctr += 1
             if env_ctr >= env_per:
