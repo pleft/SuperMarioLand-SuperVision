@@ -284,7 +284,10 @@ def main():
     for name, mb, v in wanted:
         writes, frames, owned = capture(gb, mb, v)
         if mb == 0xDFE8:                 # jingles play via the MUSIC path: no ownership
-            owned = {1, 2, 3, 4}         # flags; take all channels, full window
+            owned = {1, 2, 3}            # flags; tonal channels only -- the noise writes
+                                         # during a jingle are the SILENCED level music's
+                                         # percussion still being serviced (user-verified:
+                                         # the original's death jingle has NO drums)
         enc = encode(writes, frames, owned)
         m[0xDFE8] = 0x10                 # re-silence between captures
         for _ in range(30): gb.run(1)
