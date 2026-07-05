@@ -308,6 +308,7 @@ def main():
         live = [(l, o) for l, o in table if o >= 0]
         for i, (l, o) in enumerate(live):
             f.write(f"SFX_{l.upper()} = {i}\n")
+        f.write(f"SFX_COUNT = {len(live)}\n")
         f.write("sfx_offsets_lo:\n")
         for l, o in live: f.write(f"    .byte <{o}\n")
         f.write("sfx_offsets_hi:\n")

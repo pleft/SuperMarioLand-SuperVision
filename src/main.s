@@ -5111,8 +5111,49 @@ death_curve:                     ; ROM $0C19 verbatim (signed y deltas + $7F end
     lda frame_flag               ; hold until Start is pressed
     beq @wait
     stz frame_flag
+    jsr sfx_tick                 ; the sound test needs the player running
     jsr read_input
-    lda pad_pressed
+    lda pad_pressed              ; SOUND TEST: Select cycles the SFX id, A replays it.
+    and #GB_SELECT               ; The id shows as two digits in the top-left corner.
+    beq :+
+    inc b_i
+    lda b_i
+    cmp #SFX_COUNT
+    bcc @playid
+    stz b_i
+    bra @playid
+:   lda pad_pressed
+    and #GB_A
+    beq :+
+@playid:
+    lda b_i                      ; show the id (tens/ones font tiles at row 0)
+    ldy #0
+@tens:
+    cmp #10
+    bcc @ones
+    sbc #10
+    iny
+    bra @tens
+@ones:
+    pha
+    stz dcol
+    stz dy
+    phy
+    jsr set_dst
+    ply
+    tya
+    jsr get_tile_src
+    jsr blit_tile
+    lda #2
+    sta dcol
+    stz dy
+    jsr set_dst
+    pla
+    jsr get_tile_src
+    jsr blit_tile
+    lda b_i
+    jsr sfx_play
+:   lda pad_pressed
     and #GB_START
     beq @wait
     rts
