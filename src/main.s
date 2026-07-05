@@ -695,8 +695,8 @@ main_loop:
 
 ; award_coin: +1 coin (BCD), +100 score, and a 1-up on the 100th coin.
 .proc award_coin
-    lda #SFX_DFF0_01             ; the coin chime (wave-channel effect, hook-attributed:
-    jsr sfx_play                 ; seq $6F3B fires on the coin-block bonk)
+    lda #SFX_DFE0_05             ; the coin sound -- VERIFIED: bonking a coin ?-block at
+    jsr sfx_play                 ; camera 0 fires seq $6809 = the $dfe0=$05 handler
     lda #$00
     ldx #$01                     ; a coin is worth +100 points (SML Call_000_1bff)
     jsr add_score
@@ -949,8 +949,8 @@ main_loop:
     beq @qblock
     cmp #$82                      ; $82 = breakable brick
     beq @brick
-    lda #SFX_DFE0_03              ; plain solid/used block: the THUD (hook-attributed:
-    jsr sfx_play                  ; the used-block bonk fires $dfe0=$03 -- shared w/ stomp)
+    lda #SFX_DFE0_07              ; plain solid/used block: the THUD -- VERIFIED twice:
+    jsr sfx_play                  ; used-block bonks fire seq $68A0 = the $dfe0=$07 handler
     bra @bonk
 @qblock:
     jsr hit_qblock                ; spawn coin or mushroom per the content table
@@ -971,7 +971,7 @@ main_loop:
     bne @smash
     lda #$82
     jsr spawn_bounce
-    lda #SFX_DFE0_03              ; small Mario bonking a brick: the same thud
+    lda #SFX_DFE0_07              ; small Mario bonking a brick: the same thud
     jsr sfx_play
     bra @bonk
 @smash:
