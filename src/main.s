@@ -2070,11 +2070,13 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
     lda (sfx_p)
     sta CH2_VOLDUTY
     jsr @inc
-:   lda (sfx_p)                  ; next row's delay: 0 -> apply next frame minimum
+:   lda (sfx_p)                  ; next row's delay: 0 = SAME frame (multi-channel rows)
     cmp #$FF
     beq @end
     sta sfx_wait
-    rts
+    bne :+
+    jmp @row                     ; 0-delay: keep applying this frame (was stretching time)
+:   rts
 @end:
     lda sfx_used                 ; silence whatever the stream touched
     and #1
