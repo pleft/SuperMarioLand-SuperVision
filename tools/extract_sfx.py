@@ -166,9 +166,13 @@ def capture(gb, mailbox, value, frames=180):
     end = frames
     started = False
     owned = set()
+    jingle = (mailbox == 0xDFE8)
     for f in range(frames):
         log.frame = f
         gb.run(1)
+        if jingle and f > 2 and m[0xDFE9] != value:
+            end = f
+            break
         # per-channel ownership: the driver sets bit7 while an SFX holds a channel
         if m[0xDF1F] & 0x80: owned.add(1)
         if m[0xDF2F] & 0x80: owned.add(2)
