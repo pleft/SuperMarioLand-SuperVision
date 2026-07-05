@@ -1991,8 +1991,8 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
     sta sfx_p+1
     stz sfx_wait
     stz sfx_used
-    lda #%00001110               ; noise ctrl: enable + both speakers, 15-bit LFSR
-    sta CH4_CTRL
+    lda #%00011110               ; noise ctrl (Potator sound.c): bit4 ON, bit3 L, bit2 R,
+    sta CH4_CTRL                 ; bit1 continuous play
     rts
 .endproc
 

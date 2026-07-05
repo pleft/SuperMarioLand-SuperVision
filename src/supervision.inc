@@ -43,7 +43,7 @@ DMA_AUD_TRIG  = $201C
 ; Noise
 CH4_FREQVOL = $2028      ; bits7:4 freq, bits3:0 vol
 CH4_LEN     = $2029
-CH4_CTRL    = $202A      ; bit3 enable, bit2 left, bit1 right, bit0 lfsr len
+CH4_CTRL    = $202A      ; bit4 ON, bit3 left, bit2 right, bit1 play (Potator sound.c)
 
 CONTROLLER  = $2020      ; active-LOW: 7Start 6Sel 5A 4B 3Up 2Down 1Left 0Right
 LINK_DDR    = $2021
