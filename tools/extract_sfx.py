@@ -27,73 +27,100 @@ def gb2sv_freq(x):
 
 def duty_gb2sv(d):  return d          # both: 12.5/25/50/75 in 2 bits
 
-def synth_channel(samples, lo_i, hi_i, vol_i, len_i, sweep_i=None):
-    """samples: list of APU reg tuples per frame. Returns {frame: (F, volduty)} rows
-    for one GB square channel, with hw ENVELOPE and (ch1) hw SWEEP synthesized."""
+def simulate_square(writes, lo_a, hi_a, vol_a, len_a, sweep_a=None, frames=180):
+    """Interpret one GB square channel from the WRITE log. Slides don't retrigger;
+    the envelope restarts only on NRx2 writes or NRx4 bit7. Returns {frame:(gbfreq_x, vol, duty)}."""
     rows = {}
-    vol = 0; env_dir = 0; env_per = 0; env_ctr = 0; cur = None
-    x = 0; sw_per = 0; sw_dir = 0; sw_shift = 0; sw_ctr = 0.0
-    for f, s in enumerate(samples):
-        nr_lo, nr_hi, nr_vol = s[lo_i], s[hi_i], s[vol_i]
-        nr_len = s[len_i]
-        duty = (nr_len >> 6) & 3
-        key = (nr_lo, nr_hi, nr_vol, nr_len)
+    x = 0; duty = 2; vol = 0; env_dir = 0; env_per = 0; env_ctr = 0
+    sw_per = 0; sw_dir = 0; sw_shift = 0; sw_ctr = 0.0
+    wl = [(f, a, v) for f, a, v in writes if a in (lo_a, hi_a, vol_a, len_a, sweep_a)]
+    wi = 0
+    for f in range(frames):
         emit = False
-        if key != cur:                       # register change = (re)trigger / slide
-            cur = key
-            x = nr_lo | ((nr_hi & 7) << 8)
-            vol = nr_vol >> 4
-            env_dir = (nr_vol >> 3) & 1
-            env_per = nr_vol & 7
-            env_ctr = 0
-            if sweep_i is not None:
-                nr10 = s[sweep_i]
-                sw_per = (nr10 >> 4) & 7
-                sw_dir = (nr10 >> 3) & 1
-                sw_shift = nr10 & 7
-                sw_ctr = 0.0
-            emit = True
-        else:
-            if env_per and vol > 0:
-                env_ctr += 1
-                if env_ctr >= env_per:       # env steps at 64Hz ~ our frame rate
-                    env_ctr = 0
-                    vol = min(15, vol + 1) if env_dir else max(0, vol - 1)
-                    emit = True
-            if sweep_i is not None and sw_per and sw_shift and vol > 0:
-                sw_ctr += 128.0 / 61.0 / sw_per   # sweep steps at 128Hz/period
-                while sw_ctr >= 1.0:
-                    sw_ctr -= 1.0
-                    d = x >> sw_shift
-                    x = x - d if sw_dir else x + d
-                    if x >= 2048: x = 2047; vol = 0   # overflow silences (GB rule)
-                    if x < 0: x = 0
-                    emit = True
-        if emit:
-            rows[f] = (gb2sv_freq(x), (0x40 if vol else 0) | (duty_gb2sv(duty) << 4) | min(15, vol))
-    return rows
-
-def synth_noise(samples, div_i, vol_i):
-    rows = {}
-    vol = 0; env_dir = 0; env_per = 0; env_ctr = 0; cur = None
-    for f, s in enumerate(samples):
-        nr_vol, nr_div = s[vol_i], s[div_i]
-        key = (nr_vol, nr_div)
-        if key != cur:
-            cur = key
-            vol = nr_vol >> 4
-            env_dir = (nr_vol >> 3) & 1
-            env_per = nr_vol & 7
-            env_ctr = 0
-            shift = (nr_div >> 4) & 0xF
-            rows[f] = ((min(15, shift) << 4) | min(15, vol),)
-        elif env_per and vol > 0:
+        while wi < len(wl) and wl[wi][0] <= f:
+            _, a, v = wl[wi]; wi += 1
+            if a == lo_a:
+                x = (x & 0x700) | v; emit = True
+            elif a == hi_a:
+                x = (x & 0xFF) | ((v & 7) << 8); emit = True
+                if v & 0x80:
+                    env_ctr = 0; sw_ctr = 0.0            # retrigger
+                    vol = vol_init
+            elif a == vol_a:
+                vol_init = v >> 4; vol = vol_init
+                env_dir = (v >> 3) & 1; env_per = v & 7; env_ctr = 0
+                emit = True
+            elif a == len_a:
+                duty = (v >> 6) & 3
+            elif sweep_a is not None and a == sweep_a:
+                sw_per = (v >> 4) & 7; sw_dir = (v >> 3) & 1; sw_shift = v & 7
+        if env_per and vol > 0:
             env_ctr += 1
             if env_ctr >= env_per:
                 env_ctr = 0
                 vol = min(15, vol + 1) if env_dir else max(0, vol - 1)
-                shift = (nr_div >> 4) & 0xF
-                rows[f] = ((min(15, shift) << 4) | vol,)
+                emit = True
+        if sw_per and sw_shift and vol > 0:
+            sw_ctr += 128.0 / 61.0 / sw_per
+            while sw_ctr >= 1.0:
+                sw_ctr -= 1.0
+                d = x >> sw_shift
+                x = x - d if sw_dir else x + d
+                if x >= 2048: x = 2047; vol = 0
+                emit = True
+        if emit:
+            rows[f] = (x, vol, duty)
+    return rows
+
+def simulate_wave(writes, frames=180):
+    """GB ch3: freq = 65536/(2048-x); volume from NR32 (0/100/50/25%)."""
+    rows = {}
+    x = 0; vol = 0; on = 0
+    VMAP = {0: 0, 1: 15, 2: 8, 3: 4}
+    wl = [(f, a, v) for f, a, v in writes if a in (0xFF1A, 0xFF1C, 0xFF1D, 0xFF1E)]
+    wi = 0
+    for f in range(frames):
+        emit = False
+        while wi < len(wl) and wl[wi][0] <= f:
+            _, a, v = wl[wi]; wi += 1
+            if a == 0xFF1A: on = v >> 7; emit = True
+            elif a == 0xFF1C: vol = VMAP[(v >> 5) & 3]; emit = True
+            elif a == 0xFF1D: x = (x & 0x700) | v; emit = True
+            elif a == 0xFF1E: x = (x & 0xFF) | ((v & 7) << 8); emit = True
+        if emit:
+            rows[f] = (x, vol if on else 0, 2)
+    return rows
+
+def gb2sv_wave_freq(x):
+    if x >= 2048: x = 2047
+    f = 65536.0 / (2048 - x)
+    F = int(round(125000.0 / f)) - 1
+    return max(0, min(2047, F))
+
+def simulate_noise(writes, frames=180):
+    rows = {}
+    vol = 0; env_dir = 0; env_per = 0; env_ctr = 0; shift = 0
+    wl = [(f, a, v) for f, a, v in writes if a in (0xFF21, 0xFF22, 0xFF23)]
+    wi = 0
+    for f in range(frames):
+        emit = False
+        while wi < len(wl) and wl[wi][0] <= f:
+            _, a, v = wl[wi]; wi += 1
+            if a == 0xFF21:
+                vol_init = v >> 4; vol = vol_init
+                env_dir = (v >> 3) & 1; env_per = v & 7; env_ctr = 0; emit = True
+            elif a == 0xFF22:
+                shift = (v >> 4) & 0xF; emit = True
+            elif a == 0xFF23 and (v & 0x80):
+                env_ctr = 0; vol = vol_init if 'vol_init' in dir() else vol; emit = True
+        if env_per and vol > 0:
+            env_ctr += 1
+            if env_ctr >= env_per:
+                env_ctr = 0
+                vol = min(15, vol + 1) if env_dir else max(0, vol - 1)
+                emit = True
+        if emit:
+            rows[f] = ((min(15, shift) << 4) | min(15, vol),)
     return rows
 
 def find_write_sites(rom):
@@ -148,23 +175,24 @@ def capture(gb, mailbox, value, frames=180):
             end = f + 1
             break
     log.writes = [w for w in log.writes if w[0] <= end]
-    frames = end
-    # rebuild per-frame register STATE from the true write log
-    shadow = {a: 0 for a in range(0xFF10, 0xFF27)}
-    samples = []
-    wi = 0; ws = log.writes
-    for f in range(frames):
-        while wi < len(ws) and ws[wi][0] <= f:
-            _, a, v = ws[wi]; shadow[a] = v; wi += 1
-        samples.append(tuple(shadow[a] for a in range(0xFF10, 0xFF27)))
-    return samples
+    return list(log.writes), end
 
-def encode(samples, quiet):
-    # indices into the FF10..FF26 tuple: ch1 lo/hi/vol/len = FF13,FF14,FF12,FF11
-    idx = lambda a: a - 0xFF10
-    ch1 = synth_channel(samples, idx(0xFF13), idx(0xFF14), idx(0xFF12), idx(0xFF11), idx(0xFF10))
-    ch2 = synth_channel(samples, idx(0xFF18), idx(0xFF19), idx(0xFF17), idx(0xFF16))
-    noi = synth_noise(samples, idx(0xFF22), idx(0xFF21))
+def encode(writes, frames):
+    ch1 = simulate_square(writes, 0xFF13, 0xFF14, 0xFF12, 0xFF11, 0xFF10, frames)
+    ch2 = simulate_square(writes, 0xFF18, 0xFF19, 0xFF17, 0xFF16, None, frames)
+    ch3 = simulate_wave(writes, frames)
+    noi = simulate_noise(writes, frames)
+    # top 2 tone channels by energy onto the SV squares
+    def energy(rows): return sum(v for (_, v, _) in rows.values())
+    ranked = sorted([("s", ch1), ("s", ch2), ("w", ch3)], key=lambda kv: -energy(kv[1]))[:2]
+    def to_sv(kind, rows):
+        out = {}
+        for f, (x, v, d) in rows.items():
+            F = gb2sv_wave_freq(x) if kind == "w" else gb2sv_freq(x)
+            out[f] = (F, (0x40 if v else 0) | (d << 4) | min(15, v))
+        return out
+    ch1 = to_sv(*ranked[0])
+    ch2 = to_sv(*ranked[1]) if len(ranked) > 1 else {}
     events = {}
     for f, r in ch1.items(): events.setdefault(f, {})['1'] = r
     for f, r in ch2.items(): events.setdefault(f, {})['2'] = r
@@ -196,14 +224,13 @@ def main():
     m = gb.m
     m[0xDFE8] = 0x10                     # stop the music
     for _ in range(40): gb.run(1)
-    quiet = tuple(m[a] for a in range(0xFF10, 0xFF27))
     wanted = [("dfe0", 0xDFE0, v) for v in (1, 2, 3, 4, 7, 8)] + \
              [("dff8", 0xDFF8, v) for v in (1, 2, 3)] + \
              [("dfe8", 0xDFE8, v) for v in (2,)]     # the death jingle; more with the music
     blob = bytearray(); table = []
     for name, mb, v in wanted:
-        samples = capture(gb, mb, v)
-        enc = encode(samples, quiet)
+        writes, frames = capture(gb, mb, v)
+        enc = encode(writes, frames)
         m[0xDFE8] = 0x10                 # re-silence between captures
         for _ in range(30): gb.run(1)
         label = f"{name}_{v:02X}"
