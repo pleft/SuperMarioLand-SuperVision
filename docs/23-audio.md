@@ -43,12 +43,13 @@ time from the user's own ROM by `tools/extract_sfx.py` / `tools/extract_music.py
 | $dff8 | $01 | Nokobon explosion | upd_bomb |
 | $dff8 | $02 | brick smash (noise shards) | break_brick |
 | $dff8 | $03 | fly (Goombo) death | enemy_contact type 4 |
+| $dfe8 | $01 | GOAL course-clear jingle ($1B70: bottom door only; the top door writes NO music) | goal_check @bottom |
 | $dfe8 | $02 | death jingle | @die / pit / time-up |
 | $dfe8 | $04 | underground room music | enter_room (star-gated, $17AB) |
 | $dfe8 | $07 | 1-1 LEVEL MUSIC | mus_start at level start/respawn |
 | $dfe8 | $09 | BONUS GAME music (harness-verified: bonus state -> $dfe9=$09) | bonus_start |
 | $dfe8 | $0C | star music (ONE-SHOT: its end = the star's end, $1F08) | star grant / star tick |
-| $dfe8 | $0F | goal fanfare (one-shot) | goal_check |
+| $dfe8 | $0F | NOT the goal jingle (old label wrong; unknown later-level id) | -- |
 | $dfe8 | $11 | NOT hurry-up: written by routine $12F1 when $dfe9==0 (context unidentified) | extracted, UNWIRED |
 | $dfe8 | $12 | NOT the bonus music (old label wrong; context unknown) | -- |
 | $dfe8 | $10 | stop music | (port: mus_stop) |
@@ -180,19 +181,29 @@ per pass. The sequence engine loops perfectly by construction.
   player (borrow rule included) walking music.bin predicts EVERY register
   write; the built ROM under py65 matched **1431/1431 writes** in order,
   value, and ±2-frame timing.
-- **All six tracks wired** (stage 3): pipe enter -> $04, exit -> level
+- **All tracks wired** (stage 3): pipe enter -> $04, exit -> level
   (both star-gated like the GB's $17AB/$07A3); star grant -> $0C with the
   GB's expiry rule (the tune is one-shot at 1024 ticks = 16.0s; the timer
   (16.3s) OR the tune's end -- whichever first -- ends the star, $1F08);
   bonus game -> $09 (the '$12 = bonus' catalog label was wrong: forcing
-  the GB bonus state plays $09). List terminators are now three-way:
+  the GB bonus state plays $09). GOAL = TRACK $01 (the '$0F = goal' label
+  was the third bad one -- $01 is a 2.8s one-shot vs $0F's 28s epic; the
+  door code $1B66: BOTTOM door = state $07 + $dfe8=$01 + the 240-frame
+  freeze; the TOP door SKIPS both writes -- level music plays on into the
+  bonus game, which then starts its own track). Track $01's ch4 = hi-hat
+  ticks from a phrase SHARED with the tonal channels (its garbage tail is
+  unreachable: ch1's END whole-stops first; the extractor keeps the dead
+  struct bytes -- faithful, never played). Unknown ids now: $0F/$11/$12. List terminators are now three-way:
   $0000 = a REAL GB end entry -> stops the WHOLE song ($6CB1 semantics,
   which is also what makes the star's drums stop with its melody);
   $FE00 = DORMANT (null/unterminated channel: inactive, never ends the
   song -- the goal's null ch3/ch4 must not kill the fanfare); $FFFF+target
   = jump. Driver tempo (hurry-up) persists across song changes like the
   GB's TMA; it resets only at level init/death/goal.
-- NOT yet wired: pause ding-dong. Unknown ids: $11, $12 (later levels?).
+- **Pause ding-dong** (RE $66D6/$69EC): three pips on ch2 as $ffde passes
+  $28/$20/$18 (8 ticks apart, then frozen at $10 -- exactly three): high
+  ($7C1 = 2081Hz), low ($783 = 1049Hz), high; duty 2, vol 14, ~55ms length
+  cut. Port: pause_snd countdown + pause_dingdong (SV F = 59/118/59).
 - Star drums verified vs a demo-mode capture: 129/129 hits, ≤1.1f. (The
   attract-mode DEMO starts ~f949 after boot and rewrites the music --
   the cause of "restarts" in idle captures; re-trigger after it begins.)

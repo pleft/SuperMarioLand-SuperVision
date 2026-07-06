@@ -182,6 +182,7 @@ mus_ch2:     .res 12         ; channel 2 block (same layout)
 mus_ch3:     .res 12         ; GB ch3 (wave line): +10 = borrowed SV reg offset ($FF none)
 mus_ch4:     .res 12         ; GB ch4 (drums -> SV noise): +10 = burst cutoff ticks
 sq_user:     .res 2          ; who last wrote each SV square: 0 = its owner line, 1 = ch3
+pause_snd:   .res 1          ; pause ding-dong countdown (3 pips on ch2; RE $66D6)
 mus_on:      .res 1          ; nonzero = a track is playing
 mus_acc:     .res 1          ; 61Hz frame -> tick-rate Bresenham accumulator
 mus_rate:    .res 1          ; Bresenham add: 3=64Hz, 18=78.8Hz (time 100), 32=93.1Hz (time 50)
@@ -343,13 +344,20 @@ main_loop:
     sta paused
     jsr pause_strip              ; show/remove the bottom-right ♥PAUSE♥ strip (RE $079C)
     lda paused
-    beq :+
+    beq @unpaused
     stz CH1_VOLDUTY              ; entering pause silences the (frozen) music squares;
     stz CH2_VOLDUTY              ; a live SFX rewrites its registers on its next row
-:
+    lda #20                      ; arm the ding-dong (GB: $ffde=$30, notes as it passes
+    sta pause_snd                ; $28/$20/$18 -- three pips, 8 ticks apart, $66D6)
+    bra @nopause
+@unpaused:
+    stz pause_snd                ; unpause mid-jingle: silence the pip
+    lda #$40
+    sta CH2_VOLDUTY
 @nopause:
     lda paused
     beq :+
+    jsr pause_dingdong
     jmp main_loop
 :   lda death_anim               ; the death hop owns the frame (everything else frozen)
     beq :+
@@ -1261,21 +1269,23 @@ main_loop:
     bcc @no                      ; FULL control (even running) until this point, then an
     lda #1                       ; instant freeze -- no auto-walk, no early lock.
     sta goal_phase
-    jsr mus_stop                 ; level music out, the goal fanfare in (the original
-    lda #3                       ; 64Hz driver (GB: TMA=0 in the goal path, $0C5D)
-    sta mus_rate
-    lda #MUS_GOAL                ; writes $dfe8=$0F here; track $0F is one-shot: its
-    jsr mus_start                ; ch1 list ends with a STOP entry
     lda #240
     sta goal_tmr
     stz goal_top
     stz mario_frame              ; he stands in the arch for the whole sequence
     stz mario_duck
     stz ride                     ; (a platform carry must not drag him out of the arch)
+    lda #3                       ; 64Hz driver (GB: TMA=0 in the goal path either way)
+    sta mus_rate
     lda spr_y                    ; top exit (door at rows 0-1) vs bottom (rows 13-14)
     cmp #64
-    bcs @no
-    inc goal_top                 ; TODO: top exit = the bonus game; same tally for now
+    bcs @bottom
+    inc goal_top                 ; TOP door: the GB writes NO music here ($1B7A skips
+    bra @no                      ; the $dfe8 write): the level tune plays on into the
+@bottom:                         ; bonus game, whose entry brings its own track
+    jsr mus_stop                 ; BOTTOM door: the course-clear jingle = TRACK $01
+    lda #MUS_GOAL                ; ($1B70: $dfe8=$01 + the 240-frame freeze; the old
+    jsr mus_start                ; "$0F = goal" label was wrong -- user-caught)
 @no:
     rts                          ; (objects stay LIVE through the sequence -- the original's
 .endproc                         ;  platforms keep patrolling during the jingle/tally)
@@ -2903,6 +2913,48 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
     ora mus_duty+36
     sta CH4_FREQVOL
 @skip:
+    rts
+.endproc
+
+; --- the pause ding-dong (RE $66D6/$69EC): three short pips on GB ch2 as the pause
+; counter passes $28/$20/$18 (8 ticks apart), then it freezes -- exactly three.
+; Structs $66F2/$66EE/$66F2: high (X=$7C1 = 2081Hz), low ($783 = 1049Hz), high;
+; duty 2, vol 14, cut ~55ms by the length counter. SV: F = 59 / 118 / 59.
+.proc pause_dingdong
+    lda pause_snd
+    bne :+
+    rts
+:   dec pause_snd
+    lda pause_snd
+    cmp #18
+    beq @hi
+    cmp #10
+    beq @lo
+    cmp #2
+    beq @hi
+    cmp #15                      ; ~3 frames after each pip: the GB length cut (55ms)
+    beq @off
+    cmp #7
+    beq @off
+    cmp #0
+    beq @off
+    rts
+@hi:
+    lda #59                      ; 2083 Hz
+    bra @pip
+@lo:
+    lda #118                     ; 1050 Hz
+@pip:
+    sta CH2_FLO
+    stz CH2_FHI
+    lda #$FF
+    sta CH2_LEN
+    lda #$6E                     ; enable + duty 2 + vol 14
+    sta CH2_VOLDUTY
+    rts
+@off:
+    lda #$40
+    sta CH2_VOLDUTY
     rts
 .endproc
 

@@ -38,8 +38,12 @@ d = open(os.path.join(ROOT, "super-mario-land-gb.gb"), "rb").read()
 B = lambda gb: 3*0x4000 + (gb-0x4000)
 u16 = lambda o: d[o] | (d[o+1] << 8)
 
-TRACKS = [0x07, 0x04, 0x0C, 0x0F, 0x11, 0x09]   # level, underground, star, goal, ($11: unknown), BONUS = $09 (harness-verified: forcing the bonus state $ffb3=$12 sets $dfe9=$09; the old '$12 = bonus' catalog label was wrong)
-NAMES  = ["MUS_LEVEL", "MUS_UNDER", "MUS_STAR", "MUS_GOAL", "MUS_HURRY", "MUS_BONUS"]
+# Track ids verified against the running GB (the old static catalog had THREE wrong
+# labels): level $07 (table $07CE), underground $04 ($07C8/$17AB), star $0C ($09C9),
+# GOAL = $01 (the bottom-door write at $1B70; $0F was a mislabel), BONUS = $09 (the
+# bonus state sets $dfe9=$09; $12 was a mislabel). $0F/$11/$12 = unknown later-level ids.
+TRACKS = [0x07, 0x04, 0x0C, 0x01, 0x09]
+NAMES  = ["MUS_LEVEL", "MUS_UNDER", "MUS_STAR", "MUS_GOAL", "MUS_BONUS"]
 
 def gb_noise_to_sv(nr43):
     """GB NR43 -> SV noise freq nibble N (freq = 4MHz/(8<<N)); same rule as extract_sfx."""
@@ -75,12 +79,26 @@ def parse_phrase_bytes(gbaddr):
 drum_ids = set()
 for tr in TRACKS:
     hdr0 = B(u16(B(0x663C) + (tr-1)*2))
-    ch4p = u16(hdr0+3+3*2)
+    chp0 = [u16(hdr0+3+i*2) for i in range(4)]
+    ch4p = chp0[3]
     if not (0x4000 <= ch4p < 0x8000): continue
+    # the same boundary discipline as the main parse: track $01 packs its four
+    # lists OVERLAPPING (each starts 2 bytes into the previous, unterminated)
+    bounds0 = set(p for p in chp0 if p)
+    for ch in range(3):
+        if not (0x4000 <= chp0[ch] < 0x8000): continue
+        lp = B(chp0[ch])
+        while True:
+            if lp - 3*0x4000 + 0x4000 != chp0[ch] and lp - 3*0x4000 + 0x4000 in bounds0: break
+            p = u16(lp); lp += 2
+            if (p >> 8) in (0x00, 0xFF): break
+            bounds0.add(p)
     lp = B(ch4p); seenp = set()
     while True:
+        if lp - 3*0x4000 + 0x4000 != ch4p and lp - 3*0x4000 + 0x4000 in bounds0: break
         p = u16(lp); lp += 2
         if (p >> 8) in (0x00, 0xFF): break
+        bounds0.add(p)
         if p in seenp: continue
         seenp.add(p)
         blob = parse_phrase_bytes(p); i = 0
