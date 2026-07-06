@@ -43,7 +43,7 @@ time from the user's own ROM by `tools/extract_sfx.py` / `tools/extract_music.py
 | $dff8 | $01 | Nokobon explosion | upd_bomb |
 | $dff8 | $02 | brick smash (noise shards) | break_brick |
 | $dff8 | $03 | fly (Goombo) death | enemy_contact type 4 |
-| $dfe8 | $01 | GOAL course-clear jingle ($1B70: bottom door only; the top door writes NO music) | goal_check @bottom |
+| $dfe8 | $01 | GOAL course-clear jingle ($1B70; BOTH doors -- $d007==0 in 1-1, user-confirmed) | goal_check |
 | $dfe8 | $02 | death jingle | @die / pit / time-up |
 | $dfe8 | $04 | underground room music | enter_room (star-gated, $17AB) |
 | $dfe8 | $07 | 1-1 LEVEL MUSIC | mus_start at level start/respawn |

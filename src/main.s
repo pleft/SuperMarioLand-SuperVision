@@ -1275,17 +1275,16 @@ main_loop:
     stz mario_frame              ; he stands in the arch for the whole sequence
     stz mario_duck
     stz ride                     ; (a platform carry must not drag him out of the arch)
-    lda #3                       ; 64Hz driver (GB: TMA=0 in the goal path either way)
+    lda #3                       ; 64Hz driver (GB: TMA=0 in the goal path)
     sta mus_rate
     lda spr_y                    ; top exit (door at rows 0-1) vs bottom (rows 13-14)
     cmp #64
-    bcs @bottom
-    inc goal_top                 ; TOP door: the GB writes NO music here ($1B7A skips
-    bra @no                      ; the $dfe8 write): the level tune plays on into the
-@bottom:                         ; bonus game, whose entry brings its own track
-    jsr mus_stop                 ; BOTTOM door: the course-clear jingle = TRACK $01
-    lda #MUS_GOAL                ; ($1B70: $dfe8=$01 + the 240-frame freeze; the old
-    jsr mus_start                ; "$0F = goal" label was wrong -- user-caught)
+    bcs :+
+    inc goal_top
+:   jsr mus_stop                 ; BOTH doors: the course-clear jingle = TRACK $01
+    lda #MUS_GOAL                ; ($1B70; the [$d007] branch that skips it is NOT the
+    jsr mus_start                ; door -- $d007 == 0 all through 1-1, harness-verified;
+                                 ; user-confirmed: same jingle at both doors)
 @no:
     rts                          ; (objects stay LIVE through the sequence -- the original's
 .endproc                         ;  platforms keep patrolling during the jingle/tally)
