@@ -168,6 +168,21 @@ wcol:        .res 2          ; draw_column input: world column to draw
 dbcol:       .res 1          ; draw_column input: dest VRAM byte column
 strk:        .res 1          ; scroll streaming loop counter
 shift_px:    .res 1          ; pixels the framebuffer shifted this frame (0 or 32 per DMA shift)
+; --- music sequencer state (two channel blocks, stride 12, X = 0/12) ---
+mus_pos:     .res 2          ; +0  phrase read pointer (hi 0 = channel inactive)
+mus_list:    .res 2          ; +2  phrase-list read pointer
+mus_wait:    .res 1          ; +4  ticks until the next cell
+mus_len:     .res 1          ; +5  current cell length (64Hz ticks; $Ax sets it)
+mus_env:     .res 1          ; +6  instrument envelope (GB NRx2: vvvv d ppp)
+mus_duty:    .res 1          ; +7  VOLDUTY base: $40 | duty<<4
+mus_vol:     .res 1          ; +8  live volume 0-15
+mus_ectr:    .res 1          ; +9  envelope period countdown
+             .res 2          ; +10 stride pad
+mus_ch2:     .res 12         ; channel 2 block (same layout)
+mus_on:      .res 1          ; nonzero = a track is playing
+mus_acc:     .res 1          ; 61Hz frame -> tick-rate Bresenham accumulator
+mus_rate:    .res 1          ; Bresenham add: 3=64Hz, 18=78.8Hz (time 100), 32=93.1Hz (time 50)
+mus_lt:      .res 2          ; current track's note-length table (16 bytes)
 
 .segment "BSS"
 revpix:      .res 256        ; reverse the 4 2bpp pixels in a byte (built at boot)
@@ -270,6 +285,8 @@ o_nfl:       .res 8          ; bit0 = dirty, bit1 = visible (render_all flags)
     stz mario_frame              ; standing pose (index)
     stz prev_frame
     jsr draw_player
+    lda #MUS_LEVEL               ; the 1-1 tune (the original writes track $07 from the
+    jsr mus_start                ; per-level table at bank0 $07CE on level entry)
     cli
 
 main_loop:
@@ -280,6 +297,7 @@ main_loop:
     ; above any sprite for much longer: everything drawn here can't be caught mid-blit).
     ; Uses the state the LOGIC phase computed last frame. ====
     jsr sfx_tick                 ; sound streams run every frame, all modes
+    jsr mus_tick                 ; the music sequencer too (self-gated while paused)
     lda bonus_phase              ; the bonus game and pipe animations own their own drawing
     ora pipe_phase
     beq :+
@@ -319,6 +337,11 @@ main_loop:
     eor #1
     sta paused
     jsr pause_strip              ; show/remove the bottom-right ♥PAUSE♥ strip (RE $079C)
+    lda paused
+    beq :+
+    stz CH1_VOLDUTY              ; entering pause silences the (frozen) music squares;
+    stz CH2_VOLDUTY              ; a live SFX rewrites its registers on its next row
+:
 @nopause:
     lda paused
     beq :+
@@ -1015,6 +1038,7 @@ main_loop:
     sta spr_y
     cmp #160                      ; fell off the bottom (into a pit) -> request a respawn
     bcc @checkland                ;   (before spr_y wraps past 255 and reappears at the top)
+    jsr mus_stop                  ; the jingle REPLACES the music ($dfe9 switches)
     lda #SFX_DFE8_02              ; the death jingle plays on pit deaths too
     jsr sfx_play
     lda #1
@@ -1051,6 +1075,7 @@ main_loop:
     beq :-
     stz frame_flag
     jsr sfx_tick                 ; the death jingle keeps playing through the pause
+    jsr mus_tick                 ; (self-gated: music is stopped here, but stay uniform)
     dec tmpL3
     bne :-
     lda lives                    ; dying with no spare lives -> GAME OVER
@@ -1192,6 +1217,8 @@ main_loop:
     jsr hud_init                  ; level restart: reset the clock to 400
     jsr draw_hud                  ; restamp score/coins/time over the fresh template
     jsr draw_player              ; place Mario at the start
+    lda #MUS_LEVEL               ; level restart -> the music restarts from the top
+    jsr mus_start
     rts
 .endproc
 
@@ -1216,6 +1243,9 @@ main_loop:
     bcc @no                      ; FULL control (even running) until this point, then an
     lda #1                       ; instant freeze -- no auto-walk, no early lock.
     sta goal_phase
+    jsr mus_stop                 ; level music out, the goal fanfare in (the original
+    lda #MUS_GOAL                ; writes $dfe8=$0F here; track $0F is one-shot: its
+    jsr mus_start                ; ch1 list ends with a STOP entry)
     lda #240
     sta goal_tmr
     stz goal_top
@@ -1288,7 +1318,12 @@ main_loop:
     sbc #0
     sta timer+1
     cld
-    lda #$10                     ; +10 points per time unit
+    lda timer                    ; the tally tick ($0CB6: dfe0=$0A when the ones bit0
+    and #1                       ; is clear -- every other unit)
+    bne :+
+    lda #SFX_DFE0_0A
+    jsr sfx_play
+:   lda #$10                     ; +10 points per time unit
     ldx #$00
     jsr add_score
     lda #1
@@ -2013,7 +2048,8 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
     adc #>sfx_data
     sta sfx_p+1
     stz sfx_wait
-    stz sfx_used
+    lda sfx_chmask,x             ; claim the stream's channels up-front (like the
+    sta sfx_used                 ; GB's ownership flags): the music yields them NOW
     lda #%00011110               ; noise ctrl (Potator sound.c): bit4 ON, bit3 L, bit2 R,
     sta CH4_CTRL                 ; bit1 continuous play
     rts
@@ -2123,10 +2159,309 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
 :   rts
 .endproc
 
+.segment "LEVELS"                ; the sequencer lives with its data (FIXED is full)
+; --- Music sequencer: interprets the ORIGINAL's bank-3 track data, extracted +
+; frequency-converted at build time by tools/extract_music.py. Format RE'd from
+; MusicStart_6AB5 / the walker at $6CBE and VALIDATED end-to-end against PyBoy
+; write-log captures of track $07 (61/61 + 175/175 note events matched in order,
+; timing within 0.5 frames -- docs/23-audio.md). Two channel blocks (GB ch1/ch2
+; -> the SV squares), X = block offset (0/12), Y = SV register offset (0/4).
+; Phrase bytes: $00 = next phrase from the list ($FFFF entry = jump/loop, $0000
+; = song end), $01 = hold cell, $9D e d c = instrument (e = GB NRx2 envelope,
+; c = GB NRx1 duty), $A0-$AF = cell length := lentab[x] ticks, else = note
+; (byte*2 indexes the converted freq table). Ticks at 64Hz (the GB driver's
+; timer rate), derived from the 61Hz frame by Bresenham. Envelope steps run at
+; tick rate = the GB's 64Hz envelope clock. Music yields any channel a live
+; SFX stream claims (sfx_chmask, set at sfx_play) and reclaims it afterwards.
+.proc mus_start                  ; A = track index (MUS_* in build/audio/music.inc)
+    tax
+    lda mus_lt_lo,x
+    clc
+    adc #<music_data
+    sta mus_lt
+    lda mus_lt_hi,x
+    adc #>music_data
+    sta mus_lt+1
+    lda mus_l1_lo,x
+    clc
+    adc #<music_data
+    sta mus_list
+    lda mus_l1_hi,x
+    adc #>music_data
+    sta mus_list+1
+    lda mus_l2_lo,x
+    clc
+    adc #<music_data
+    sta mus_list+12
+    lda mus_l2_hi,x
+    adc #>music_data
+    sta mus_list+1+12
+    ldx #12
+@init:
+    lda #<mus_zero               ; point the phrase ptr at a ROM $00: the first
+    sta mus_pos,x                ; tick pulls phrase 1 from the list
+    lda #>mus_zero
+    sta mus_pos+1,x
+    lda #1
+    sta mus_wait,x
+    sta mus_len,x
+    sta mus_ectr,x
+    stz mus_vol,x
+    stz mus_env,x
+    lda #$40
+    sta mus_duty,x
+    txa
+    beq @armed
+    ldx #0
+    bra @init
+@armed:
+    lda #1
+    sta mus_on
+    stz mus_acc
+    lda #3                       ; tick rate back to 64Hz (GB: TMA reset at level init)
+    sta mus_rate
+    rts
+.endproc
+
+.proc mus_stop                   ; silence + stop (channels the SFX owns are left alone)
+    stz mus_on
+    lda #3                       ; hurry-up rate ends with the song (GB: TMA=0 at death/goal)
+    sta mus_rate
+    ldx #0
+    ldy #0
+    jsr @kill
+    ldx #12
+    ldy #4
+@kill:
+    stz mus_pos+1,x
+    stz mus_vol,x
+    jsr mus_free
+    bcc :+
+    lda #$40
+    sta CH1_VOLDUTY,y
+:   rts
+.endproc
+
+.proc mus_tick                   ; every frame, all modes
+    lda mus_on
+    bne :+
+    rts
+:   lda paused
+    beq :+
+    rts                          ; frozen while paused (silenced at pause entry)
+:   jsr @tick
+    lda mus_acc                  ; rate ticks per 61 frames: 1 base tick + carry
+    clc
+    adc mus_rate
+    sta mus_acc
+    cmp #61
+    bcc @done
+    sbc #61
+    sta mus_acc                  ; fall through: the extra tick
+@tick:
+    ldx #0
+    ldy #0
+    jsr mus_ch
+    ldx #12
+    ldy #4
+    jsr mus_ch
+    lda mus_pos+1                ; both channels ended (one-shot jingle) -> off
+    ora mus_pos+1+12
+    bne @done
+    stz mus_on
+@done:
+    rts
+.endproc
+
+.proc mus_ch                     ; X = channel block (0/12), Y = SV reg offset (0/4)
+    lda mus_pos+1,x
+    bne :+
+    rts                          ; channel inactive
+:   lda mus_env,x                ; --- envelope step (64Hz, like the GB) ---
+    and #7
+    beq @adv                     ; period 0 = static volume
+    lda mus_vol,x
+    beq @adv                     ; already silent
+    dec mus_ectr,x
+    bne @adv
+    lda mus_env,x
+    and #7
+    sta mus_ectr,x
+    lda mus_env,x
+    and #8
+    bne @up
+    dec mus_vol,x
+    bra @wr
+@up:lda mus_vol,x
+    cmp #15
+    bcs @adv
+    inc mus_vol,x
+@wr:jsr mus_wrvol
+@adv:
+    dec mus_wait,x               ; --- cell timing ---
+    beq @cell
+    rts
+@cell:
+    lda (mus_pos,x)
+    inc mus_pos,x
+    bne :+
+    inc mus_pos+1,x
+:   cmp #0
+    beq @next_phrase
+    cmp #1
+    beq @hold
+    cmp #$9D
+    beq @inst
+    cmp #$A0
+    bcs @setlen
+    ; --- note cell: A = note byte, freq at music_data + byte*2 ---
+    sta tmpL
+    stz tmpH
+    asl tmpL
+    rol tmpH
+    lda tmpL
+    clc
+    adc #<music_data
+    sta tmpL
+    lda tmpH
+    adc #>music_data
+    sta tmpH
+    jsr mus_free
+    bcc @regs_done               ; SFX owns this square: advance silently
+    lda (tmpL)
+    sta CH1_FLO,y
+    inc tmpL
+    bne :+
+    inc tmpH
+:   lda (tmpL)
+    sta CH1_FHI,y
+    lda #$FF
+    sta CH1_LEN,y
+@regs_done:
+    lda mus_env,x                ; restart the envelope
+    lsr
+    lsr
+    lsr
+    lsr
+    sta mus_vol,x
+    lda mus_env,x
+    and #7
+    sta mus_ectr,x
+    jsr mus_wrvol
+@hold:
+    lda mus_len,x
+    sta mus_wait,x
+    rts
+@setlen:
+    and #$0F
+    sty tmpH3
+    tay
+    lda (mus_lt),y
+    ldy tmpH3
+    sta mus_len,x
+    jmp @cell
+@inst:
+    lda (mus_pos,x)              ; param 0 = GB NRx2 envelope
+    sta mus_env,x
+    jsr @incp
+    jsr @incp                    ; param 1: unobserved in any register write; skipped
+    lda (mus_pos,x)              ; param 2 = GB NRx1: bits 7:6 duty -> SV bits 5:4
+    lsr
+    lsr
+    and #$30
+    ora #$40
+    sta mus_duty,x
+    jsr @incp
+    jmp @cell
+@next_phrase:
+    lda (mus_list,x)             ; entry lo
+    sta tmpL
+    jsr @incl
+    lda (mus_list,x)             ; entry hi: 0 = end, $FF = jump, else offset
+    jsr @incl
+    cmp #0
+    beq @end
+    cmp #$FF
+    beq @jump
+    pha
+    lda tmpL
+    clc
+    adc #<music_data
+    sta mus_pos,x
+    pla
+    adc #>music_data
+    sta mus_pos+1,x
+    jmp @cell
+@jump:
+    lda (mus_list,x)             ; the loop target (a list offset)
+    sta tmpL
+    jsr @incl
+    lda (mus_list,x)
+    pha
+    lda tmpL
+    clc
+    adc #<music_data
+    sta mus_list,x
+    pla
+    adc #>music_data
+    sta mus_list+1,x
+    bra @next_phrase
+@end:
+    stz mus_pos+1,x              ; channel done (one-shot jingles)
+    stz mus_vol,x
+    jsr mus_free
+    bcc :+
+    lda #$40
+    sta CH1_VOLDUTY,y
+:   rts
+@incp:
+    inc mus_pos,x
+    bne :+
+    inc mus_pos+1,x
+:   rts
+@incl:
+    inc mus_list,x
+    bne :+
+    inc mus_list+1,x
+:   rts
+.endproc
+
+.proc mus_wrvol                  ; write vol|duty for channel Y (0/4), SFX-gated
+    jsr mus_free
+    bcc @skip
+    lda mus_vol,x
+    ora mus_duty,x
+    sta CH1_VOLDUTY,y
+@skip:
+    rts
+.endproc
+
+.proc mus_free                   ; C = channel Y is NOT claimed by a live SFX stream
+    lda sfx_p+1
+    beq @free
+    cpy #0
+    bne :+
+    lda #1
+    bra :++
+:   lda #2
+:   and sfx_used
+    beq @free
+    clc
+    rts
+@free:
+    sec
+    rts
+.endproc
+
+mus_zero: .byte 0                ; mus_start seeds phrase ptrs here ("fetch next phrase")
+
 .segment "LEVELS"
 .include "../build/audio/sfx.inc"
 sfx_data:
     .incbin "../build/audio/sfx.bin"
+.include "../build/audio/music.inc"
+music_data:
+    .incbin "../build/audio/music.bin"
 .segment "CODE"
 
 ; pause_strip: draw (paused=1) or clear (paused=0) the original's "♥PAUSE♥" window strip:
@@ -2210,6 +2545,7 @@ sfx_data:
     beq @wait1
     stz frame_flag
     jsr sfx_tick
+    jsr mus_tick
     rts
 @text:
     stz b_i
@@ -2372,6 +2708,8 @@ sfx_data:
     jsr hud_init                 ; clock back to 400 (score/coins/lives untouched)
     jsr draw_hud
     jsr draw_player
+    lda #MUS_LEVEL               ; fresh level -> the tune from the top
+    jsr mus_start
     rts
 .endproc
 
@@ -2939,7 +3277,8 @@ TIMER_RATE = 40                  ; frames per clock unit (SML's $da00 sub-counte
     sta hud_dirty
     lda timer                    ; hit 000? TIME-UP death: the hop plays (harness: state
     ora timer+1                  ; $03 fires with $da1d=$FF regardless of size/star),
-    bne :+                       ; then the " TIME UP " strip, then the reload
+    bne @hurry                   ; then the " TIME UP " strip, then the reload
+    jsr mus_stop                 ; the jingle REPLACES the music
     lda #SFX_DFE8_02             ; the death jingle plays on time-up too
     jsr sfx_play
     lda #1
@@ -2947,7 +3286,26 @@ TIMER_RATE = 40                  ; frames per clock unit (SML's $da00 sub-counte
     sta death_anim
     stz mario_duck
     stz ride
-:   rts
+    rts
+@hurry:                          ; SML's hurry-up: no separate track -- the DRIVER speeds
+    lda timer+1                  ; up (bank2 $5851: time 100 -> TMA=$30 = 78.8Hz ticks,
+    cmp #1                       ; time 050 -> TMA=$50 = 93.1Hz; TMA reset to 0 at level
+    bne @try50                   ; init/death/goal). Port: the Bresenham add per frame.
+    lda timer
+    bne @done
+    lda #18                      ; 61+18 = 79 ticks per 61 frames
+    sta mus_rate
+    rts
+@try50:
+    cmp #0
+    bne @done
+    lda timer
+    cmp #$50
+    bne @done
+    lda #32                      ; 61+32 = 93 ticks per 61 frames
+    sta mus_rate
+@done:
+    rts
 .endproc
 
 ; hud_init: set the clock to 400 and a fresh sub-counter (boot + level restart).
@@ -4885,6 +5243,7 @@ fly_dy:
     stz mario_duck
     rts
 @die:
+    jsr mus_stop                 ; the jingle REPLACES the music
     lda #SFX_DFE8_02             ; the death jingle ($dfe8=$02, RE $09F1)
     jsr sfx_play
     lda #1                       ; enemy deaths play the HOP (RE states $03/$04); pit
@@ -4960,6 +5319,7 @@ fly_dy:
     beq @wait
     stz frame_flag
     jsr sfx_tick
+    jsr mus_tick
     dec tmpL3
     bne @wait
     rts

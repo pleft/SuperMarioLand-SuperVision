@@ -279,11 +279,11 @@ def fresh():
 
 def main():
     os.makedirs(OUT, exist_ok=True)
-    wanted = [("dfe0", 0xDFE0, v) for v in (1, 2, 3, 4, 5, 6, 7, 8, 0x0B)] + \
+    wanted = [("dfe0", 0xDFE0, v) for v in (1, 2, 3, 4, 5, 6, 7, 8, 0x0A, 0x0B)] + \
              [("dff0", 0xDFF0, 1)] + \
              [("dff8", 0xDFF8, v) for v in (1, 2, 3)] + \
              [("dfe8", 0xDFE8, v) for v in (2,)]     # the death jingle; more with the music
-    blob = bytearray(); table = []
+    blob = bytearray(); table = []; masks = []
     for name, mb, v in wanted:
         gb = fresh()                     # DETERMINISTIC: a fresh session per capture
         _hooked.clear()                  # (re-hook the new PyBoy instance)
@@ -298,6 +298,10 @@ def main():
         label = f"{name}_{v:02X}"
         if len(enc) <= 3:                # empty capture
             table.append((label, -1)); continue
+        # channel-claim mask for the port's music arbitration (b0 sq1, b1 sq2, b2 noise):
+        # known up-front like the GB's ownership flags, not accumulated row by row
+        masks.append((1 if 1 in owned else 0) | (2 if 2 in owned else 0)
+                     | (4 if 4 in owned else 0))
         table.append((label, len(blob)))
         blob += enc
         print(f"SFX {label}: {len(enc)} bytes")
@@ -313,6 +317,8 @@ def main():
         for l, o in live: f.write(f"    .byte <{o}\n")
         f.write("sfx_offsets_hi:\n")
         for l, o in live: f.write(f"    .byte >{o}\n")
+        f.write("sfx_chmask:\n")
+        for m in masks: f.write(f"    .byte {m}\n")
     print(f"total: {len(blob)} bytes, {len([1 for _,o in table if o>=0])} live SFX")
 
 if __name__ == "__main__":
