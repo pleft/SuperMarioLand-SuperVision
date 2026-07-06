@@ -179,6 +179,9 @@ mus_vol:     .res 1          ; +8  live volume 0-15
 mus_ectr:    .res 1          ; +9  envelope period countdown
              .res 2          ; +10 stride pad
 mus_ch2:     .res 12         ; channel 2 block (same layout)
+mus_ch3:     .res 12         ; GB ch3 (wave line): +10 = borrowed SV reg offset ($FF none)
+mus_ch4:     .res 12         ; GB ch4 (drums -> SV noise): +10 = burst cutoff ticks
+sq_user:     .res 2          ; who last wrote each SV square: 0 = its owner line, 1 = ch3
 mus_on:      .res 1          ; nonzero = a track is playing
 mus_acc:     .res 1          ; 61Hz frame -> tick-rate Bresenham accumulator
 mus_rate:    .res 1          ; Bresenham add: 3=64Hz, 18=78.8Hz (time 100), 32=93.1Hz (time 50)
@@ -2196,7 +2199,21 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
     lda mus_l2_hi,x
     adc #>music_data
     sta mus_list+1+12
-    ldx #12
+    lda mus_l3_lo,x
+    clc
+    adc #<music_data
+    sta mus_list+24
+    lda mus_l3_hi,x
+    adc #>music_data
+    sta mus_list+1+24
+    lda mus_l4_lo,x
+    clc
+    adc #<music_data
+    sta mus_list+36
+    lda mus_l4_hi,x
+    adc #>music_data
+    sta mus_list+1+36
+    ldx #36
 @init:
     lda #<mus_zero               ; point the phrase ptr at a ROM $00: the first
     sta mus_pos,x                ; tick pulls phrase 1 from the list
@@ -2212,9 +2229,20 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
     sta mus_duty,x
     txa
     beq @armed
-    ldx #0
+    sec
+    sbc #12
+    tax
     bra @init
 @armed:
+    lda #$60                     ; ch3 borrows a square at 50% duty (the wave voice's
+    sta mus_duty+24              ; stand-in -- the one declared mixing decision)
+    lda #$FF
+    sta mus_ch3+10               ; ch3: nothing borrowed yet
+    stz mus_ch4+10               ; noise: no burst running
+    stz sq_user
+    stz sq_user+1
+    lda #%00011110               ; noise ctrl: ON + L + R + continuous (Potator sound.c)
+    sta CH4_CTRL
     lda #1
     sta mus_on
     stz mus_acc
@@ -2227,7 +2255,17 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
     stz mus_on
     lda #3                       ; hurry-up rate ends with the song (GB: TMA=0 at death/goal)
     sta mus_rate
-    ldx #0
+    stz mus_pos+1+24             ; ch3 + noise off
+    stz mus_pos+1+36
+    lda #$FF
+    sta mus_ch3+10
+    lda sfx_p+1                  ; noise: silence unless an SFX stream owns it
+    beq :+
+    lda sfx_used
+    and #4
+    bne :++
+:   stz CH4_FREQVOL
+:   ldx #0
     ldy #0
     jsr @kill
     ldx #12
@@ -2265,8 +2303,12 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
     ldx #12
     ldy #4
     jsr mus_ch
-    lda mus_pos+1                ; both channels ended (one-shot jingle) -> off
+    jsr mus_ch3t
+    jsr mus_chn
+    lda mus_pos+1                ; all four channels ended (one-shot jingle) -> off
     ora mus_pos+1+12
+    ora mus_pos+1+24
+    ora mus_pos+1+36
     bne @done
     stz mus_on
 @done:
@@ -2307,8 +2349,9 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
     bne :+
     inc mus_pos+1,x
 :   cmp #0
-    beq @next_phrase
-    cmp #1
+    bne :+
+    jmp @next_phrase
+:   cmp #1
     beq @hold
     cmp #$9D
     beq @inst
@@ -2326,7 +2369,12 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
     lda tmpH
     adc #>music_data
     sta tmpH
-    jsr mus_free
+    cpy #0                       ; the owner line reclaims its square from ch3
+    bne :+
+    stz sq_user
+    bra :++
+:   stz sq_user+1
+:   jsr mus_free
     bcc @regs_done               ; SFX owns this square: advance silently
     lda (tmpL)
     sta CH1_FLO,y
@@ -2450,6 +2498,382 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
     rts
 @free:
     sec
+    rts
+.endproc
+
+; --- ch3: the GB wave line on a BORROWED square. SV has two squares for the GB's
+; three tonal voices; ch3 (the busiest line: 96 notes vs 52/77 in track 7, and the
+; ONLY voice sounding for 14% of the tune) plays on whichever square's owner line
+; has fully decayed (mus_vol == 0). The owner steals its square back at its next
+; note-on (it stamps sq_user); ch3 then stops touching those registers. Wave
+; frequency = octave below the shared note table: F3 = F*2+1 (65536 vs 131072
+; in the GB formulas). Duty fixed 50%.
+.proc mus_ch3t
+    ldx #24
+    lda mus_pos+1,x
+    bne :+
+    rts
+:   lda mus_env,x                ; envelope (writes gated through mus3_wr)
+    and #7
+    beq @adv
+    lda mus_vol,x
+    beq @adv
+    dec mus_ectr,x
+    bne @adv
+    lda mus_env,x
+    and #7
+    sta mus_ectr,x
+    lda mus_env,x
+    and #8
+    bne @up
+    dec mus_vol,x
+    bra @wr
+@up:lda mus_vol,x
+    cmp #15
+    bcs @adv
+    inc mus_vol,x
+@wr:jsr mus3_wr
+@adv:
+    dec mus_wait,x
+    beq @cell
+    rts
+@cell:
+    lda (mus_pos,x)
+    inc mus_pos,x
+    bne :+
+    inc mus_pos+1,x
+:   cmp #0
+    bne :+
+    jmp @next_phrase
+:   cmp #1
+    bne :+
+    jmp @hold
+:   cmp #$9D
+    bne :+
+    jmp @inst
+:   cmp #$A0
+    bcc :+
+    jmp @setlen
+:   ; --- note: octave-down freq, then pick a free square ---
+    sta tmpL
+    stz tmpH
+    asl tmpL
+    rol tmpH
+    lda tmpL
+    clc
+    adc #<music_data
+    sta tmpL
+    lda tmpH
+    adc #>music_data
+    sta tmpH
+    lda (tmpL)                   ; F -> tmpL2/tmpH2
+    sta tmpL2
+    inc tmpL
+    bne :+
+    inc tmpH
+:   lda (tmpL)
+    sta tmpH2
+    asl tmpL2                    ; F*2+1 = the octave below (wave 65536 vs square
+    rol tmpH2                    ; 131072 in the GB freq formulas)
+    lda tmpL2
+    ora #1
+    sta tmpL2
+    lda tmpH2
+    cmp #8                       ; clamp to 11 bits
+    bcc :+
+    lda #7
+    sta tmpH2
+    lda #$FF
+    sta tmpL2
+:   ldy #0                       ; square 1 free? (owner line decayed + no SFX claim)
+    lda mus_vol
+    bne @try2
+    jsr mus_free
+    bcs @have
+@try2:
+    ldy #4
+    lda mus_vol+12
+    bne @nofree
+    jsr mus_free
+    bcs @have
+@nofree:
+    lda #$FF                     ; all busy: the note advances silently (the GB has
+    sta mus_ch3+10               ; three voices sounding; we drop ch3 only here)
+    bra @env
+@have:
+    sty mus_ch3+10
+    cpy #0                       ; stamp the square as ch3's
+    bne :+
+    lda #1
+    sta sq_user
+    bra :++
+:   lda #1
+    sta sq_user+1
+:   lda tmpL2
+    sta CH1_FLO,y
+    lda tmpH2
+    sta CH1_FHI,y
+    lda #$FF
+    sta CH1_LEN,y
+@env:
+    lda mus_env,x                ; restart the envelope state either way
+    lsr
+    lsr
+    lsr
+    lsr
+    sta mus_vol,x
+    lda mus_env,x
+    and #7
+    sta mus_ectr,x
+    jsr mus3_wr
+@hold:
+    lda mus_len,x
+    sta mus_wait,x
+    rts
+@setlen:
+    and #$0F
+    tay
+    lda (mus_lt),y
+    sta mus_len,x
+    jmp @cell
+@inst:
+    lda (mus_pos,x)              ; param 0 = envelope; params 1/2 skipped (duty is
+    sta mus_env,x                ; fixed 50% for the borrowed-square wave voice)
+    jsr @incp
+    jsr @incp
+    jsr @incp
+    jmp @cell
+@next_phrase:
+    lda (mus_list,x)
+    sta tmpL
+    jsr @incl
+    lda (mus_list,x)
+    jsr @incl
+    cmp #0
+    beq @end
+    cmp #$FF
+    beq @jump
+    pha
+    lda tmpL
+    clc
+    adc #<music_data
+    sta mus_pos,x
+    pla
+    adc #>music_data
+    sta mus_pos+1,x
+    jmp @cell
+@jump:
+    lda (mus_list,x)
+    sta tmpL
+    jsr @incl
+    lda (mus_list,x)
+    pha
+    lda tmpL
+    clc
+    adc #<music_data
+    sta mus_list,x
+    pla
+    adc #>music_data
+    sta mus_list+1,x
+    bra @next_phrase
+@end:
+    stz mus_pos+1,x
+    stz mus_vol,x
+    jsr mus3_wr                  ; silence the borrowed square (write vol 0)
+    lda #$FF
+    sta mus_ch3+10
+    rts
+@incp:
+    inc mus_pos,x
+    bne :+
+    inc mus_pos+1,x
+:   rts
+@incl:
+    inc mus_list,x
+    bne :+
+    inc mus_list+1,x
+:   rts
+.endproc
+
+.proc mus3_wr                    ; volume write to the borrowed square, if still ours
+    ldy mus_ch3+10
+    bmi @skip
+    ldx #0
+    cpy #0
+    beq :+
+    ldx #1
+:   lda sq_user,x
+    cmp #1
+    beq @ours
+    lda #$FF                     ; the owner took it back: stop touching it
+    sta mus_ch3+10
+    ldx #24
+    rts
+@ours:
+    jsr mus_free
+    bcc @done
+    lda mus_vol+24
+    ora #$60                     ; enable + 50% duty
+    sta CH1_VOLDUTY,y
+@done:
+    ldx #24
+@skip:
+    rts
+.endproc
+
+; --- ch4: the drums on the SV noise channel. Drum table (build-time converted):
+; 3 bytes each [FREQVOL init, GB NRx2 envelope, cutoff ticks] -- GB drums are
+; length-gated bursts (NR44 bit6), so a tick-counter silences the burst like the
+; GB's length counter. On the GB's ch4 EVERY non-command byte is a drum ($01 is
+; the vol-0 silent drum) -- verified 95/95 hits against the track-7 capture.
+.proc mus_chn
+    ldx #36
+    lda mus_pos+1,x
+    bne :+
+    rts
+:   lda mus_ch4+10               ; burst cutoff (the GB length counter's stand-in)
+    beq @envstep
+    dec mus_ch4+10
+    bne @envstep
+    stz mus_vol,x
+    jsr musn_wr
+@envstep:
+    lda mus_env,x
+    and #7
+    beq @adv
+    lda mus_vol,x
+    beq @adv
+    dec mus_ectr,x
+    bne @adv
+    lda mus_env,x
+    and #7
+    sta mus_ectr,x
+    dec mus_vol,x                ; drums only decay
+    jsr musn_wr
+@adv:
+    dec mus_wait,x
+    beq @cell
+    rts
+@cell:
+    lda (mus_pos,x)
+    inc mus_pos,x
+    bne :+
+    inc mus_pos+1,x
+:   cmp #0
+    beq @next_phrase
+    cmp #$9D
+    beq @inst
+    cmp #$A0
+    bcs @setlen
+    ; --- drum hit: 1-based index into the converted drum table ---
+    dec a
+    sta tmpL
+    asl
+    clc
+    adc tmpL                     ; *3
+    clc
+    adc #<(music_data+MUS_DRUMS)
+    sta tmpL
+    lda #0
+    adc #>(music_data+MUS_DRUMS)
+    sta tmpH
+    lda (tmpL)                   ; FREQVOL init
+    pha
+    and #$F0
+    sta mus_duty,x
+    pla
+    and #$0F
+    sta mus_vol,x
+    inc tmpL
+    bne :+
+    inc tmpH
+:   lda (tmpL)                   ; envelope byte
+    sta mus_env,x
+    and #7
+    sta mus_ectr,x
+    inc tmpL
+    bne :+
+    inc tmpH
+:   lda (tmpL)                   ; cutoff ticks (0 = none)
+    sta mus_ch4+10
+    jsr musn_wr
+    lda #$FF
+    sta CH4_LEN
+@hold:
+    lda mus_len,x
+    sta mus_wait,x
+    rts
+@setlen:
+    and #$0F
+    tay
+    lda (mus_lt),y
+    sta mus_len,x
+    bra @cell
+@inst:
+    jsr @incp                    ; params land in the GB's struct shadow; every
+    jsr @incp                    ; note-on overwrites them -- consume and ignore
+    jsr @incp
+    bra @cell
+@next_phrase:
+    lda (mus_list,x)
+    sta tmpL
+    jsr @incl
+    lda (mus_list,x)
+    jsr @incl
+    cmp #0
+    beq @end
+    cmp #$FF
+    beq @jump
+    pha
+    lda tmpL
+    clc
+    adc #<music_data
+    sta mus_pos,x
+    pla
+    adc #>music_data
+    sta mus_pos+1,x
+    jmp @cell
+@jump:
+    lda (mus_list,x)
+    sta tmpL
+    jsr @incl
+    lda (mus_list,x)
+    pha
+    lda tmpL
+    clc
+    adc #<music_data
+    sta mus_list,x
+    pla
+    adc #>music_data
+    sta mus_list+1,x
+    bra @next_phrase
+@end:
+    stz mus_pos+1,x
+    stz mus_vol,x
+    jsr musn_wr
+    rts
+@incp:
+    inc mus_pos,x
+    bne :+
+    inc mus_pos+1,x
+:   rts
+@incl:
+    inc mus_list,x
+    bne :+
+    inc mus_list+1,x
+:   rts
+.endproc
+
+.proc musn_wr                    ; noise FREQVOL write, yielded to a claiming SFX
+    lda sfx_p+1
+    beq :+
+    lda sfx_used
+    and #4
+    bne @skip
+:   lda mus_vol+36
+    ora mus_duty+36
+    sta CH4_FREQVOL
+@skip:
     rts
 .endproc
 

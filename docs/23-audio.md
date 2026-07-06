@@ -155,8 +155,32 @@ per pass. The sequence engine loops perfectly by construction.
 - **Goal-tally tick (RE'd, $0CB6)**: during the time tally the GB plays
   $dfe0=$0A on every unit whose BCD ones bit0 is clear. Port: hooked in
   goal_seq @tally; the $0A stream is now captured (15 SFX total).
+- **Drums (stage 2)**: on the GB's ch4 EVERY non-command byte is a drum —
+  the $01-is-hold rule does NOT apply (no rest check in the $6D34 path);
+  drum $01 is the vol-0 SILENT hit. A drum byte indexes 5-byte structs at
+  $6F06: [NR42 env, special flag (unused by these tracks), NR41 length,
+  NR43 poly, NR44]. All are length-gated bursts (NR44 bit6). DETERMINISTIC:
+  95/95 hits vs the track-7 capture match exactly up to the capture's own
+  mid-run song restart (the rDIV randomization belongs to the $dff0 wave-
+  effect handler, NOT the drums — the old "random drums" note was wrong).
+  Port: extractor converts each struct to [FREQVOL init (svN<<4|vol),
+  env byte, cutoff ticks = GB length × 64/256] and rewrites ch4 phrase
+  bytes to dense 1-based indices; the player runs env decay + a tick
+  cutoff (the length counter's stand-in) on the SV noise channel.
+- **The third voice (stage 2)**: GB ch3 (wave) is the BUSIEST line of
+  track 7 (96 notes vs 52/77) and the only voice sounding for 14% of the
+  tune — dropping it left audible holes (user-reported). Port: dynamic
+  square BORROWING — ch3 plays on whichever square's owner line has fully
+  decayed (vol 0); the owner reclaims it at its next note-on via sq_user
+  stamps, and ch3 only goes silent when all three GB voices sound at once.
+  Wave pitch = octave below the shared table (F*2+1, from the GB formula
+  pair 65536 vs 131072); duty fixed 50% (the one mixing decision).
+- **Stage-2 verification**: a faithful Python model of the 4-channel
+  player (borrow rule included) walking music.bin predicts EVERY register
+  write; the built ROM under py65 matched **1431/1431 writes** in order,
+  value, and ±2-frame timing.
 - NOT yet wired: underground ($04, pipe rooms), bonus ($12), star ($0C),
-  drums/wave, pause ding-dong.
+  pause ding-dong.
 
 ## 5. SV hardware truths (Potator-source-verified)
 
