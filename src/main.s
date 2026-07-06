@@ -2053,8 +2053,8 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
     stz sfx_wait
     lda sfx_chmask,x             ; claim the stream's channels up-front (like the
     sta sfx_used                 ; GB's ownership flags): the music yields them NOW
-    lda #%00011110               ; noise ctrl (Potator sound.c): bit4 ON, bit3 L, bit2 R,
-    sta CH4_CTRL                 ; bit1 continuous play
+    lda sfx_nctrl,x              ; noise ctrl incl. the per-sound LFSR width (bit0:
+    sta CH4_CTRL                 ; the fly death is the GB's 7-bit buzz; the rest 15-bit)
     rts
 .endproc
 
@@ -2241,8 +2241,8 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
     stz mus_ch4+10               ; noise: no burst running
     stz sq_user
     stz sq_user+1
-    lda #%00011110               ; noise ctrl: ON + L + R + continuous (Potator sound.c)
-    sta CH4_CTRL
+    lda #%00011111               ; noise ctrl: ON + L + R + continuous + 15-BIT LFSR
+    sta CH4_CTRL                 ; (bit0=0 is the 7-bit metallic buzz -- "awful" drums)
     lda #1
     sta mus_on
     stz mus_acc

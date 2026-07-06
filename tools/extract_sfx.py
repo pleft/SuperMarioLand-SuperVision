@@ -283,7 +283,7 @@ def main():
              [("dff0", 0xDFF0, 1)] + \
              [("dff8", 0xDFF8, v) for v in (1, 2, 3)] + \
              [("dfe8", 0xDFE8, v) for v in (2,)]     # the death jingle; more with the music
-    blob = bytearray(); table = []; masks = []
+    blob = bytearray(); table = []; masks = []; nctrl = []
     for name, mb, v in wanted:
         gb = fresh()                     # DETERMINISTIC: a fresh session per capture
         _hooked.clear()                  # (re-hook the new PyBoy instance)
@@ -302,6 +302,10 @@ def main():
         # known up-front like the GB's ownership flags, not accumulated row by row
         masks.append((1 if 1 in owned else 0) | (2 if 2 in owned else 0)
                      | (4 if 4 in owned else 0))
+        # noise LFSR width is a GB per-sound choice (NR43 bit3): the fly death is
+        # DELIBERATELY the 7-bit buzz; explosion/smash are 15-bit hiss. SV: CTRL bit0.
+        seven = any(w[1] == 0xFF22 and (w[2] & 8) for w in writes)
+        nctrl.append(0b00011110 if seven else 0b00011111)
         table.append((label, len(blob)))
         blob += enc
         print(f"SFX {label}: {len(enc)} bytes")
@@ -319,6 +323,8 @@ def main():
         for l, o in live: f.write(f"    .byte >{o}\n")
         f.write("sfx_chmask:\n")
         for m in masks: f.write(f"    .byte {m}\n")
+        f.write("sfx_nctrl:\n")
+        for m in nctrl: f.write(f"    .byte %{m:08b}\n")
     print(f"total: {len(blob)} bytes, {len([1 for _,o in table if o>=0])} live SFX")
 
 if __name__ == "__main__":
