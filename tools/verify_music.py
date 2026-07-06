@@ -61,6 +61,15 @@ def model(frames, rate=3):
                 while True:
                     e=c.u16(c.list); c.list+=2
                     if e==0:
+                        # ANY channel's REAL END stops the WHOLE song ($6CB1)
+                        for j,cc in enumerate(ch):
+                            cc.pos=None; cc.vol=0
+                        sq_wr(0,"vd",0x40); sq_wr(1,"vd",0x40)
+                        writes.append((fr[0],"nfv",0))
+                        borrowed[0]=None
+                        return
+                    if e==0xFE00:
+                        # dormant: this channel off, the song continues
                         c.pos=None; c.vol=0
                         if i==2:
                             wr_vol(i,c); borrowed[0]=None
@@ -122,7 +131,12 @@ def model(frames, rate=3):
                 if c.pos is None:              # the mus_zero $00 fetch
                     while True:
                         e=c.u16(c.list); c.list+=2
-                        if e==0: c.pos=None; c.active=False; break
+                        if e==0:
+                            for cc in ch: cc.pos=None; cc.vol=0
+                            sq_wr(0,"vd",0x40); sq_wr(1,"vd",0x40)
+                            writes.append((fr[0],"nfv",0))
+                            break
+                        if e==0xFE00: c.pos=None; c.active=False; break
                         if e==0xFFFF:
                             c.list=c.u16(c.list); continue
                         c.pos=e; break

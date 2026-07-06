@@ -44,12 +44,13 @@ time from the user's own ROM by `tools/extract_sfx.py` / `tools/extract_music.py
 | $dff8 | $02 | brick smash (noise shards) | break_brick |
 | $dff8 | $03 | fly (Goombo) death | enemy_contact type 4 |
 | $dfe8 | $02 | death jingle | @die / pit / time-up |
-| $dfe8 | $04 | underground room music | extracted, UNWIRED |
+| $dfe8 | $04 | underground room music | enter_room (star-gated, $17AB) |
 | $dfe8 | $07 | 1-1 LEVEL MUSIC | mus_start at level start/respawn |
-| $dfe8 | $0C | star music | extracted, UNWIRED |
+| $dfe8 | $09 | BONUS GAME music (harness-verified: bonus state -> $dfe9=$09) | bonus_start |
+| $dfe8 | $0C | star music (ONE-SHOT: its end = the star's end, $1F08) | star grant / star tick |
 | $dfe8 | $0F | goal fanfare (one-shot) | goal_check |
 | $dfe8 | $11 | NOT hurry-up: written by routine $12F1 when $dfe9==0 (context unidentified) | extracted, UNWIRED |
-| $dfe8 | $12 | bonus game music | extracted, UNWIRED |
+| $dfe8 | $12 | NOT the bonus music (old label wrong; context unknown) | -- |
 | $dfe8 | $10 | stop music | (port: mus_stop) |
 
 Level→track table: bank0 `$07CE`.
@@ -179,8 +180,22 @@ per pass. The sequence engine loops perfectly by construction.
   player (borrow rule included) walking music.bin predicts EVERY register
   write; the built ROM under py65 matched **1431/1431 writes** in order,
   value, and ±2-frame timing.
-- NOT yet wired: underground ($04, pipe rooms), bonus ($12), star ($0C),
-  pause ding-dong.
+- **All six tracks wired** (stage 3): pipe enter -> $04, exit -> level
+  (both star-gated like the GB's $17AB/$07A3); star grant -> $0C with the
+  GB's expiry rule (the tune is one-shot at 1024 ticks = 16.0s; the timer
+  (16.3s) OR the tune's end -- whichever first -- ends the star, $1F08);
+  bonus game -> $09 (the '$12 = bonus' catalog label was wrong: forcing
+  the GB bonus state plays $09). List terminators are now three-way:
+  $0000 = a REAL GB end entry -> stops the WHOLE song ($6CB1 semantics,
+  which is also what makes the star's drums stop with its melody);
+  $FE00 = DORMANT (null/unterminated channel: inactive, never ends the
+  song -- the goal's null ch3/ch4 must not kill the fanfare); $FFFF+target
+  = jump. Driver tempo (hurry-up) persists across song changes like the
+  GB's TMA; it resets only at level init/death/goal.
+- NOT yet wired: pause ding-dong. Unknown ids: $11, $12 (later levels?).
+- Star drums verified vs a demo-mode capture: 129/129 hits, ≤1.1f. (The
+  attract-mode DEMO starts ~f949 after boot and rewrites the music --
+  the cause of "restarts" in idle captures; re-trigger after it begins.)
 
 ## 5. SV hardware truths (Potator-source-verified)
 

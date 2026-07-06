@@ -288,6 +288,8 @@ o_nfl:       .res 8          ; bit0 = dirty, bit1 = visible (render_all flags)
     stz mario_frame              ; standing pose (index)
     stz prev_frame
     jsr draw_player
+    lda #3                       ; 64Hz driver (GB: TMA=0 at level init, $0769)
+    sta mus_rate
     lda #MUS_LEVEL               ; the 1-1 tune (the original writes track $07 from the
     jsr mus_start                ; per-level table at bank0 $07CE on level entry)
     cli
@@ -391,11 +393,22 @@ main_loop:
     lda frame_count
     and #3
     bne @nostar
+    lda mus_on                   ; the star tune is one-shot: when it ends, the star
+    beq @starout                 ; ends with it ($1F08: $dfe9==0 -> expire now)
     dec mario_starT
-    bne :+
+    bne @starflash
+@starout:
+    stz mario_starT
     stz star_flash               ; expired -> visible for good
+    lda #MUS_LEVEL               ; music back via the level table ($1F1C -> $07A3):
+    ldx room_mode                ; the underground rooms restore their own tune
+    beq @strestore
+    lda #MUS_UNDER
+@strestore:
+    jsr mus_start
     bra @nostar
-:   lda star_flash
+@starflash:
+    lda star_flash
     eor #1
     sta star_flash
 @nostar:
@@ -1220,6 +1233,8 @@ main_loop:
     jsr hud_init                  ; level restart: reset the clock to 400
     jsr draw_hud                  ; restamp score/coins/time over the fresh template
     jsr draw_player              ; place Mario at the start
+    lda #3                       ; 64Hz driver (GB: TMA=0 at level init)
+    sta mus_rate
     lda #MUS_LEVEL               ; level restart -> the music restarts from the top
     jsr mus_start
     rts
@@ -1247,8 +1262,10 @@ main_loop:
     lda #1                       ; instant freeze -- no auto-walk, no early lock.
     sta goal_phase
     jsr mus_stop                 ; level music out, the goal fanfare in (the original
+    lda #3                       ; 64Hz driver (GB: TMA=0 in the goal path, $0C5D)
+    sta mus_rate
     lda #MUS_GOAL                ; writes $dfe8=$0F here; track $0F is one-shot: its
-    jsr mus_start                ; ch1 list ends with a STOP entry)
+    jsr mus_start                ; ch1 list ends with a STOP entry
     lda #240
     sta goal_tmr
     stz goal_top
@@ -1471,6 +1488,8 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
 
 ; bonus_start: draw the whole bonus screen + place Mario. (RE: State_12/$13/$14.)
 .proc bonus_start
+    lda #MUS_BONUS               ; the bonus tune replaces the goal fanfare ($0F84
+    jsr mus_start                ; writes $dfe8=$12 in the bonus-entry setup)
     stz scroll_s                 ; the level end leaves XSCROLL=32 (sub-shift): the bonus
     stz prev_scroll_s            ; draws at fb cols 0-19, so the window must start at 0
     stz scroll_vis
@@ -2246,15 +2265,11 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
     lda #1
     sta mus_on
     stz mus_acc
-    lda #3                       ; tick rate back to 64Hz (GB: TMA reset at level init)
-    sta mus_rate
     rts
 .endproc
 
 .proc mus_stop                   ; silence + stop (channels the SFX owns are left alone)
     stz mus_on
-    lda #3                       ; hurry-up rate ends with the song (GB: TMA=0 at death/goal)
-    sta mus_rate
     stz mus_pos+1+24             ; ch3 + noise off
     stz mus_pos+1+36
     lda #$FF
@@ -2425,10 +2440,12 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
     lda (mus_list,x)             ; entry lo
     sta tmpL
     jsr @incl
-    lda (mus_list,x)             ; entry hi: 0 = end, $FF = jump, else offset
+    lda (mus_list,x)             ; entry hi: 0 = end-all, $FE = dormant, $FF = jump
     jsr @incl
     cmp #0
     beq @end
+    cmp #$FE
+    beq @dormant
     cmp #$FF
     beq @jump
     pha
@@ -2454,14 +2471,18 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
     adc #>music_data
     sta mus_list+1,x
     bra @next_phrase
-@end:
-    stz mus_pos+1,x              ; channel done (one-shot jingles)
-    stz mus_vol,x
+@dormant:
+    stz mus_pos+1,x              ; unterminated/null on the GB = inactive channel;
+    stz mus_vol,x                ; it never ends the song
     jsr mus_free
-    bcc :+
+    bcc @end0
     lda #$40
     sta CH1_VOLDUTY,y
-:   rts
+@end0:
+    rts
+@end:
+    jmp mus_stop                 ; ANY channel's REAL END entry stops the WHOLE song
+                                 ; ($6CB1: clears $dfe9 + full APU reset)
 @incp:
     inc mus_pos,x
     bne :+
@@ -2651,6 +2672,8 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
     jsr @incl
     cmp #0
     beq @end
+    cmp #$FE
+    beq @dormant
     cmp #$FF
     beq @jump
     pha
@@ -2676,13 +2699,15 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
     adc #>music_data
     sta mus_list+1,x
     bra @next_phrase
-@end:
+@dormant:
     stz mus_pos+1,x
     stz mus_vol,x
-    jsr mus3_wr                  ; silence the borrowed square (write vol 0)
+    jsr mus3_wr                  ; silence the borrowed square, release it
     lda #$FF
     sta mus_ch3+10
     rts
+@end:
+    jmp mus_stop                 ; whole-song stop ($6CB1)
 @incp:
     inc mus_pos,x
     bne :+
@@ -2822,6 +2847,8 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
     jsr @incl
     cmp #0
     beq @end
+    cmp #$FE
+    beq @dormant
     cmp #$FF
     beq @jump
     pha
@@ -2847,11 +2874,13 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
     adc #>music_data
     sta mus_list+1,x
     bra @next_phrase
-@end:
+@dormant:
     stz mus_pos+1,x
     stz mus_vol,x
     jsr musn_wr
     rts
+@end:
+    jmp mus_stop                 ; whole-song stop ($6CB1)
 @incp:
     inc mus_pos,x
     bne :+
@@ -3132,6 +3161,8 @@ music_data:
     jsr hud_init                 ; clock back to 400 (score/coins/lives untouched)
     jsr draw_hud
     jsr draw_player
+    lda #3                       ; 64Hz driver (GB: TMA=0 at level init)
+    sta mus_rate
     lda #MUS_LEVEL               ; fresh level -> the tune from the top
     jsr mus_start
     rts
@@ -3266,7 +3297,11 @@ music_data:
     jsr render_status_bar
     jsr draw_hud                  ; restamp the HUD over the fresh template (clock continues)
     jsr draw_player
-    rts
+    lda mario_starT               ; underground music ($dfe8=$04 at room entry, $07C8;
+    bne :+                        ; skipped while the star tune owns the music, $17AB)
+    lda #MUS_UNDER
+    jsr mus_start
+:   rts
 .endproc
 
 ; exit_room: return to the surface at the saved camera, standing.
@@ -3318,7 +3353,11 @@ music_data:
     jsr render_status_bar
     jsr draw_hud                  ; restamp the HUD over the fresh template (clock continues)
     jsr draw_player
-    rts
+    lda mario_starT               ; surface music restored via the level table ($07A3),
+    bne :+                        ; which returns early while the star is active
+    lda #MUS_LEVEL
+    jsr mus_start
+:   rts
 .endproc
 
 ; redraw_pipe_front: redraw the pipe's rim tiles (the 2 rows at/below the pipe top, across
@@ -4613,6 +4652,8 @@ STAR_ARC_N = 42
     lda #248                     ; star! 248 ticks, dec every 4th frame (~16s; $c0d3=$f8)
     sta mario_starT
     stz star_flash
+    lda #MUS_STAR                ; the star tune ($09C9 writes $dfe8=$0C with the timer);
+    jsr mus_start                ; it is ONE-SHOT -- its end also ends the star ($1F08)
     lda #$00                     ; +1000
     ldx #$10
     jsr add_score

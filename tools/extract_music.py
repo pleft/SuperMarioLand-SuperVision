@@ -26,7 +26,9 @@ Port encoding (music.bin):
   (on the GB ch4 every non-command byte is a drum -- $01 included: it is the
   SILENT drum, vol 0; verified 95/95 hits vs capture before its mid-capture restart).
   ch3 (wave) notes keep the shared note table; the player derives the octave-below
-  frequency as F*2+1. A null channel pointer becomes a list of just $0000.
+  frequency as F*2+1. List terminators: $0000 = a REAL GB end entry (stops the WHOLE
+  song, $6CB1); $FE00 = DORMANT (null channel pointer, or a list that just runs out
+  unterminated -- the GB treats those channels as inactive, never as a song end).
 music.inc: mus_l1..l4 offset tables + mus_track_ids + MUS_* indices.
 """
 import os
@@ -36,7 +38,7 @@ d = open(os.path.join(ROOT, "super-mario-land-gb.gb"), "rb").read()
 B = lambda gb: 3*0x4000 + (gb-0x4000)
 u16 = lambda o: d[o] | (d[o+1] << 8)
 
-TRACKS = [0x07, 0x04, 0x0C, 0x0F, 0x11, 0x12]   # level, underground, star, goal, hurry, bonus
+TRACKS = [0x07, 0x04, 0x0C, 0x0F, 0x11, 0x09]   # level, underground, star, goal, ($11: unknown), BONUS = $09 (harness-verified: forcing the bonus state $ffb3=$12 sets $dfe9=$09; the old '$12 = bonus' catalog label was wrong)
 NAMES  = ["MUS_LEVEL", "MUS_UNDER", "MUS_STAR", "MUS_GOAL", "MUS_HURRY", "MUS_BONUS"]
 
 def gb_noise_to_sv(nr43):
@@ -122,15 +124,17 @@ for tr in TRACKS:
     bounds = set(p for p in chp if p)
     for ch in range(4):                      # all four GB channels
         if not (0x4000 <= chp[ch] < 0x8000): # null pointer (e.g. goal ch3/ch4)
-            lists.append((None, None))
+            lists.append((None, None, b"\x00\xFE"))
             continue
-        base = chp[ch]; lp = B(base); lst = []; term = b"\x00\x00"; loop_ix = None
+        base = chp[ch]; lp = B(base); lst = []; loop_ix = None
+        term_bytes = b"\x00\xFE"            # truncated list = dormant channel
         while True:
             gbaddr = lp - 3*0x4000 + 0x4000
             if gbaddr != base and gbaddr in bounds:
                 break
             p = u16(lp); lp += 2
             if (p >> 8) == 0x00:
+                term_bytes = b"\x00\x00"    # a REAL end entry: stops the whole song
                 break
             if (p >> 8) == 0xFF:
                 tgt = u16(lp)
@@ -160,7 +164,7 @@ for tr in TRACKS:
                     blob = nb
                 phrases[key] = None; order.append(key)
             lst.append(key)
-        lists.append((lst, loop_ix))
+        lists.append((lst, loop_ix, term_bytes))
     poff = {}
     for key in order:
         p, isdrum = key
@@ -176,17 +180,17 @@ for tr in TRACKS:
             blob = nb
         poff[key] = len(out); out += blob
     L = []
-    for lst, loop_ix in lists:
+    for lst, loop_ix, tb in lists:
         lbase = len(out)
         L.append(lbase)
-        if lst is None:                      # null channel: immediate end
-            out += b"\x00\x00"
+        if lst is None:                      # null channel: dormant, NOT song-end
+            out += tb
             continue
         for key in lst:
             o = poff[key]
             out += bytes([o & 0xFF, o >> 8])
         if loop_ix is None:
-            out += b"\x00\x00"
+            out += tb
         else:
             t = lbase + loop_ix*2
             out += b"\xFF\xFF" + bytes([t & 0xFF, t >> 8])
