@@ -119,6 +119,7 @@ stream_pend: .res 1          ; margin columns still to stream after a shift (amo
 scroll_vis:  .res 1          ; scroll value the line-16 IRQ latches (updated ONLY at frame start)
 m_dirty:     .res 1          ; Mario needs erase+redraw this frame
 combo_t:     .res 1          ; stomp-combo window ($ff9c): 50 frames
+skid_t:      .res 1          ; turn-around skid: walkB pose held ~7f (GB OAM capture)
 combo_n:     .res 1          ; chain count ($ff9d): 0..3, doubles the value code
 death_anim:  .res 1          ; >0 = the death hop is playing (index+1 into death_curve)
 timeup:      .res 1          ; the clock ran out: after the hop, show " TIME UP " (state $3B)
@@ -210,6 +211,7 @@ o_pfr:       .res 8          ; anim token at the last draw (flip/twinkle cadence
 o_nvx:       .res 8          ; this frame's computed screen x (render_all pass 1)
 o_ndy:       .res 8          ; this frame's computed dy
 o_nfl:       .res 8          ; bit0 = dirty, bit1 = visible (render_all flags)
+o_hp:        .res 8          ; extra hits to survive (fly: 1 -- two balls kill, user/GB)
 
 .segment "ZEROPAGE"
 
@@ -3935,15 +3937,24 @@ CAM_MAX = (level0_cols - 20) * 8 ; max scroll: (level width - 20 visible cols) *
 @walk:
     lda pad_held
     and #GB_RIGHT
-    bne @right
-    lda pad_held
+    beq :+
+    jmp @right
+:   lda pad_held
     and #GB_LEFT
-    bne @left
-    stz h_hold                   ; not moving: reset accel
+    beq :+
+    jmp @left
+:   stz h_hold                   ; not moving: reset accel
     stz h_idx
     rts
 @right:
-    stz mario_facing
+    lda mario_facing             ; was moving/facing LEFT -> the turn skid (GB: walkB
+    beq :+                       ; held ~7 frames with the new facing)
+    lda h_hold
+    cmp #4
+    bcc :+
+    lda #7
+    sta skid_t
+:   stz mario_facing
     jsr calc_step                ; h_step = px this frame
     lda #14                      ; blocked by a wall to the right? (pipe/wall/step-up)
     jsr wall_ahead
@@ -4013,7 +4024,14 @@ CAM_MAX = (level0_cols - 20) * 8 ; max scroll: (level width - 20 visible cols) *
     sta spr_x
     rts
 @left:
-    lda #1
+    lda mario_facing             ; was facing RIGHT -> the turn skid
+    bne :+
+    lda h_hold
+    cmp #4
+    bcc :+
+    lda #7
+    sta skid_t
+:   lda #1
     sta mario_facing
     jsr calc_step
     lda #1                       ; blocked by a wall to the left?
@@ -4474,6 +4492,7 @@ FLOWER_RISE = 7                  ; emerge: rise 7px out of the block, then sit (
     sec
     rts
 @ok:
+    stz o_hp,x                   ; fresh slot: full health
     clc
     rts
 .endproc
@@ -6328,8 +6347,6 @@ title_tiles:                     ; the used tiles, SV-packed
     beq :+
     cmp #OBJ_FLY
     beq :+
-    cmp #OBJ_SQUASH
-    beq :+
     jmp @next
 :   ldy oi                       ; dx = |ball - enemy| (16-bit)
     lda o_xl,y
@@ -6365,30 +6382,13 @@ title_tiles:                     ; the used tiles, SV-packed
     lda #$01                     ; value code: walkers 100
     sta tmpH2
     lda o_type,x
-    cmp #OBJ_SQUASH              ; a ball into the FLAT FLY corpse flips it away
-    bne :+                       ; (GB: $0F -> $15 -> $0D on the second shot)
-    lda o_st,x
-    and #1                       ; only the fly's 2-tile flat corpse is a target
-    beq @bnext
-    lda #OBJ_FLY                 ; kind = fly for kill_flip
-    sta o_type,x
-    lda #$04
-    sta tmpH2
-    bra @bkill
-:   cmp #OBJ_FLY
+    cmp #OBJ_FLY
     bne @bkill
-    lda #$04                     ; fly, shot #1: drops as the FLAT corpse (GB $0F --
-    sta tmpH2                    ; it falls to the ground and stays; shot #2 removes it)
-    lda #OBJ_SQUASH
-    sta o_type,x
-    lda #FLY_SQ
-    sta o_vx,x
-    lda #96                      ; lives long enough to take the second shot
-    sta o_tmr,x
-    lda #1
-    sta o_st,x
-    lda tmpH2
-    jsr award_kill
+    lda #$04                     ; fly 400
+    sta tmpH2
+    lda o_hp,x                   ; the fly takes TWO balls (user-verified on GB):
+    bne @bkill                   ; the first just expires against it
+    inc o_hp,x
     ldx oi
     stz o_type,x
     rts
@@ -7764,7 +7764,13 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     sta mario_frame
     rts
 @ground:
-    lda pad_held
+    lda skid_t                   ; turn-around: hold walk B (the GB's skid pose is
+    beq :+                       ; metasprite 1 = the walkB tiles, capture-verified)
+    dec skid_t
+    lda #2
+    sta mario_frame
+    rts
+:   lda pad_held
     and #(GB_LEFT | GB_RIGHT)
     beq @idle
     lda frame_count              ; walk cycle: alternate ~every 8 frames
