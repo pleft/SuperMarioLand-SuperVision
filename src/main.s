@@ -120,6 +120,7 @@ scroll_vis:  .res 1          ; scroll value the line-16 IRQ latches (updated ONL
 m_dirty:     .res 1          ; Mario needs erase+redraw this frame
 combo_t:     .res 1          ; stomp-combo window ($ff9c): 50 frames
 skid_t:      .res 1          ; turn-around skid: walkB pose held ~7f (GB OAM capture)
+move_t:      .res 1          ; frames since real motion (dpad-roll grace for the skid)
 combo_n:     .res 1          ; chain count ($ff9d): 0..3, doubles the value code
 death_anim:  .res 1          ; >0 = the death hop is playing (index+1 into death_curve)
 timeup:      .res 1          ; the clock ran out: after the hop, show " TIME UP " (state $3B)
@@ -3945,15 +3946,22 @@ CAM_MAX = (level0_cols - 20) * 8 ; max scroll: (level width - 20 visible cols) *
     jmp @left
 :   stz h_hold                   ; not moving: reset accel
     stz h_idx
-    rts
+    lda move_t                   ; rolling the dpad passes through neutral: the skid
+    beq :+                       ; gate must survive a few frames of no input
+    dec move_t
+:   rts
 @right:
     lda mario_facing             ; was moving/facing LEFT -> the turn skid (GB: walkB
     beq :+                       ; held ~7 frames with the new facing)
-    lda h_hold
-    cmp #4
-    bcc :+
+    lda move_t
+    beq :+
     lda #7
     sta skid_t
+:   lda h_hold                   ; real motion only (a 1-frame tap must not arm it)
+    cmp #4
+    bcc :+
+    lda #8
+    sta move_t
 :   stz mario_facing
     jsr calc_step                ; h_step = px this frame
     lda #14                      ; blocked by a wall to the right? (pipe/wall/step-up)
@@ -4026,11 +4034,15 @@ CAM_MAX = (level0_cols - 20) * 8 ; max scroll: (level width - 20 visible cols) *
 @left:
     lda mario_facing             ; was facing RIGHT -> the turn skid
     bne :+
-    lda h_hold
-    cmp #4
-    bcc :+
+    lda move_t
+    beq :+
     lda #7
     sta skid_t
+:   lda h_hold                   ; real motion only
+    cmp #4
+    bcc :+
+    lda #8
+    sta move_t
 :   lda #1
     sta mario_facing
     jsr calc_step
