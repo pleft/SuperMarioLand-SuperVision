@@ -7109,7 +7109,14 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     cpy #OBJ_POPUP
     bne :+
     lda #3
-:   cpy #OBJ_BOOM
+:   cpy #OBJ_SQUASH              ; the fly's FLAT corpse is a 2-tile pair (16px):
+    bne @notsq                   ; without the wider erase it smears while falling
+    ldy o_st,x
+    beq :+
+    lda #3
+:   ldy #OBJ_SQUASH
+@notsq:
+    cpy #OBJ_BOOM
     bne :+
     lda #3
 :   cpy #OBJ_NOKO
