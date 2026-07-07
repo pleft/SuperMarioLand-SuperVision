@@ -42,8 +42,11 @@ u16 = lambda o: d[o] | (d[o+1] << 8)
 # labels): level $07 (table $07CE), underground $04 ($07C8/$17AB), star $0C ($09C9),
 # GOAL = $01 (the bottom-door write at $1B70; $0F was a mislabel), BONUS = $09 (the
 # bonus state sets $dfe9=$09; $12 was a mislabel). $0F/$11/$12 = unknown later-level ids.
-TRACKS = [0x07, 0x04, 0x0C, 0x01, 0x09]
-NAMES  = ["MUS_LEVEL", "MUS_UNDER", "MUS_STAR", "MUS_GOAL", "MUS_BONUS"]
+# Bonus stage (harness, forced $ffb3=$12 with A presses): entry $09 (ladder stage),
+# the walk-to-prize $0A (state $17), the award celebration $0D (state $1A), and the
+# 1UP chirp $dfe0=$08 at each joy hop.
+TRACKS = [0x07, 0x04, 0x0C, 0x01, 0x09, 0x0A, 0x0D]
+NAMES  = ["MUS_LEVEL", "MUS_UNDER", "MUS_STAR", "MUS_GOAL", "MUS_BONUS", "MUS_BWALK", "MUS_BAWARD"]
 
 def gb_noise_to_sv(nr43):
     """GB NR43 -> SV noise freq nibble N (freq = 4MHz/(8<<N)); same rule as extract_sfx."""

@@ -190,6 +190,7 @@ mus_lt:      .res 2          ; current track's note-length table (16 bytes)
 
 .segment "BSS"
 revpix:      .res 256        ; reverse the 4 2bpp pixels in a byte (built at boot)
+flipbuf:     .res 16         ; row-reversed tile scratch for the Y-flipped corpse draw
 tile_mod:    .res 640        ; "modified" bitmap, 1 bit per surface (col,row): used ?-block / broken brick
 ; --- object slots (items / coin-pop / brick debris). SoA, 8 entries (a brick break spawns
 ;     4 debris pieces on top of whatever item is live). ---
@@ -347,6 +348,8 @@ main_loop:
     beq @unpaused
     stz CH1_VOLDUTY              ; entering pause silences the (frozen) music squares;
     stz CH2_VOLDUTY              ; a live SFX rewrites its registers on its next row
+    stz CH4_FREQVOL              ; ...and a mid-ring drum (user: noise persisted through
+                                 ; pause -- the frozen music can't run its env/cutoff)
     lda #20                      ; arm the ding-dong (GB: $ffde=$30, notes as it passes
     sta pause_snd                ; $28/$20/$18 -- three pips, 8 ticks apart, $66D6)
     bra @nopause
@@ -1772,6 +1775,8 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
     bne @cdone
     lda b_gap
     sta b_floor
+    lda #MUS_BWALK               ; the walk-to-prize tune (GB state $17 -> $dfe8=$0A)
+    jsr mus_start
     lda #3
     sta bonus_phase
 @cdone:
@@ -1789,6 +1794,8 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
     lda b_gap
     ina
     sta b_floor
+    lda #MUS_BWALK               ; the walk-to-prize tune (GB state $17 -> $dfe8=$0A)
+    jsr mus_start
     lda #3
     sta bonus_phase
     rts
@@ -1914,6 +1921,8 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
     sta bonus_phase              ; original does a hard CUT to the top-centre and hops
     lda #68                      ; (harness capture: (128,128) f116-183 -> (88,56) f184)
     sta b_awt
+    lda #MUS_BAWARD              ; the award celebration (GB state $1A -> $dfe8=$0D)
+    jsr mus_start
     ldx b_floor
     lda b_prz,x
     cmp #$E5                     ; flower?
@@ -1923,6 +1932,8 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
 @wdone:
     rts
 @flower:
+    lda #MUS_BAWARD              ; the award celebration (same GB award state $1A)
+    jsr mus_start
     lda #10                      ; flower: awarded IN PLACE at the pedestal
     sta bonus_phase
     lda #1
@@ -1985,8 +1996,8 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
 @apex:
     lda b_awn
     beq :+
-    jsr add_life
-    dec b_awn
+    jsr add_life_snd             ; the 1UP chirp at every hop apex ($dfe0=$08 x lives,
+    dec b_awn                    ; 44f apart -- harness-captured; was silent)
 :   inc b_gap
     rts
 @fall:
@@ -4418,6 +4429,9 @@ BOOM_TB    = $9E
 BOMB_FUSE  = 63                  ; trace-exact: stomp f694 -> explosion f757 (~1.0s)
 BOOM_LIFE  = 44                  ; trace: >=43 frames live (capture ended mid-cloud)
 OBJ_FLY    = 17                  ; the Fly (SML type $0E): sits, then hops toward Mario
+OBJ_CORPSE = 18                  ; ball/star kill: the enemy Y-FLIPPED, hops and falls off
+                                 ; the screen (GB type $0D; slot capture: rise 7px, fall to
+                                 ; +2px/f, 1px/f sideways drift away from the killer)
 FLY_TL     = $A0                 ; 16x16 metasprite, frame A: A0 A1 / B0 B1
 FLY_BL     = $B0
 FLY_TL2    = $A2                 ; frame B
@@ -6331,23 +6345,27 @@ title_tiles:                     ; the used tiles, SV-packed
     bcs @next
     lda #$01                     ; value code: walkers 100
     sta tmpH2
-    lda o_type,x                 ; kill: corpse (Chibibo) or gone (Nokobon/Fly); ball expires
-    cmp #OBJ_NOKO
-    beq :+
+    lda o_type,x
     cmp #OBJ_FLY
-    bne :++
+    bne @bkill
     lda #$04                     ; fly 400
     sta tmpH2
-:   stz o_type,x
-    bra @pts
-:   lda #OBJ_SQUASH
-    sta o_type,x
-    lda #CHIB_TB
-    sta o_vx,x
-    lda #24
-    sta o_tmr,x
-@pts:
-    lda tmpH2                    ; base value code (set per type below)
+    lda o_st,x                   ; the fly takes TWO superballs (user-observed);
+    bmi @bkill                   ; bit7 of its hop phase = "hit once"
+    ora #$80
+    sta o_st,x
+    ldx oi                       ; first hit: the ball still expires, the fly lives
+    stz o_type,x
+    rts
+@bkill:
+    ldy oi                       ; drift away along the ball's flight direction
+    lda o_vx,y
+    bmi :+
+    lda #1
+    bra :++
+:   lda #$FF
+:   jsr kill_flip
+    lda tmpH2
     jsr award_kill
     ldx oi
     stz o_type,x
@@ -6359,6 +6377,99 @@ title_tiles:                     ; the used tiles, SV-packed
     beq :+
     jmp @loop
 :   rts
+.endproc
+
+; kill_flip: X = enemy slot, A = sideways drift (+1/-1, away from the killer).
+; Convert a live enemy to the dead-flip corpse (the GB's universal type $0D:
+; captured star-kill: type -> $0D, kept fields, arc counter). Kind -> o_tmr.
+.proc kill_flip
+    sta o_vx,x
+    lda o_type,x
+    ldy #0                       ; kind 0 = chibibo
+    cmp #OBJ_NOKO
+    bne :+
+    ldy #1
+:   cmp #OBJ_FLY
+    bne :+
+    ldy #2
+:   tya
+    sta o_tmr,x
+    lda #OBJ_CORPSE
+    sta o_type,x
+    stz o_st,x
+    rts
+.endproc
+
+; upd_corpse: the captured arc -- corpse_dy for 23 ticks, then +2/frame; x += o_vx
+; every frame; despawns off the bottom. No collision with anything.
+.proc upd_corpse
+    jsr mush_xmove               ; o_x += o_vx (sign-extended 16-bit)
+    ldx oi
+    lda o_st,x
+    cmp #23
+    bcs @term
+    tay
+    lda corpse_dy,y
+    clc
+    adc o_y,x
+    sta o_y,x
+    inc o_st,x
+    bra @clip
+@term:
+    lda o_y,x
+    clc
+    adc #2
+    sta o_y,x
+@clip:
+    lda o_y,x
+    cmp #160
+    bcc :+
+    stz o_type,x                 ; off the bottom -> gone
+:   rts
+.endproc
+
+corpse_dy:                       ; the star-kill capture, verbatim (23 signed deltas)
+    .byte $FF,$FF,$FF,$FF,$FF,$00,$FF,$00,$FF,$00,$00,$00,$00
+    .byte $01,$00,$01,$00,$01,$01,$01,$01,$01,$01
+
+; draw_tile_yflip: like draw_quad, but the tile's 8 rows are blitted bottom-up
+; (the GB corpse OAM carries the Y-flip attribute).
+.proc draw_tile_yflip
+    txa                          ; src = chardata + X*16
+    stz src_ptr+1
+    asl
+    rol src_ptr+1
+    asl
+    rol src_ptr+1
+    asl
+    rol src_ptr+1
+    asl
+    rol src_ptr+1
+    clc
+    adc #<chardata
+    sta src_ptr
+    lda src_ptr+1
+    adc #>chardata
+    sta src_ptr+1
+    ldy #0                       ; flipbuf = rows 7..0 (2 bytes each)
+    ldx #14
+:   lda (src_ptr),y
+    sta flipbuf,x
+    iny
+    lda (src_ptr),y
+    sta flipbuf+1,x
+    iny
+    dex
+    dex
+    bpl :-
+    lda #<flipbuf
+    sta src_ptr
+    lda #>flipbuf
+    sta src_ptr+1
+    jsr set_dst
+    stz blit_opaque
+    jsr sprite_blit_subpx
+    rts
 .endproc
 
 ; spawn_coin: a coin pops straight up from the block and falls away (~24 frames).
@@ -6426,6 +6537,9 @@ title_tiles:                     ; the used tiles, SV-packed
     bra @next
 @squash:
     jsr upd_squash
+    bra @next
+@corpse:
+    jsr upd_corpse
     bra @next
 @bomb:
     jsr upd_bomb
@@ -6960,7 +7074,17 @@ title_tiles:                     ; the used tiles, SV-packed
 :   cpy #OBJ_FLY
     bne :+
     lda #$83                     ; 16 wide + tall
-:   cpy #OBJ_PLATV
+:   cpy #OBJ_CORPSE
+    bne :+
+    lda #2
+    ldy o_tmr,x                  ; kind: noko tall, fly wide+tall
+    beq :+
+    lda #$82
+    cpy #1
+    beq :+
+    lda #$83
+:   ldy o_type,x
+    cpy #OBJ_PLATV
     bcc :+
     cpy #OBJ_PLATH+1
     bcs :+
@@ -7116,6 +7240,9 @@ title_tiles:                     ; the used tiles, SV-packed
     cmp #OBJ_PLATH+1
     bcs :+
     jmp @plat
+:   cmp #OBJ_CORPSE
+    bne :+
+    jmp @corpse
 :   cmp #OBJ_HEART
     beq @heart
     cmp #OBJ_CHIB
@@ -7135,6 +7262,9 @@ title_tiles:                     ; the used tiles, SV-packed
 :   cmp #OBJ_SQUASH
     bne :+
     jmp @squash
+:   cmp #OBJ_CORPSE
+    bne :+
+    jmp @corpse
 :   cmp #OBJ_STAR
     bne :+
     jmp @stard
@@ -7181,6 +7311,70 @@ title_tiles:                     ; the used tiles, SV-packed
     ldx #CHIB_TA
     jsr draw_quad
     rts
+@corpse:
+    lda spr_col                  ; the dead-flip: the enemy's own sprite Y-FLIPPED
+    sta dcol                     ; (GB corpse OAM attr $40)
+    ldx oi
+    lda o_tmr,x                  ; kind: 0 chibibo, 1 nokobon, 2 fly
+    bne @cnoko
+    lda o_y,x                    ; --- chibibo: one tile ---
+    clc
+    adc #8
+    sta dy
+    ldx #CHIB_TA
+    jmp draw_tile_yflip
+@cnoko:
+    cmp #2
+    beq @cfly
+    ldx oi                       ; --- nokobon 8x16: bottom tile flipped on TOP ---
+    lda o_y,x
+    sta dy
+    ldx #NOKO_B1
+    jsr draw_tile_yflip
+    ldx oi
+    lda o_y,x
+    clc
+    adc #8
+    sta dy
+    lda spr_col
+    sta dcol
+    ldx #NOKO_T1
+    jmp draw_tile_yflip
+@cfly:
+    ldx oi                       ; --- fly 16x16: bottom row flipped on top ---
+    lda o_y,x
+    sta dy
+    ldx #FLY_BL
+    jsr draw_tile_yflip
+    lda spr_col
+    ina
+    ina
+    sta dcol
+    ldx oi
+    lda o_y,x
+    sta dy
+    ldx #FLY_BL+1
+    jsr draw_tile_yflip
+    lda spr_col
+    sta dcol
+    ldx oi
+    lda o_y,x
+    clc
+    adc #8
+    sta dy
+    ldx #FLY_TL
+    jsr draw_tile_yflip
+    lda spr_col
+    ina
+    ina
+    sta dcol
+    ldx oi
+    lda o_y,x
+    clc
+    adc #8
+    sta dy
+    ldx #FLY_TL+1
+    jmp draw_tile_yflip
 @squash:
     lda spr_col
     sta dcol
