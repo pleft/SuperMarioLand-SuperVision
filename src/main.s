@@ -5664,29 +5664,19 @@ fly_dy:
 @done:
     rts
 @kill:
-    ldx oi                       ; star kill: gone + points, no bounce (dead-flip type
-    lda #$01                     ; equivalents $11/$12/$15 just leave the screen)
-    sta tmpH2
+    ldx oi                       ; star kill: the DEAD-FLIP corpse (captured GB type
+    lda #$01                     ; $0D: Y-flipped, 7px hop then falls off-screen,
+    sta tmpH2                    ; 1px/f drift away from Mario)
     lda o_type,x
-    cmp #OBJ_NOKO
-    beq @kgone
     cmp #OBJ_FLY
     bne :+
-    lda #$04
+    lda #$04                     ; fly class = 400
     sta tmpH2
-    bra @kgone
-:
-    lda #OBJ_SQUASH
-    sta o_type,x
-    lda #CHIB_TB
-    sta o_vx,x
-    lda #24
-    sta o_tmr,x
-    stz o_st,x
-    bra @kpts
-@kgone:
-    stz o_type,x
-@kpts:
+:   lda #1                       ; thrown away from Mario: he walks into it, so the
+    ldy mario_facing             ; drift follows his facing (right -> thrown right)
+    beq :+
+    lda #$FF
+:   jsr kill_flip
     lda tmpH2                    ; base value code, no chain on kills
     jmp award_kill
 .endproc
@@ -5950,6 +5940,30 @@ death_curve:                     ; ROM $0C19 verbatim (signed y deltas + $7F end
 ; upd_squash: a squashed corpse -- sits still, then vanishes.
 .proc upd_squash
     ldx oi
+    lda o_xl,x                   ; gravity: fall 1px/f until solid ground under the
+    clc                          ; feet (a fly shot mid-hop drops flat, GB $0F)
+    adc #4
+    sta feet_col
+    lda o_xh,x
+    adc #0
+    sta feet_col+1
+    lsr feet_col+1
+    ror feet_col
+    lsr feet_col+1
+    ror feet_col
+    lsr feet_col+1
+    ror feet_col
+    lda o_y,x
+    lsr
+    lsr
+    lsr
+    sta mrow
+    jsr read_solid
+    bne :+
+    ldx oi
+    inc o_y,x
+    rts
+:   ldx oi
     dec o_tmr,x
     bne :+
     stz o_type,x
@@ -6313,7 +6327,10 @@ title_tiles:                     ; the used tiles, SV-packed
     cmp #OBJ_NOKO
     beq :+
     cmp #OBJ_FLY
-    bne @next
+    beq :+
+    cmp #OBJ_SQUASH
+    beq :+
+    jmp @next
 :   ldy oi                       ; dx = |ball - enemy| (16-bit)
     lda o_xl,y
     sec
@@ -6323,7 +6340,9 @@ title_tiles:                     ; the used tiles, SV-packed
     sbc o_xh,x
     beq @dxok                    ; hi 0 -> non-negative small
     cmp #$FF
-    bne @next                    ; |dx| >= 256
+    beq :+
+    jmp @next                    ; |dx| >= 256
+:
     lda tmpL3                    ; negative: negate
     eor #$FF
     ina
@@ -6346,15 +6365,31 @@ title_tiles:                     ; the used tiles, SV-packed
     lda #$01                     ; value code: walkers 100
     sta tmpH2
     lda o_type,x
-    cmp #OBJ_FLY
-    bne @bkill
-    lda #$04                     ; fly 400
+    cmp #OBJ_SQUASH              ; a ball into the FLAT FLY corpse flips it away
+    bne :+                       ; (GB: $0F -> $15 -> $0D on the second shot)
+    lda o_st,x
+    and #1                       ; only the fly's 2-tile flat corpse is a target
+    beq @bnext
+    lda #OBJ_FLY                 ; kind = fly for kill_flip
+    sta o_type,x
+    lda #$04
     sta tmpH2
-    lda o_st,x                   ; the fly takes TWO superballs (user-observed);
-    bmi @bkill                   ; bit7 of its hop phase = "hit once"
-    ora #$80
+    bra @bkill
+:   cmp #OBJ_FLY
+    bne @bkill
+    lda #$04                     ; fly, shot #1: drops as the FLAT corpse (GB $0F --
+    sta tmpH2                    ; it falls to the ground and stays; shot #2 removes it)
+    lda #OBJ_SQUASH
+    sta o_type,x
+    lda #FLY_SQ
+    sta o_vx,x
+    lda #96                      ; lives long enough to take the second shot
+    sta o_tmr,x
+    lda #1
     sta o_st,x
-    ldx oi                       ; first hit: the ball still expires, the fly lives
+    lda tmpH2
+    jsr award_kill
+    ldx oi
     stz o_type,x
     rts
 @bkill:
@@ -6370,6 +6405,8 @@ title_tiles:                     ; the used tiles, SV-packed
     ldx oi
     stz o_type,x
     rts
+@bnext:
+    jmp @next
 @next:
     inc oi2
     lda oi2
@@ -6379,6 +6416,7 @@ title_tiles:                     ; the used tiles, SV-packed
 :   rts
 .endproc
 
+.segment "LEVELS"                ; corpse machinery lives with the level data (FIXED full)
 ; kill_flip: X = enemy slot, A = sideways drift (+1/-1, away from the killer).
 ; Convert a live enemy to the dead-flip corpse (the GB's universal type $0D:
 ; captured star-kill: type -> $0D, kept fields, arc counter). Kind -> o_tmr.
@@ -6403,11 +6441,13 @@ title_tiles:                     ; the used tiles, SV-packed
 ; upd_corpse: the captured arc -- corpse_dy for 23 ticks, then +2/frame; x += o_vx
 ; every frame; despawns off the bottom. No collision with anything.
 .proc upd_corpse
-    jsr mush_xmove               ; o_x += o_vx (sign-extended 16-bit)
     ldx oi
     lda o_st,x
     cmp #23
     bcs @term
+    jsr mush_xmove               ; sideways drift ONLY during the arc (GB: the x
+    ldx oi                       ; freezes exactly when the +2/f fall begins)
+    lda o_st,x
     tay
     lda corpse_dy,y
     clc
@@ -6472,6 +6512,8 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     rts
 .endproc
 
+.segment "CODE"
+
 ; spawn_coin: a coin pops straight up from the block and falls away (~24 frames).
 .proc spawn_coin
     jsr find_free_obj
@@ -6524,6 +6566,8 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     beq @chib                    ; same walker engine (combat branches by type inside)
     cmp #OBJ_SQUASH
     beq @squash
+    cmp #OBJ_CORPSE
+    beq @corpse
     cmp #OBJ_BOMB
     beq @bomb
     cmp #OBJ_BOOM
@@ -7262,9 +7306,6 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
 :   cmp #OBJ_SQUASH
     bne :+
     jmp @squash
-:   cmp #OBJ_CORPSE
-    bne :+
-    jmp @corpse
 :   cmp #OBJ_STAR
     bne :+
     jmp @stard
