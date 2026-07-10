@@ -18,15 +18,18 @@ SPEEDTAB_LEN  = 6
 
 # Mario metasprite poses. The metasprite pointer table is at bank 3 $4C37 (idx*2 ->
 # 4-byte struct; struct[0:2] = tile-data ptr). Each tile-data entry is
-# [oam-list ptr:2][4 tile numbers][$FF]. We take the 4 tile numbers for the 4 poses the
-# port uses, in its order: stand, walkA, walkB, jump = metasprite indices 0, 3, 1, 4.
+# [oam-list ptr:2][4 tile numbers][$FF]. We take the 4 tile numbers for the poses the
+# port uses, in its order: stand, walkA, walkB, jump, skid, walkC = metasprite indices
+# 0, 3, 1, 4, 5, 2. (GB walk cycle = $c203 low nibble 1->2->3 advancing every 4 moving
+# frames at $1701; the turn-around skid = metasprite 5, set by the brake code at $1e48.)
 META_TABLE   = 0x4C37     # bank 3
-POSE_INDICES = [0, 3, 1, 4]
+POSE_INDICES = [0, 3, 1, 4, 5, 2]
 # Big ("Super") Mario uses a parallel pose set (same 16x16 metasprite shape, +$20 tile
-# offset, filling the full cell vs small Mario's ~12px). Same order as small, plus a duck:
-# stand, walkA, walkB, jump, duck = metasprite indices 16, 19, 17, 20, 24 (idx 24 = the
-# real big-Mario crouch, tiles $40-$43; verified by rendering vs the original).
-BIG_POSE_INDICES = [16, 19, 17, 20, 24]
+# offset, filling the full cell vs small Mario's ~12px). Same order as small, plus the
+# duck: stand, walkA, walkB, jump, skid, walkC, duck = metasprite indices
+# 16, 19, 17, 20, 21, 18, 24 (idx 24 = the real big-Mario crouch, tiles $40-$43,
+# verified by rendering vs the original; idx 21 = big skid, +$20 mirror of small's 5).
+BIG_POSE_INDICES = [16, 19, 17, 20, 21, 18, 24]
 
 # Status-bar template: 2 rows x 20 tiles at bank 0 $3F9C (the HUD-init at $060F copies it
 # to BG map $9800). Static labels + zero/blank placeholders for the dynamic values.

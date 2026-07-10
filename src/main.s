@@ -9,8 +9,8 @@
 .import level0_map           ; World 1-1 tilemap (column-major, 16 tiles/col)
 .import jumparc              ; Mario's jump arc table (27 bytes; $7F = apex)
 .import speedtab            ; horizontal walk speed table (px/frame)
-.import mario_poses          ; 4 poses x 4 tiles (metasprite tiles from ROM $4C37)
-.import mario_big_poses      ; 5 big-Mario poses x 4 tiles (stand,walkA,walkB,jump,duck)
+.import mario_poses          ; 6 poses x 4 tiles (metasprite tiles from ROM $4C37)
+.import mario_big_poses      ; 7 big-Mario poses x 4 tiles (stand,walkA,walkB,jump,skid,walkC,duck)
 .import statusbar_tiles      ; 2x20 status-bar template (ROM $3F9C)
 .import spawn_table          ; enemy spawns: [fire_cam(16), o_y, type] per entry, $FFFF end
 .import level0_cols          ; World 1-1 width in columns (from the level binary size)
@@ -119,8 +119,11 @@ stream_pend: .res 1          ; margin columns still to stream after a shift (amo
 scroll_vis:  .res 1          ; scroll value the line-16 IRQ latches (updated ONLY at frame start)
 m_dirty:     .res 1          ; Mario needs erase+redraw this frame
 combo_t:     .res 1          ; stomp-combo window ($ff9c): 50 frames
-skid_t:      .res 1          ; turn-around skid: walkB pose held ~7f (GB OAM capture)
-move_t:      .res 1          ; frames since real motion (dpad-roll grace for the skid)
+skid_t:      .res 1          ; turn-around brake ($c20d=1 state): 8f input-ignored freeze
+move_t:      .res 1          ; momentum counter ($c20c): +1/held frame cap 6, -1/neutral
+mdir:        .res 1          ; last motion direction ($c20d): 0 none, 1 right, 2 left
+walk_t:      .res 1          ; walk-anim tick ($c20b): pose advances every 4 moving frames
+walk_i:      .res 1          ; walk-cycle position 0..2 -> pose 2,5,1 (GB metas 1,2,3)
 combo_n:     .res 1          ; chain count ($ff9d): 0..3, doubles the value code
 death_anim:  .res 1          ; >0 = the death hop is playing (index+1 into death_curve)
 timeup:      .res 1          ; the clock ran out: after the hop, show " TIME UP " (state $3B)
@@ -1217,6 +1220,11 @@ main_loop:
     stz h_hold
     stz h_idx
     stz h_toggle
+    stz skid_t                   ; no brake/momentum state survives a respawn
+    stz move_t
+    stz mdir
+    stz walk_t
+    stz walk_i
     stz mario_facing
     stz mario_frame
     stz prev_frame
@@ -3198,6 +3206,11 @@ music_data:
     stz h_hold
     stz h_idx
     stz h_toggle
+    stz skid_t                   ; no brake/momentum state survives a respawn
+    stz move_t
+    stz mdir
+    stz walk_t
+    stz walk_i
     stz mario_facing
     stz mario_frame
     stz prev_frame
@@ -3923,6 +3936,18 @@ CAM_MAX = (level0_cols - 20) * 8 ; max scroll: (level width - 20 visible cols) *
 ; past it his rightward motion scrolls the camera (cam_x) instead, until the level
 ; end (CAM_MAX) where he walks to the right screen edge. The level never scrolls back.
 .proc move_player                ; accelerating walk via the real speed table (px-precise)
+    lda skid_t                   ; turn-around brake (GB $c20d=1 state, $1d1e): input is
+    beq @nobrake                 ; ignored and Mario is frozen for 8 frames, showing the
+    dec skid_t                   ; skid pose (grounded) with the OLD facing
+    bne :+
+    stz mdir                     ; brake over: direction memory cleared ($1d6b),
+    stz walk_t                   ; pose -> stand and the walk cycle restarts ($1d71)
+    stz walk_i
+    stz mario_frame
+:   stz h_hold                   ; speed restarts from the slow ramp ($c20e=0 at $1d71)
+    stz h_idx
+    rts
+@nobrake:
     stz mario_duck               ; big Mario, grounded, holding Down -> duck (no walk)
     lda mario_big
     beq @walk
@@ -3946,22 +3971,30 @@ CAM_MAX = (level0_cols - 20) * 8 ; max scroll: (level width - 20 visible cols) *
     jmp @left
 :   stz h_hold                   ; not moving: reset accel
     stz h_idx
-    lda move_t                   ; rolling the dpad passes through neutral: the skid
-    beq :+                       ; gate must survive a few frames of no input
-    dec move_t
-:   rts
+    lda move_t                   ; neutral: momentum decays; the direction memory
+    beq @mclr                    ; survives until it reaches 0 (GB $1d5e -- so a
+    dec move_t                   ; dpad roll's neutral gap keeps $c20d armed)
+    rts
+@mclr:
+    stz mdir
+    rts
+@brake:                          ; opposite direction pressed while moving: the GB
+    lda #8                       ; brake ($1e48): $c20c=8 -> 8 input-ignored frames,
+    sta skid_t                   ; skid pose, facing NOT flipped
+    stz move_t
+    stz h_hold
+    stz h_idx
+    rts
 @right:
-    lda mario_facing             ; was moving/facing LEFT -> the turn skid (GB: walkB
-    beq :+                       ; held ~7 frames with the new facing)
-    lda move_t
-    beq :+
-    lda #7
-    sta skid_t
-:   lda h_hold                   ; real motion only (a 1-frame tap must not arm it)
-    cmp #4
-    bcc :+
-    lda #8
-    sta move_t
+    lda mdir                     ; was moving LEFT -> the turn skid
+    cmp #2
+    beq @brake
+    lda #1                       ; remember the motion direction ($c20d=$10)
+    sta mdir
+    lda move_t                   ; momentum ramp, cap 6 ($c20c)
+    cmp #6
+    bcs :+
+    inc move_t
 :   stz mario_facing
     jsr calc_step                ; h_step = px this frame
     lda #14                      ; blocked by a wall to the right? (pipe/wall/step-up)
@@ -4032,17 +4065,16 @@ CAM_MAX = (level0_cols - 20) * 8 ; max scroll: (level width - 20 visible cols) *
     sta spr_x
     rts
 @left:
-    lda mario_facing             ; was facing RIGHT -> the turn skid
+    lda mdir                     ; was moving RIGHT -> the turn skid
+    cmp #1
     bne :+
-    lda move_t
-    beq :+
-    lda #7
-    sta skid_t
-:   lda h_hold                   ; real motion only
-    cmp #4
-    bcc :+
-    lda #8
-    sta move_t
+    jmp @brake
+:   lda #2                       ; remember the motion direction ($c20d=$20)
+    sta mdir
+    lda move_t                   ; momentum ramp, cap 6 ($c20c)
+    cmp #6
+    bcs :+
+    inc move_t
 :   lda #1
     sta mario_facing
     jsr calc_step
@@ -4250,9 +4282,9 @@ FB_MAX_COL = level0_cols - 24    ; last fb_col0 that keeps cols fb_col0..+23 in 
 @sizesel:
     lda mario_big                ; small or big ("Super") Mario pose set?
     beq @small
-    lda mario_duck               ; big + ducking -> force the duck pose (index 4 -> offset 16)
+    lda mario_duck               ; big + ducking -> force the duck pose (index 6 -> offset 24)
     beq @big
-    ldx #16
+    ldx #24
 @big:
     lda mario_big_poses,x
     sta pose_tl
@@ -7776,29 +7808,36 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     sta mario_frame
     rts
 @ground:
-    lda skid_t                   ; turn-around: hold walk B (the GB's skid pose is
-    beq :+                       ; metasprite 1 = the walkB tiles, capture-verified)
-    dec skid_t
-    lda #2
+    lda skid_t                   ; turn-around brake: metasprite 5 (GB $1e48), held
+    beq :+                       ; for the whole 8-frame freeze, old facing
+    lda #4
     sta mario_frame
     rts
 :   lda pad_held
     and #(GB_LEFT | GB_RIGHT)
     beq @idle
-    lda frame_count              ; walk cycle: alternate ~every 8 frames
-    and #$08
-    beq @w1
-    lda #2                       ; walk B
+    inc walk_t                   ; GB walk cycle ($1701): pose advances every 4 moving
+    lda walk_t                   ; frames through metasprites 1 -> 2 -> 3 -> 1 ...
+    and #3
+    beq @adv
+    rts                          ; between advances keep the current pose
+@adv:
+    ldx walk_i
+    lda wcyc,x
     sta mario_frame
-    rts
-@w1:
-    lda #1                       ; walk A
-    sta mario_frame
+    inx
+    cpx #3
+    bcc :+
+    ldx #0
+:   stx walk_i
     rts
 @idle:
+    stz walk_t                   ; walking restarts the cycle at metasprite 1
+    stz walk_i
     lda #0                       ; stand
     sta mario_frame
     rts
+wcyc: .byte 2, 5, 1              ; port pose ids for GB metasprites 1, 2, 3
 .endproc
 
 ; mario_poses (4 poses x 4 tiles) and statusbar_tiles (2x20 template) are now
