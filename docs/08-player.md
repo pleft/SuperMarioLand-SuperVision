@@ -149,3 +149,52 @@ because it was found while chasing the jump; it is the enemies' movement engine.
 - All constants above (speed table $1ECE, jump force $30, descent +3, hold-counters)
   must be reproduced exactly on the 65C02. Positions are whole-pixel for vertical;
   horizontal uses a sub-pixel toggle. No floating point — straightforward to port.
+
+## Horizontal movement: the FULL state machine (RE'd 2026-07-10, capture-verified)
+
+`Player_HorizControl` ($1D1E) + the walk-anim advance ($1701) + the B-rule
+(bank 3 $4975). Four state variables:
+
+| var | meaning |
+|-----|---------|
+| `$C20C` | momentum: +1 per held frame (skip when ==6, $1DD8), −1 per neutral frame; also reused as the 8-frame brake timer |
+| `$C20D` | last motion direction: $10 right, $20 left, $01 = braking, 0 = none. Survives neutral frames until `$C20C` hits 0 ($1D6B) |
+| `$C20E` | speed index into `Player_SpeedTable` ($1ECE, +`$C20F` sub-pixel toggle, $1EB4): 0 slow (0.5 px/f), 2 walk (1), 4 run (1.5). PERSISTENT state |
+| `$C20B` | walk-anim tick; pose advances when moving and `($C20B & 3)==0` |
+
+Per-frame flow (order matters):
+1. **Brake state** (`$C20D==1`): decrement `$C20C`; input is IGNORED and Mario is
+   frozen. At 0: `$C20D=0`, pose→stand, `$C20B=1`, `$C20E=0` ($1D71).
+2. **Accel bump** ($1D3A): `$C20C==6 && $C20E==0` → `$C20E=2`. Runs mid-air too
+   (capture T2: air ramp 0.5 px/f for 6 frames, then 1 px/f).
+3. **B rule** (bank 3 $4975): B held + grounded → `$C20E = ($C20C<3) ? 2 : 4`;
+   B not held → a 4 decays to 2 (NOT grounded-gated: releasing B mid-air slows a
+   run-jump). Run-jumps carry 4 into the air because nothing updates it airborne.
+4. **Duck** ($1D87→$1DA6): big+grounded+Down → duck, clears `$C20C` only.
+5. **Direction held**: if `$C20D` = the opposite → **skid** ($1E48): `$C20D=1`,
+   `$C20C=8`, pose = **metasprite 5** if grounded (old facing kept — `$C205`
+   untouched). Else: facing set, `$C20C` inc (skip when ==6), `$C20D` stored, move
+   at `$C20E`.
+6. **Neutral**: `$C20E=0` every frame ($1D5E), `$C20C`−−, then RE-DISPATCH with
+   `$C20D` as input but the REAL pad re-read inside skips the inc/store paths →
+   **Mario glides on at idx 0** until `$C20C`=0 (≈3 px walk-off slide; same in air,
+   x freezes when it runs out). The walk anim cycles through the last glide frame
+   and stands the frame `$C20D` clears.
+
+Walk cycle ($1701): pose `$C203` low nibble cycles metasprites **1→2→3** every 4
+moving frames (`inc`, wrap at 4 back to 1). Metasprite tile map (bank 3 $4C37):
+stand 0, walk 1/2/3, jump 4, **skid 5** (tiles $0A/$0B/$1A/$1B; big set = +16,
+big skid = 21). The skid is a DISTINCT lean sprite — an earlier port shipped
+"walkB with new facing", which is a frame the walk cycle already shows (invisible).
+
+**Capture-refuted disasm reading:** bank 3's jump path that sets `$C20C=$30` and
+floors `$C20E` to 2 ($49ED) does NOT run in normal gameplay — a standing jump has
+`$C20C=0` and ramps from idx 0 in air (PyBoy capture). Never port a disasm-only
+conclusion without a capture.
+
+Port (src/main.s): `move_t`/`mdir`/`h_idx`/`walk_t`+`walk_i` mirror the four vars;
+`skid_t` = the brake timer; `calc_step` = speedtab[h_idx+toggle] verbatim. Verified
+frame-by-frame vs PyBoy: walk release +3px/6f, tap +1px/3f, B 2→4 at momentum 3,
+air ramp + bump at 6, air-release drift, 8-frame skid at dpad-roll gaps 0–6, none
+at 7+. Capture pitfalls hit: the first pipe wall pins x at 81; the first goomba
+kills a >100-frame rightward run — fresh boot per trial.
