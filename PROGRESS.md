@@ -7,10 +7,34 @@ Newest entries at the top. Every entry should be traceable to ROM bytes/code.
 - [x] Confirm ROM identity (header decode)
 - [x] Establish disassembly toolchain (RGBDS 1.0.1 + cc65 2.18 + mgbdis 3.0)
 - [x] Produce reassembling disassembly that rebuilds byte-identical ROM ✓ SHA1 match
-- [ ] Annotate / reverse-engineer subsystems  ← current phase
-- [ ] Extract game data (graphics, levels, tables, sound)
-- [ ] Document Watara Supervision hardware (primary sources)
-- [ ] Port subsystems to 65C02
+- [x] Annotate / reverse-engineer subsystems (per-feature; docs/03..14)
+- [x] Extract game data at build time (graphics, levels, tables, music/SFX — rule 5)
+- [x] Document Watara Supervision hardware (docs/20-21)
+- [x] Port to 65C02: WORLD 1-1 FEATURE-COMPLETE (enemies, goal+bonus game, death/
+      game-over/time-up, title, audio: SFX + 7-track music engine, GB-exact movement
+      physics incl. skid/glide/momentum)  ← current: user hardware testing
+- [ ] Multi-level (1-2+), top-score on title, hard-mode toggle, over-HUD row-split
+
+(2026-06-29 → 2026-07-09 work is logged in docs/ + git history rather than here:
+rendering/perf rounds, blocks/powerups, enemies, goal+bonus game, death/title,
+audio phase. See docs/22 + docs/23 and the memory index.)
+
+## 2026-07-10
+- **Turn-around skid corrected** (`cdc087e`): the real skid = **metasprite 5** (a
+  distinct lean sprite, tiles $0A/$0B/$1A/$1B; big = idx 21) + an 8-frame BRAKE state
+  ($1e48: input ignored, x frozen, OLD facing). Two earlier ships were wrong because
+  the pose was "verified" from eyeballed OAM captures — the fix came from reading the
+  code that WRITES $c203 (Player_HorizControl $1d1e). Walk cycle also corrected:
+  **3 frames** (metasprites 1→2→3 every 4 moving frames, $1701), was 2-frame/8f.
+  Pose tables now 6 small / 7 big entries (extract_tables.py).
+- **Movement physics completed** (`3189577`): release GLIDE (neutral → speed idx 0,
+  Mario keeps moving in the remembered direction while momentum $c20c decays: 6f ×
+  0.5px ≈ 3px; same drift mid-air), persistent speed index $c20e (0/2/4; bump 0→2 at
+  momentum 6 — mid-air too), B-rule (bank3 $4975: B+grounded → 2, run 4 at momentum
+  ≥3; release → 4→2 even mid-air), duck clears momentum. The invented h_hold ramp is
+  deleted. PyBoy captures REFUTED the bank3 jump path ($c20c=$30) — it never runs in
+  gameplay; capture before porting disasm-only conclusions. py65 x-trajectories match
+  the GB captures frame-by-frame. Full state machine: docs/08-player.md.
 
 ## 2026-06-27
 - Project initialized. Only artifact present: `super-mario-land-gb.gb` (64 KB).
