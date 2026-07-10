@@ -150,8 +150,7 @@ do_flip:     .res 1          ; draw_quad: blit flipped if nonzero
 blit_opaque: .res 1          ; sprite_blit_subpx: 1 = opaque (cover all px) for the status bar
 blit_row:    .res 1          ; row counter for the flipped blit (X is used for lookup)
 spr_x:       .res 1          ; Mario X in PIXELS (spr_col = spr_x >> 2)
-h_hold:      .res 1          ; frames a direction has been held (for accel)
-h_idx:       .res 1          ; speed-table index (0/2/4 = accel level)
+h_idx:       .res 1          ; persistent speed index ($c20e): 0 slow, 2 walk, 4 run
 h_toggle:    .res 1          ; sub-pixel toggle (the game's $C20F)
 h_step:      .res 1          ; pixels to move this frame
 spr_subx:    .res 1          ; sub-pixel X offset within the byte (spr_x & 3)
@@ -1217,7 +1216,6 @@ main_loop:
     stz jump_state
     stz fall_v
     stz arc_idx
-    stz h_hold
     stz h_idx
     stz h_toggle
     stz skid_t                   ; no brake/momentum state survives a respawn
@@ -3203,7 +3201,6 @@ music_data:
     stz jump_state
     stz fall_v
     stz arc_idx
-    stz h_hold
     stz h_idx
     stz h_toggle
     stz skid_t                   ; no brake/momentum state survives a respawn
@@ -3358,7 +3355,6 @@ music_data:
     stz scroll_vis
     stz XSCROLL
     stz mario_facing
-    stz h_hold
     stz h_idx
     lda #16                      ; drop in at the room's entry opening (top-left)
     sta spr_x
@@ -3944,10 +3940,36 @@ CAM_MAX = (level0_cols - 20) * 8 ; max scroll: (level width - 20 visible cols) *
     stz walk_t                   ; pose -> stand and the walk cycle restarts ($1d71)
     stz walk_i
     stz mario_frame
-:   stz h_hold                   ; speed restarts from the slow ramp ($c20e=0 at $1d71)
-    stz h_idx
+:   stz h_idx                    ; speed restarts slow ($c20e=0 at $1d71)
     rts
 @nobrake:
+    lda move_t                   ; $1d3a: momentum just reached full while slow ->
+    cmp #6                       ; walk speed (the acceleration step; also mid-air)
+    bne @accdone
+    lda h_idx
+    bne @accdone
+    lda #2
+    sta h_idx
+@accdone:
+    lda pad_held                 ; B rule (bank3 $4975): held + grounded -> run (4)
+    and #GB_B                    ; once momentum >= 3, else walk (2); released ->
+    beq @brel                    ; a run decays to walk (even mid-air)
+    lda jump_state
+    bne @bdone
+    lda move_t
+    cmp #3
+    lda #4
+    bcs :+
+    lda #2
+:   sta h_idx
+    bra @bdone
+@brel:
+    lda h_idx
+    cmp #4
+    bne @bdone
+    lda #2
+    sta h_idx
+@bdone:
     stz mario_duck               ; big Mario, grounded, holding Down -> duck (no walk)
     lda mario_big
     beq @walk
@@ -3957,8 +3979,7 @@ CAM_MAX = (level0_cols - 20) * 8 ; max scroll: (level width - 20 visible cols) *
     and #GB_DOWN
     beq @walk
     inc mario_duck
-    stz h_hold
-    stz h_idx
+    stz move_t                   ; ducking clears the momentum ($1da6)
     rts
 @walk:
     lda pad_held
@@ -3969,12 +3990,18 @@ CAM_MAX = (level0_cols - 20) * 8 ; max scroll: (level width - 20 visible cols) *
     and #GB_LEFT
     beq :+
     jmp @left
-:   stz h_hold                   ; not moving: reset accel
-    stz h_idx
-    lda move_t                   ; neutral: momentum decays; the direction memory
-    beq @mclr                    ; survives until it reaches 0 (GB $1d5e -- so a
-    dec move_t                   ; dpad roll's neutral gap keeps $c20d armed)
-    rts
+:   stz h_idx                    ; neutral: speed collapses to slow ($c20e=0, $1d5e)
+    lda move_t                   ; momentum decays, and while it lasts Mario GLIDES
+    beq @mclr                    ; on in the remembered direction (the $1d5e
+    dec move_t                   ; re-dispatch; capture: 6f at 0.5px/f = ~3px)
+    lda mdir
+    cmp #1
+    bne :+
+    jmp @rmove
+:   cmp #2
+    bne :+
+    jmp @lmove
+:   rts
 @mclr:
     stz mdir
     rts
@@ -3982,8 +4009,6 @@ CAM_MAX = (level0_cols - 20) * 8 ; max scroll: (level width - 20 visible cols) *
     lda #8                       ; brake ($1e48): $c20c=8 -> 8 input-ignored frames,
     sta skid_t                   ; skid pose, facing NOT flipped
     stz move_t
-    stz h_hold
-    stz h_idx
     rts
 @right:
     lda mdir                     ; was moving LEFT -> the turn skid
@@ -3991,11 +4016,12 @@ CAM_MAX = (level0_cols - 20) * 8 ; max scroll: (level width - 20 visible cols) *
     beq @brake
     lda #1                       ; remember the motion direction ($c20d=$10)
     sta mdir
-    lda move_t                   ; momentum ramp, cap 6 ($c20c)
+    lda move_t                   ; momentum ramp, cap 6 ($c20c, $1dd8)
     cmp #6
-    bcs :+
+    bcs @rmove
     inc move_t
-:   stz mario_facing
+@rmove:
+    stz mario_facing
     jsr calc_step                ; h_step = px this frame
     lda #14                      ; blocked by a wall to the right? (pipe/wall/step-up)
     jsr wall_ahead
@@ -4071,11 +4097,12 @@ CAM_MAX = (level0_cols - 20) * 8 ; max scroll: (level width - 20 visible cols) *
     jmp @brake
 :   lda #2                       ; remember the motion direction ($c20d=$20)
     sta mdir
-    lda move_t                   ; momentum ramp, cap 6 ($c20c)
+    lda move_t                   ; momentum ramp, cap 6 ($c20c, $1dd8)
     cmp #6
-    bcs :+
+    bcs @lmove
     inc move_t
-:   lda #1
+@lmove:
+    lda #1
     sta mario_facing
     jsr calc_step
     lda #1                       ; blocked by a wall to the left?
@@ -4091,25 +4118,10 @@ CAM_MAX = (level0_cols - 20) * 8 ; max scroll: (level width - 20 visible cols) *
     rts
 .endproc
 
-; calc_step: ramp the accel, read speedtab[idx+toggle] -> h_step, flip the toggle.
+; calc_step: read speedtab[h_idx+toggle] -> h_step, flip the toggle (GB $1eb4).
+; h_idx is the persistent speed index ($c20e); move_player's entry rules set it.
 .proc calc_step
-    lda h_hold                   ; ramp hold counter (cap 12)
-    cmp #12
-    bcs @capped
-    inc h_hold
-@capped:
-    ldx #0                       ; idx 0 = slow start (<6 held)
-    lda h_hold
-    cmp #6
-    bcc @gi
-    ldx #2                       ; idx 2 = walk (~1 px/frame)
-    lda pad_held                 ; hold B while moving -> idx 4 = run (~1.5 px/frame)
-    and #GB_B
-    beq @gi
-    ldx #4
-@gi:
-    stx h_idx
-    txa                          ; speedtab[idx + toggle]
+    lda h_idx                    ; speedtab[idx + toggle]
     clc
     adc h_toggle
     tax
@@ -7799,8 +7811,9 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
 .endproc
 
 ; ---------------------------------------------------------------------------
-; animate_player: pick the pose index — jump in the air, 2-frame walk while moving,
-; else standing. (Pose tiles come from mario_poses, captured from the real game.)
+; animate_player: pick the pose index — jump in the air, the 3-frame GB walk cycle
+; while moving/gliding, skid during the brake, else standing.
+.segment "LEVELS"                ; (FIXED is full)
 .proc animate_player
     lda jump_state
     beq @ground
@@ -7815,7 +7828,10 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     rts
 :   lda pad_held
     and #(GB_LEFT | GB_RIGHT)
-    beq @idle
+    bne @moving
+    lda mdir                     ; release glide: the walk anim keeps cycling until
+    beq @idle                    ; the direction memory clears (capture: pose walks
+@moving:                         ; through the LAST glide frame, stands the next)
     inc walk_t                   ; GB walk cycle ($1701): pose advances every 4 moving
     lda walk_t                   ; frames through metasprites 1 -> 2 -> 3 -> 1 ...
     and #3
@@ -7839,6 +7855,7 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     rts
 wcyc: .byte 2, 5, 1              ; port pose ids for GB metasprites 1, 2, 3
 .endproc
+.segment "CODE"
 
 ; mario_poses (4 poses x 4 tiles) and statusbar_tiles (2x20 template) are now
 ; ROM-derived BUILD ARTIFACTS extracted by tools/extract_tables.py (rule 5) and
