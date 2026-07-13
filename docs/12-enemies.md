@@ -167,13 +167,19 @@ State_08 with `$ffe4 = target−1`).
 
 - **Bunbun (type $42 → OBJ_BUNBUN 19)**: 16×16 bee, tiles $C0/$C1/$D0/$D1 (+2 = frame B),
   left-native like the fly. Phys `00 22 80` → score class 2 = **800**. Slot capture:
-  spawns at the right edge, flies at its SPAWN HEIGHT (no y tracking) 1px/frame toward
-  Mario for 40f (script steps = 8f each; wing flap per step), hovers 33f, **drops the
-  arrow 17f into the hover** (cycle tick 57), loops — `F0 $10` re-faces Mario every cycle.
+  spawns at the right edge, flies at its SPAWN HEIGHT (no y tracking) 1px/frame for 40f
+  (script steps = 8f each; wing flap per step), hovers 33f, **drops the arrow 17f into
+  the hover** (cycle tick 57), loops. **It NEVER turns** (user-verified vs GB): the
+  direction is fixed at spawn (toward Mario = left) and it exits the screen. [An earlier
+  build re-faced Mario each cycle off the script's loop-start `F0 $10` — a disasm
+  inference the capture never confirmed (the observed bee died to star contact before a
+  second cycle could show it). RULE 0: same failure mode as the skid pose.]
   Stomp → type $43: param $34 = flat pair $C8+$C9 (~24f) → $44 (pop −7/+3) → $0D falling
   corpse (param $35). Port: OBJ_SQUASH pair (32f, the fly convention) on stomp; star/ball
   → corpse kind 3 (dead-flip 16×16). Ball kills in ONE hit (no fly-style 2-ball rule).
-- **Arrow (type $45 → OBJ_ARROW 20)**: 8×16, tiles $BC over $AC. Phys `00 12 00`, script:
+- **Arrow (type $45 → OBJ_ARROW 20)**: 8×16 — the display list draws $BC at the base y
+  and $AC 8px ABOVE: shaft on top, **head at the bottom**, leading the fall (the first
+  ship had them inverted; user-caught). Phys `00 12 00`, script:
   velocity $10 = 1px/frame straight DOWN, x frozen, NO terrain collision — captured
   falling through the floor to y≈191, culled off-screen. Contact table row `$3186+$45*5 =
   00 00 ff 00 00`: **no stomp morph** — any contact falls through to hurt (captured: arrow
@@ -196,3 +202,20 @@ State_08 with `$ffe4 = target−1`).
 params $04/$05), $08 (big winged thing, params $48/$49, drops type $1B), $0C (low wide
 rock, param $13), $3F (Gao the sphinx: static, params $2A/$2B, spawns fireball $23),
 plus 5× $36 stones (done) — AND the $d014 animated water tiles + music track $03.
+
+## Hidden blocks ($5F) + the block-bounce kill [2026-07-13 hardware feedback, a6c0e53]
+
+- **Hidden blocks**: map tile `$5F` (blank in the BG charset, `<$60` = non-solid, so
+  Mario passes through the cell) is an INVISIBLE block: bonkable from below only. The
+  bonk materializes it — the hop shows the used block `$7F` — and pays out through the
+  same contents table (bank3 $6536; the extractor already keyed rows off $80/$81/**$5F**).
+  Once modded, the cell draws AND collides as `$7F`. Instances: 1-2 col 95 row 11 = a
+  1-UP heart ($2A); 1-3 has cols 2 & 150 row 9 with **value $07 (unidentified — RE at
+  the 1-3 round)** and col 193 row 8 = a hidden MULTI-COIN ($C0). CAVEAT for 1-3: the
+  live multi-coin's draws-as-brick rule (`@mcchk`) only fires for raw $80/$81 — the
+  hidden multi-coin needs the $5F case added there.
+- **Block-bounce kill** (`bonk_kill_above`): any hopping bonk (?-block, hidden block,
+  brick hop or smash, multi-coin re-bonk) kills an enemy standing on the bonked cell:
+  the walkers' own ground rule (`o_y>>3 == mrow`) + |enemy centre − cell centre| < 10
+  → dead-flip corpse keeping its walk direction + the class kill score (100 walkers /
+  400 fly / 800 bunbun). Plain used/solid bonks (no hop) don't kill.

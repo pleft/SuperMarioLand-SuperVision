@@ -22,6 +22,17 @@ Newest entries at the top. Every entry should be traceable to ROM bytes/code.
 rendering/perf rounds, blocks/powerups, enemies, goal+bonus game, death/title,
 audio phase. See docs/22 + docs/23 and the memory index.)
 
+## 2026-07-13 (evening) — 1-2 hardware feedback round (a6c0e53)
+User hardware test caught four fidelity gaps, all fixed + py65-verified:
+- Bunbun NEVER turns to chase (direction fixed at spawn; exits the screen) — the
+  shipped per-cycle re-face was an unconfirmed disasm inference (RULE 0 lesson again).
+- Arrow head at the BOTTOM (GB list: $BC base, $AC above), leading the fall.
+- HIDDEN BLOCKS (tile $5F, blank + non-solid): bonk-from-below materializes the used
+  block + pays the contents table (1-2: hidden 1-UP col 95; 1-3 has 3 more incl. a
+  hidden multi-coin + unknown content value $07 — 1-3 round).
+- BLOCK-BOUNCE KILL: hopping bonks kill the enemy standing on the block (dead-flip +
+  class score). Also: dy*48 tables now built in RAM at boot (−320B from every bank).
+
 ## 2026-07-13 — Multi-level: 64K banked cart, World 1-2 shipped (1c4f533 + 7f62148)
 Movement physics user-confirmed on hardware → started the multi-level phase (docs/24).
 - RE: level id $ffe4 (State_08: +1, wrap 12; BCD display $ffb4 +1/+$0D), start segment
