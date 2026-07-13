@@ -273,6 +273,7 @@ o_hp:        .res 8          ; extra hits to survive (fly: 1 -- two balls kill, 
     stz YSCROLL
 
     jsr build_revpix             ; pixel-reverse lookup for horizontal sprite flip
+    jsr build_row48              ; dy*48 VRAM-stride tables
     jsr clear_vram
     jsr title_screen             ; the SML title (extracted at build time); waits for Start
     jsr clear_vram
@@ -559,8 +560,11 @@ main_loop:
     beq @broke                   ; broken brick -> blank
     cmp #$F4
     beq @broke                   ; collected coin -> blank
+    cmp #$5F                     ; bonked hidden block -> used block (now solid)
+    beq @used
     cmp #$80                     ; only $80/$81 ?-blocks become the used block; anything else
     bcc @keep                    ; (a mod bit that bled onto a blank/wall/coin-row tile in a
+@used:
     lda #$7F                     ; room) is left RAW, so it can never turn into a solid block
 @keep:
     rts
@@ -663,7 +667,11 @@ main_loop:
     sta mc_tmr
 @reg_done:
     jsr read_map_tile            ; pre-bonk display tile ($80/$81; $82 for a multi-coin)
-    jsr spawn_bounce             ; the block hops as a sprite while the outcome resolves
+    cmp #$5F                     ; a hidden block materializes: it hops as the block
+    bne :+                       ; it becomes, not as its (blank) map tile
+    lda #$7F
+:   jsr spawn_bounce             ; the block hops as a sprite while the outcome resolves
+    jsr bonk_kill_above          ; the hop kills whoever stands on the block
     jsr find_block               ; C=1,A=value if this block is in the contents table
     bcc @coin
     cmp #$c0                     ; multi-coin: special lifecycle, NOT marked used yet
@@ -1001,6 +1009,8 @@ main_loop:
     sbc #2                        ; head row = (new spr_y >> 3) - 2 (tile at his head)
     sta mrow
     jsr read_map_tile             ; effective tile above his head (centre column)
+    cmp #$5F                      ; $5F = INVISIBLE block: bonkable from below only
+    beq @qblock                   ; (blank tile, walk-through until hit; then used)
     cmp #$60
     bcc @noceil                   ; < $60 -> not solid -> keep rising
     cmp #$F4
@@ -1029,6 +1039,7 @@ main_loop:
     bne @realbrick
     bra @qblock
 @realbrick:
+    jsr bonk_kill_above           ; brick hop/break kills whoever stands on it
     lda mario_big                 ; small Mario can't break bricks -> the brick just hops
     bne @smash
     lda #$82
@@ -4493,8 +4504,8 @@ BUN_SQ     = $C8                 ; stomped: flat pair $C8+$C9 (param $34)
 BUN_FLY_T  = 40                  ; cycle: fly frames,
 BUN_HOV_T  = 33                  ;   hover frames,
 BUN_DROP_T = 57                  ;   arrow drop at cycle tick 40+17
-ARROW_T    = $BC                 ; arrow: top tile / bottom tile (param $44: BC over AC)
-ARROW_B    = $AC
+ARROW_T    = $AC                 ; arrow: shaft on top, HEAD at the bottom — it points
+ARROW_B    = $BC                 ; down (param $44 list: $BC at base y, $AC at y-8)
 STONE_T    = $EE                 ; the stone's single 8x8 tile (param $21)
 STONE_BEAT = 8                   ; triggered: one script step's pause before the drop ($399D E7)
 STAR_TA    = $86                 ; star twinkles between $86 and $85 (param $19 list)
@@ -5421,15 +5432,108 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     jsr spawn_tabx
     lda spawn_tab+2,y
     sta o_y,x
-    lda #$FF                     ; enters flying left (re-faces at each cycle start)
-    sta o_vx,x
-    lda #1                       ; cycle tick (0 would re-face immediately off-screen;
-    sta o_tmr,x                  ;  the GB faces once at spawn, then per loop)
+    lda #$FF                     ; faces Mario ONCE at spawn = always left (it enters
+    sta o_vx,x                   ; at the right edge) and never turns
+    stz o_tmr,x                  ; cycle tick
     stz o_st,x
 @full:
     rts
 .endproc
 
+
+; bonk_kill_above: a hopping block bonk (?-block/hidden/brick/multi-coin) kills any
+; enemy standing ON the bonked cell (feet_col/mrow): dead-flip corpse + the class
+; kill score (user-verified vs GB — the classic block-bounce kill, "100" popup for
+; walkers). Enemy feet = o_y+16, so "on the block" = (o_y>>3)+2 == mrow.
+.proc bonk_kill_above
+    stz oi2
+@loop:
+    ldx oi2
+    lda o_type,x
+    cmp #OBJ_CHIB
+    beq @cand
+    cmp #OBJ_NOKO
+    beq @cand
+    cmp #OBJ_FLY
+    beq @cand
+    cmp #OBJ_BUNBUN
+    beq @cand
+@next:
+    inc oi2
+    lda oi2
+    cmp #8
+    bne @loop
+    rts
+@cand:
+    lda o_y,x                    ; standing on the bonked cell? the walkers' own ground
+    lsr                          ; rule: o_y>>3 == the solid row under their feet
+    lsr
+    lsr
+    cmp mrow
+    bne @next
+    lda feet_col                 ; cell centre = col*8 + 4 (16-bit)
+    sta tmpL2
+    lda feet_col+1
+    sta tmpH2
+    asl tmpL2
+    rol tmpH2
+    asl tmpL2
+    rol tmpH2
+    asl tmpL2
+    rol tmpH2
+    lda tmpL2
+    clc
+    adc #4
+    sta tmpL2
+    bcc :+
+    inc tmpH2
+:   lda o_xl,x                   ; |enemy centre (o_x+4) - cell centre| < 10
+    clc
+    adc #4
+    sta tmpL3
+    lda o_xh,x
+    adc #0
+    sta tmpH3
+    sec
+    lda tmpL2
+    sbc tmpL3
+    sta tmpL3
+    lda tmpH2
+    sbc tmpH3
+    bpl @pos
+    eor #$FF
+    tay
+    sec
+    lda #0
+    sbc tmpL3
+    sta tmpL3
+    tya
+@pos:
+    bne @next                    ; |dx| >= 256
+    lda tmpL3
+    cmp #10
+    bcs @next
+    lda #$01                     ; kill value by class (star/ball convention):
+    sta tmpH3                    ; walkers 100, fly 400, bunbun 800
+    lda o_type,x
+    cmp #OBJ_FLY
+    bne :+
+    lda #$04
+    sta tmpH3
+:   cmp #OBJ_BUNBUN
+    bne :+
+    lda #$08
+    sta tmpH3
+:   lda o_vx,x                   ; the corpse keeps its walk direction
+    bmi :+
+    lda #1
+    bra :++
+:   lda #$FF
+:   jsr kill_flip
+    lda tmpH3
+    jsr award_kill
+    jmp @next                    ; keep scanning: two enemies can share a block
+.endproc
 
 ; upd_bunbun: the slot-captured cycle — fly 1px/f toward Mario 40f (wings flap per
 ; 8f), hover 33f dropping an arrow at tick 57, loop re-facing Mario each cycle.
@@ -5453,34 +5557,9 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     stz o_type,x
     rts
 @alive:
-    lda o_tmr,x
-    bne @notface
-    lda cam_x                    ; cycle start: face toward Mario (script F0 $10
-    clc                          ; re-runs on every loop)
-    adc spr_x
-    sta tmpL2
-    lda cam_x+1
-    adc #0
-    sta tmpH2
-    lda tmpL2
-    clc
-    adc #8
-    sta tmpL2
-    bcc :+
-    inc tmpH2
-:   lda tmpL2                    ; sign(mario centre - bee x)
-    sec
-    sbc o_xl,x
-    lda tmpH2
-    sbc o_xh,x
-    bmi :+
-    lda #1
-    bra :++
-:   lda #$FF
-:   sta o_vx,x
-@notface:
-    lda o_tmr,x
-    cmp #BUN_FLY_T
+    lda o_tmr,x                  ; direction is FIXED at spawn (user-verified vs GB:
+    cmp #BUN_FLY_T               ; the bee never turns to chase — it drops its arrows
+                                 ; and leaves the screen)
     bcs @hover
     lda o_vx,x                   ; flying: 1px EVERY frame
     bmi @ml
@@ -5511,6 +5590,24 @@ riding_this:                     ; Z=1 if Mario rides slot oi
 
 ; upd_arrow: 1px/frame straight down, x frozen, straight through terrain, gone off
 ; the bottom. ANY contact hurts — no stomp ($3186 row for $45: no morph on top contact).
+.proc bunbun_drop                ; release the arrow at the bee's position
+    jsr find_free_obj
+    bcs @full
+    ldy oi
+    lda #OBJ_ARROW
+    sta o_type,x
+    lda o_xl,y
+    sta o_xl,x
+    lda o_xh,y
+    sta o_xh,x
+    lda o_y,y
+    ina                          ; capture: the arrow appears 1px below the flight line
+    sta o_y,x
+    stz o_tmr,x                  ; (o_st/o_vx unused by the arrow)
+@full:
+    rts
+.endproc
+
 .proc upd_arrow
     ldx oi
     lda o_y,x
@@ -5547,24 +5644,6 @@ riding_this:                     ; Z=1 if Mario rides slot oi
 .endproc
 
 .segment "CODE"
-
-.proc bunbun_drop                ; release the arrow at the bee's position
-    jsr find_free_obj
-    bcs @full
-    ldy oi
-    lda #OBJ_ARROW
-    sta o_type,x
-    lda o_xl,y
-    sta o_xl,x
-    lda o_xh,y
-    sta o_xh,x
-    lda o_y,y
-    ina                          ; capture: the arrow appears 1px below the flight line
-    sta o_y,x
-    stz o_tmr,x                  ; (o_st/o_vx unused by the arrow)
-@full:
-    rts
-.endproc
 
 .proc spawn_stone                ; stepping stone: static until ridden
     phy
@@ -8469,13 +8548,32 @@ wcyc: .byte 2, 5, 1              ; port pose ids for GB metasprites 1, 2, 3
     rts
 .endproc
 
-.segment "LEVELS"            ; bank 0 ($8000, always mapped) -- FIXED is full
-row48_lo: .repeat 160, i
-          .byte <(i*48)
-          .endrepeat
-row48_hi: .repeat 160, i
-          .byte >(i*48)
-          .endrepeat
+.segment "BSS"               ; dy -> dy*48 split tables, BUILT AT BOOT (they were
+row48_lo: .res 160           ; 320 bytes of ROM in the banked prefix = 320 bytes
+row48_hi: .res 160           ; paid in EVERY bank)
+.segment "CODE"
+
+; build_row48: fill the dy*48 tables (boot).
+.segment "LEVELS"
+.proc build_row48
+    stz tmpL
+    stz tmpH
+    ldx #0
+@l: lda tmpL
+    sta row48_lo,x
+    lda tmpH
+    sta row48_hi,x
+    lda tmpL
+    clc
+    adc #48
+    sta tmpL
+    bcc :+
+    inc tmpH
+:   inx
+    cpx #160
+    bne @l
+    rts
+.endproc
 .segment "CODE"
 
 
