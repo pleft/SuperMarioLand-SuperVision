@@ -12,12 +12,36 @@ Newest entries at the top. Every entry should be traceable to ROM bytes/code.
 - [x] Document Watara Supervision hardware (docs/20-21)
 - [x] Port to 65C02: WORLD 1-1 FEATURE-COMPLETE (enemies, goal+bonus game, death/
       game-over/time-up, title, audio: SFX + 7-track music engine, GB-exact movement
-      physics incl. skid/glide/momentum)  ← current: user hardware testing
-- [ ] Multi-level (1-2+), top-score on title, hard-mode toggle, over-HUD row-split
+      physics incl. skid/glide/momentum) — user-verified on hardware
+- [x] Multi-level foundation: 64K banked cart + level headers; WORLD 1-2 SHIPPED
+      (Bunbun/arrow/falling stones, table-driven platforms)  ← current: hardware test
+- [ ] 1-3 (types $02/$08/$0C/$3F, water tile anim, track $03), then W2+; top-score
+      on title, hard-mode toggle, over-HUD row-split
 
 (2026-06-29 → 2026-07-09 work is logged in docs/ + git history rather than here:
 rendering/perf rounds, blocks/powerups, enemies, goal+bonus game, death/title,
 audio phase. See docs/22 + docs/23 and the memory index.)
+
+## 2026-07-13 — Multi-level: 64K banked cart, World 1-2 shipped (1c4f533 + 7f62148)
+Movement physics user-confirmed on hardware → started the multi-level phase (docs/24).
+- RE: level id $ffe4 (State_08: +1, wrap 12; BCD display $ffb4 +1/+$0D), start segment
+  $ffe5 = 3 for EVERY level (Jump_000_0dd3, PyBoy-verified), per-level music table
+  bank0 $07CE (1-2 = track $07 = already ported; 1-3 = $03), $d014 = animated-tile
+  flag (1-3/2-1/2-2/3-2/3-3/4-2), 1-2 checkpoints = the same 0/640/1280/1920 rule ✓,
+  spawner X rule $249B: world x = fire + 192 + x_off*4 (matches 1-1's traced platforms).
+- Port: 64K image [bank0][bank1][bank2][FIXED]; LEVELS = common prefix duplicated per
+  bank by tools/pack_banks.py; TITLE0 = bank-0-only (banks 1+ overlay it with their
+  level region); 18-byte level header + load_level (bank select via SYS_CTRL bits 7:5,
+  header + small tables copied to RAM); next_level advances + wraps; HUD stage digits.
+- 1-2 kit (all PyBoy-slot-capture-verified, then py65-verified against those numbers):
+  Bunbun $42 (fly 1px/f×40 at spawn height, hover 33f, arrow at tick 57, re-face per
+  cycle; stomp = flat $C8+$C9 pair + 800; corpse kind 3), arrow $45 (1px/f down, x
+  frozen, no terrain, any contact hurts), stepping stone $36→$37 (rideable 8px; landing
+  → 8f beat → 1px/f drop carrying Mario). Platforms now table-driven from the 5-byte
+  spawn entries (V: spawn-y down 60px; H: spawn-x left 53px; 0.5px/f) — reproduces the
+  1-1 dedicated-trace bounds exactly, hardcoded end-area spawner deleted.
+- Regressions green throughout: physics T1-T5, stomp, music 1431/1431, 1-1 platforms,
+  1-1→1-2→wrap. AWAITING user hardware test of 1-2.
 
 ## 2026-07-10
 - **Turn-around skid corrected** (`cdc087e`): the real skid = **metasprite 5** (a

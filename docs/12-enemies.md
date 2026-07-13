@@ -155,3 +155,44 @@ stomp-by-type/hurt); tall/wide erase via o_pw bit7 + width; bg_chardata → bank
 - **AI VM opcode `$F9 nn` decoded** (was missing from the table): writes nn to `$dff8` =
   SOUND trigger (the `$FA nn` below it writes `$dfe0`). The explosion's `F9 01` = its bang —
   audio phase, not visual.
+
+## PORT: the 1-2 kit — Bunbun + arrow + falling stone [2026-07-13, commit 7f62148]
+
+Identified from the FULL type tables (99 entries: PhysicsParamTable $3375..$349E = 99×3,
+AIScriptPtrTable $349E..$3564 = 99×2 — decode_ai_scripts.py now decodes all of them) +
+the enemy metasprite display lists ($2fe2 right / $30b4 left, param*2 → list of
+[control bytes: bit3/2 y∓8, bit1/0 x∓8, upper bits → OAM attr] + tile bytes (bit7 set),
+$FF end) + PyBoy slot captures of a forced 1-2 (`$ffe4` poked at the title, or better:
+State_08 with `$ffe4 = target−1`).
+
+- **Bunbun (type $42 → OBJ_BUNBUN 19)**: 16×16 bee, tiles $C0/$C1/$D0/$D1 (+2 = frame B),
+  left-native like the fly. Phys `00 22 80` → score class 2 = **800**. Slot capture:
+  spawns at the right edge, flies at its SPAWN HEIGHT (no y tracking) 1px/frame toward
+  Mario for 40f (script steps = 8f each; wing flap per step), hovers 33f, **drops the
+  arrow 17f into the hover** (cycle tick 57), loops — `F0 $10` re-faces Mario every cycle.
+  Stomp → type $43: param $34 = flat pair $C8+$C9 (~24f) → $44 (pop −7/+3) → $0D falling
+  corpse (param $35). Port: OBJ_SQUASH pair (32f, the fly convention) on stomp; star/ball
+  → corpse kind 3 (dead-flip 16×16). Ball kills in ONE hit (no fly-style 2-ball rule).
+- **Arrow (type $45 → OBJ_ARROW 20)**: 8×16, tiles $BC over $AC. Phys `00 12 00`, script:
+  velocity $10 = 1px/frame straight DOWN, x frozen, NO terrain collision — captured
+  falling through the floor to y≈191, culled off-screen. Contact table row `$3186+$45*5 =
+  00 00 ff 00 00`: **no stomp morph** — any contact falls through to hurt (captured: arrow
+  on small Mario = death state $03). Port: shared-geometry overlap (`mario_dx`) → hurt;
+  star just deletes it (+100 class 0).
+- **Stepping stone (type $36 → OBJ_STONE 21)**: single 8×8 tile $EE, phys `00 91 00`
+  (byte1 bit7 = rideable, like the platforms' $B1). Contact row `37 00 00 00 00`: LANDING
+  morphs it to $37 = same sprite, one script-step beat, then velocity $10 = falls 1px/f
+  (still carrying). Port: plat_land/ride_support accept OBJ_STONE (8px window), landing
+  sets an 8f beat then a 1px/f drop via carry_y_dn; culled off the bottom. py65: land
+  f+5, beat 8f, stone+Mario descend in lockstep ✓.
+- **Moving platforms are now TABLE-DRIVEN** (spawn entries carry x_off; $0A/$0B emitted):
+  world x = fire+192+x_off*4 ($249B rule), V patrols spawn-y DOWN 60px, H patrols spawn-x
+  LEFT 53px, 0.5px/f ping-pong (o_st = offset from origin, o_vy = returning). Six 1-2
+  platforms slot-captured (all = spawn_y..+60); the rule reproduces 1-1's dedicated-trace
+  bounds EXACTLY (V x=2280 y 64..124, H y=40 x 2291..2344 — py65-verified), so the 1-1
+  hardcoded end-area spawner (PLATS_AT/plats_on) is deleted.
+
+**1-3 roster still to port** (spawn types from its list): $02 (walker w/ pauses+turns,
+params $04/$05), $08 (big winged thing, params $48/$49, drops type $1B), $0C (low wide
+rock, param $13), $3F (Gao the sphinx: static, params $2A/$2B, spawns fireball $23),
+plus 5× $36 stones (done) — AND the $d014 animated water tiles + music track $03.
