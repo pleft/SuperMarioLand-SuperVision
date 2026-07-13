@@ -21,7 +21,7 @@ import sys, hashlib
 
 EXPECT_SHA1 = "418203621b887caa090215d97e3f509b79affd3e"
 AISCRIPT_TABLE = 0x349E      # bank 0 (file offset == addr)
-NUM_TYPES = 28
+NUM_TYPES = 99   # PhysicsParamTable $3375..$349E = 99*3 bytes, AIScriptPtrTable $349E..$3564 = 99*2
 
 # opcode -> (mnemonic, operand_bytes)
 OPS = {

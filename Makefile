@@ -12,13 +12,16 @@ SVT     = build/gfx/w1_obj_8000.svt
 LVL     = build/levels/level_00.bin
 ARC     = build/data/jumparc.bin
 TABLES  = build/data/jumparc.bin build/data/speedtab.bin build/data/mario_poses.bin build/data/mario_big_poses.bin build/data/statusbar.bin
-OBJS    = build/main.o build/gfxdata.o build/leveldata.o build/datatables.o
+# leveldata.o LAST: the level header + blobs must sit at the tail of the LEVELS
+# segment so every bank shares the same common prefix (see tools/pack_banks.py).
+OBJS    = build/main.o build/gfxdata.o build/datatables.o build/leveldata.o
 ROM     = build/super-mario-land.sv
 
 all: $(ROM)
 
-$(ROM): $(OBJS) $(CFG)
-	$(LD) -C $(CFG) $(OBJS) -o $@
+$(ROM): $(OBJS) $(CFG) tools/pack_banks.py
+	$(LD) -C $(CFG) $(OBJS) -o $@ -m build/rom.map
+	python3 tools/pack_banks.py $@ build/rom.map 1:1 2:2
 	@echo "built $@ ($$(wc -c < $@) bytes)"
 
 build/main.o: src/main.s src/supervision.inc build/levels/title_map.bin build/gfx/title_tiles.svt build/audio/sfx.bin build/audio/sfx.inc build/audio/music.bin build/audio/music.inc

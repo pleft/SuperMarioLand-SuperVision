@@ -6,17 +6,13 @@
 .include "supervision.inc"
 .import chardata             ; OBJ tiles (src/gfxdata.s) — also the $8800 BG tiles $80-$FF
 .import bg_chardata          ; BG tiles (level tiles $00-$7F)
-.import level0_map           ; World 1-1 tilemap (column-major, 16 tiles/col)
+.import level_hdr            ; level header: map/cols/rooms/pipes/blocks/spawns (leveldata.s);
+                             ; same address in EVERY bank — load_level binds the engine to it
 .import jumparc              ; Mario's jump arc table (27 bytes; $7F = apex)
 .import speedtab            ; horizontal walk speed table (px/frame)
 .import mario_poses          ; 6 poses x 4 tiles (metasprite tiles from ROM $4C37)
 .import mario_big_poses      ; 7 big-Mario poses x 4 tiles (stand,walkA,walkB,jump,skid,walkC,duck)
 .import statusbar_tiles      ; 2x20 status-bar template (ROM $3F9C)
-.import spawn_table          ; enemy spawns: [fire_cam(16), o_y, type] per entry, $FFFF end
-.import level0_cols          ; World 1-1 width in columns (from the level binary size)
-.import room_ptrs            ; table of underground room map pointers
-.import pipe_table, pipe_count ; pipe entries: entry_col(16), room, resume_col(16)
-.import block_table, block_count ; ?-block contents: col(16), row, value ($28=mushroom)
 
 ; ---------------------------------------------------------------------------
 .segment "ZEROPAGE"
@@ -69,7 +65,8 @@ feet_col:    .res 2          ; world tile column under Mario's centre (for colli
 mrow:        .res 1          ; level row being collision-tested
 fall_v:      .res 1          ; fall mode: 0 = jump-arc descent, nonzero = free-fall (+3)
 respawn_req: .res 1          ; set when Mario falls into a pit -> restart the level
-map_base:    .res 2          ; current tilemap base (surface level0_map, or a pipe room)
+map_base:    .res 2          ; current tilemap base (the surface map, or a pipe room)
+lvl_ptr:     .res 2          ; load_level scratch: header table source pointer
 room_mode:   .res 1          ; 0 = surface (scrolls), 1 = inside a single-screen pipe room
 save_cam_x:  .res 2          ; surface camera saved on pipe entry (restored on exit)
 save_spr_x:  .res 1
@@ -193,6 +190,17 @@ mus_rate:    .res 1          ; Bresenham add: 3=64Hz, 18=78.8Hz (time 100), 32=9
 mus_lt:      .res 2          ; current track's note-length table (16 bytes)
 
 .segment "BSS"
+; --- per-level bindings, set by load_level from the current bank's level_hdr ---
+cur_level:   .res 1          ; level id 0.. (GB $ffe4); selects the ROM bank
+surf_map:    .res 2          ; surface tilemap base (map_base resets to this)
+lvl_cols:    .res 2          ; level width in columns
+cam_max:     .res 2          ; max scroll = (lvl_cols - 20) * 8 px
+fbmax_col:   .res 2          ; last fb_col0 with cols fb_col0..+23 inside the level
+room_tbl:    .res 6          ; up to 3 underground-room map pointers
+pipe_cnt:    .res 1          ; pipe entries in pipe_tab
+pipe_tab:    .res 15         ; RAM copy: 5 bytes/pipe, up to 3 pipes
+block_tab:   .res 40         ; RAM copy: 4 bytes/block, up to 10 ?-block entries
+spawn_tab:   .res 256        ; RAM copy: 4 bytes/spawn + $FFFF sentinel
 revpix:      .res 256        ; reverse the 4 2bpp pixels in a byte (built at boot)
 flipbuf:     .res 16         ; row-reversed tile scratch for the Y-flipped corpse draw
 tile_mod:    .res 640        ; "modified" bitmap, 1 bit per surface (col,row): used ?-block / broken brick
@@ -268,9 +276,11 @@ o_hp:        .res 8          ; extra hits to survive (fly: 1 -- two balls kill, 
     jsr clear_vram
     jsr title_screen             ; the SML title (extracted at build time); waits for Start
     jsr clear_vram
-    lda #<level0_map             ; start on the surface map
+    stz cur_level                ; a fresh game starts at 1-1 (bank 0)
+    jsr load_level               ; map the bank + bind level pointers/limits to its header
+    lda surf_map                 ; start on the surface map
     sta map_base
-    lda #>level0_map
+    lda surf_map+1
     sta map_base+1
     jsr render_background        ; draw the World 1-1 scene
     jsr render_status_bar        ; status bar (drawn once; pinned by the NMI/IRQ raster split)
@@ -278,10 +288,6 @@ o_hp:        .res 8          ; extra hits to survive (fly: 1 -- two balls kill, 
     sta lives
     lda #$FF                     ; no multi-coin block active (ZP cleared to 0 above)
     sta mc_colh
-    lda #<block_count            ; find_block limit = block_count*4 (low byte is enough: < 64)
-    asl
-    asl
-    sta blk_lim
     jsr hud_init                 ; clock = 400, zero score/coins
     jsr draw_hud                 ; stamp the live values over the template
     lda #40                      ; place Mario standing on the ground (pixel X)
@@ -491,11 +497,11 @@ main_loop:
     cmp #16
     bcs @off
     lda feet_col+1               ; past the level's right edge? open space -- the goal door
-    cmp #>level0_cols            ; leads off the map (the walk-through would otherwise read
+    cmp lvl_cols+1            ; leads off the map (the walk-through would otherwise read
     bcc :+                       ; garbage past the level data and block Mario)
     bne @off
     lda feet_col
-    cmp #<level0_cols
+    cmp lvl_cols
     bcs @off
 :
     lda feet_col                 ; map_ptr = map_base + feet_col*16
@@ -725,16 +731,16 @@ main_loop:
 .proc find_block
     ldx #0
 @loop:
-    lda block_table,x
+    lda block_tab,x
     cmp feet_col
     bne @next
-    lda block_table+1,x
+    lda block_tab+1,x
     cmp feet_col+1
     bne @next
-    lda block_table+2,x
+    lda block_tab+2,x
     cmp mrow
     bne @next
-    lda block_table+3,x
+    lda block_tab+3,x
     sec
     rts
 @next:
@@ -1119,9 +1125,9 @@ main_loop:
     sta cam_dead
     lda cam_x+1
     sta cam_dead+1
-    lda #<level0_map
+    lda surf_map
     sta map_base
-    lda #>level0_map
+    lda surf_map+1
     sta map_base+1
     ; --- respawn checkpoint, the ORIGINAL'S algorithm (State_02 @ $06E2): take the death
     ; segment counter, step ONE segment back (unless at the start), then quantize to the
@@ -1196,13 +1202,13 @@ main_loop:
     asl
     asl
     tay
-    lda spawn_table+1,y
+    lda spawn_tab+1,y
     cmp #$FF
     beq @sffd
     cmp cam_x+1
     bcc @sfn
     bne @sffd
-    lda spawn_table,y
+    lda spawn_tab,y
     cmp cam_x
     bcs @sffd
 @sfn:
@@ -1269,10 +1275,10 @@ main_loop:
     lda goal_phase
     bne @no
     lda cam_x+1                  ; only possible with the camera at its max (the level end)
-    cmp #>CAM_MAX
+    cmp cam_max+1
     bne @no
     lda cam_x
-    cmp #<CAM_MAX
+    cmp cam_max
     bne @no
     lda jump_state               ; only from the ground (jumping into the arch waits for landing)
     bne @no
@@ -3098,73 +3104,27 @@ music_data:
 @txt: .byte $2C,$2C,$2C,$2C,$2C,$10,$0A,$16,$0E,$2C,$2C,$18,$1F,$0E,$1B,$2C,$2C  ; $1CD7
 .endproc
 
-; next_level: level complete. The original proceeds to 1-2; the port has one level
-; built in, so it loops 1-1 fresh for now (multi-level = its own task). Score, coins,
-; lives and Mario's power-ups (big/superball) PERSIST; everything level-local resets.
+; next_level: level complete — advance to the next level (GB State_08: $ffe4+1) and
+; start it FRESH from column 0. Score, coins, lives and Mario's power-ups
+; (big/superball) PERSIST; everything level-local resets. Levels shipped so far:
+; 1-1 and 1-2 — the wrap constant grows as more of World 1 comes online.
+NUM_LEVELS = 2
 .proc next_level
     stz goal_phase
     stz room_mode
-    lda #<level0_map
-    sta map_base
-    lda #>level0_map
-    sta map_base+1
-    ; --- respawn checkpoint, the ORIGINAL'S algorithm (State_02 @ $06E2): take the death
-    ; segment counter, step ONE segment back (unless at the start), then quantize to the
-    ; fixed checkpoints at static segs 3/7/11/15/19 (= port camera 0/640/1280/1920/2240).
-    lsr cam_dead+1               ; death column = cam/8
-    ror cam_dead
-    lsr cam_dead+1
-    ror cam_dead
-    lsr cam_dead+1
-    ror cam_dead
-    lda cam_dead                 ; right-edge column = col + 20
-    clc
-    adc #20
-    sta cam_dead
+    lda cur_level
+    inc a
+    cmp #NUM_LEVELS
     bcc :+
-    inc cam_dead+1
-:   ldx #3                       ; seg = 3 + (right edge)/20
-@div:
-    lda cam_dead+1
-    bne @sub20
-    lda cam_dead
-    cmp #20
-    bcc @seg
-@sub20:
-    sec
-    lda cam_dead
-    sbc #20
-    sta cam_dead
-    lda cam_dead+1
-    sbc #0
-    sta cam_dead+1
-    inx
-    bra @div
-@seg:
-    cpx #3                       ; not at the very start? one segment back (the generous rule)
-    beq :+
-    dex
-:   stz cam_x
-    stz cam_x+1
-    cpx #7                       ; quantize (cab = 12 + cam/16, trace-calibrated: checkpoint
-    bcc @have                    ; cam = (C-12)*16): <7 -> 0
-    ldy #<640
-    sty cam_x
-    ldy #>640
-    sty cam_x+1
-    cpx #11                      ; <11 -> 640
-    bcc @have
-    ldy #<1280
-    sty cam_x
-    ldy #>1280
-    sty cam_x+1
-    cpx #15                      ; <15 -> 1280
-    bcc @have
-    ldy #<1920                   ; else 1920 (seg 15+; later checkpoints past 1-1's range)
-    sty cam_x
-    ldy #>1920
-    sty cam_x+1
-@have:
+    lda #0                       ; past the last shipped level: wrap to 1-1
+:   sta cur_level
+    jsr load_level               ; map the new bank + rebind the level pointers
+    lda surf_map
+    sta map_base
+    lda surf_map+1
+    sta map_base+1
+    stz cam_x                    ; a completed level always restarts at the very start
+    stz cam_x+1                  ; (checkpoints are a DEATH mechanic — do_respawn's)
     lda cam_x                    ; fb_col0 = cam/8
     sta fb_col0
     lda cam_x+1
@@ -3181,13 +3141,13 @@ music_data:
     asl
     asl
     tay
-    lda spawn_table+1,y
+    lda spawn_tab+1,y
     cmp #$FF
     beq @sffd
     cmp cam_x+1
     bcc @sfn
     bne @sffd
-    lda spawn_table,y
+    lda spawn_tab,y
     cmp cam_x
     bcs @sffd
 @sfn:
@@ -3307,18 +3267,18 @@ music_data:
 .proc find_pipe
     lda #8
     jsr calc_feet_col            ; feet_col = centre column
-    ldx #0                       ; byte index into pipe_table (5 bytes/pipe)
+    ldx #0                       ; byte index into pipe_tab (5 bytes/pipe)
     ldy #0
 @loop:
-    lda pipe_table+1,x           ; entry_col high == feet_col high?
+    lda pipe_tab+1,x           ; entry_col high == feet_col high?
     cmp feet_col+1
     bne @next
     lda feet_col                 ; feet_col - entry_col in {0,1} ?
     sec
-    sbc pipe_table,x
+    sbc pipe_tab,x
     cmp #2
     bcs @next
-    lda pipe_table+2,x           ; -> room index
+    lda pipe_tab+2,x           ; -> room index
     rts
 @next:
     txa
@@ -3326,7 +3286,7 @@ music_data:
     adc #5
     tax
     iny
-    cpy #<pipe_count
+    cpy pipe_cnt
     bne @loop
     lda #$FF
     rts
@@ -3339,11 +3299,11 @@ music_data:
     lda #1
     sta room_mode
     pla
-    asl                          ; map_base = room_ptrs[room*2]
+    asl                          ; map_base = room_tbl[room*2]
     tax
-    lda room_ptrs,x
+    lda room_tbl,x
     sta map_base
-    lda room_ptrs+1,x
+    lda room_tbl+1,x
     sta map_base+1
     stz cam_x
     stz cam_x+1
@@ -3381,9 +3341,9 @@ music_data:
 ; exit_room: return to the surface at the saved camera, standing.
 .proc exit_room
     stz room_mode
-    lda #<level0_map
+    lda surf_map
     sta map_base
-    lda #>level0_map
+    lda surf_map+1
     sta map_base+1
     lda save_cam_x
     sta cam_x
@@ -3786,8 +3746,18 @@ TIMER_RATE = 40                  ; frames per clock unit (SML's $da00 sub-counte
     lda timer                    ; tens/ones -> cols 18-19
     ldx #18
     jsr put_hud_byte
+    ldx cur_level                ; "W-S" under WORLD (row 1 cols 12/14; the '-' is
+    lda world_tab,x              ; static in the template)
+    ldx #12
+    jsr put_hud
+    ldx cur_level
+    lda stage_tab,x
+    ldx #14
+    jsr put_hud
     stz hud_dirty
     rts
+world_tab: .byte 1,1,1,2,2,2,3,3,3,4,4,4   ; level id -> displayed world digit
+stage_tab: .byte 1,2,3,1,2,3,1,2,3,1,2,3   ; level id -> displayed stage digit
 .endproc
 
 ; tick_timer: count down the level clock; dirties the HUD when the displayed value changes.
@@ -3923,9 +3893,8 @@ TIMER_RATE = 40                  ; frames per clock unit (SML's $da00 sub-counte
 .endproc
 
 ; Camera constants. PIN_X = Mario's screen X (left edge) at which the camera starts
-; following him; CAM_MAX = max scroll = (level_cols 420 - 20 visible) * 8 px.
+; following him; cam_max (runtime, per level) = max scroll = (lvl_cols - 20) * 8 px.
 PIN_X   = 64
-CAM_MAX = (level0_cols - 20) * 8 ; max scroll: (level width - 20 visible cols) * 8 px
 
 ; ---------------------------------------------------------------------------
 ; move_player: walk via the real speed table. Up to PIN_X Mario moves on screen;
@@ -4045,11 +4014,11 @@ CAM_MAX = (level0_cols - 20) * 8 ; max scroll: (level width - 20 visible cols) *
     bcc @setx                    ; new <= PIN_X: just move on screen
     ; new > PIN_X: scroll instead, unless the camera is already at the level end
     lda cam_x+1
-    cmp #>CAM_MAX
+    cmp cam_max+1
     bcc @scroll
     bne @atmax
     lda cam_x
-    cmp #<CAM_MAX
+    cmp cam_max
     bcc @scroll
 @atmax:                          ; camera maxed -> Mario walks INTO the goal door and stops
     lda tmpL                     ; CENTERED in the arch (cols 298-299 = screen 144-159; the
@@ -4073,16 +4042,16 @@ CAM_MAX = (level0_cols - 20) * 8 ; max scroll: (level width - 20 visible cols) *
     inc cam_x+1
 @clamp:                          ; clamp cam_x to CAM_MAX
     lda cam_x+1
-    cmp #>CAM_MAX
+    cmp cam_max+1
     bcc @rdone
     bne @doclamp
     lda cam_x
-    cmp #<CAM_MAX
+    cmp cam_max
     bcc @rdone
 @doclamp:
-    lda #<CAM_MAX
+    lda cam_max
     sta cam_x
-    lda #>CAM_MAX
+    lda cam_max+1
     sta cam_x+1
 @rdone:
     rts
@@ -4140,7 +4109,8 @@ CAM_MAX = (level0_cols - 20) * 8 ; max scroll: (level width - 20 visible cols) *
 ; fb_col0 we DMA-shift the framebuffer left 8 bytes (4 cols) and stream 4 fresh
 ; columns into the right margin. Scroll is byte-aligned (4px steps) so the status
 ; bar and Mario stay pixel-exact while reusing the byte-aligned blits.
-FB_MAX_COL = level0_cols - 24    ; last fb_col0 that keeps cols fb_col0..+23 in the level
+; (fbmax_col, runtime per level = lvl_cols - 24: last fb_col0 that keeps cols
+;  fb_col0..+23 inside the level.)
 .proc scroll_apply
     stz shift_px                 ; track how far the framebuffer shifts this frame
 @loop:
@@ -4168,11 +4138,11 @@ FB_MAX_COL = level0_cols - 24    ; last fb_col0 that keeps cols fb_col0..+23 in 
     bcc @setscroll
 @needshift:
     lda fb_col0+1                ; only shift while the level still has columns to the right
-    cmp #>FB_MAX_COL
+    cmp fbmax_col+1
     bcc @doshift
     bne @clampend
     lda fb_col0
-    cmp #<FB_MAX_COL
+    cmp fbmax_col
     bcc @doshift
 @clampend:                       ; at the level end: pin scroll to the last margin (<=32)
     lda tmpL
@@ -5277,17 +5247,17 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     asl
     asl
     tay
-    lda spawn_table+1,y          ; fire_cam hi ($FF = end of table)
+    lda spawn_tab+1,y          ; fire_cam hi ($FF = end of table)
     cmp #$FF
     beq @done
     cmp cam_x+1
     bcc @fire
     bne @done
-    lda spawn_table,y
+    lda spawn_tab,y
     cmp cam_x
     bcs @done                    ; STRICT: fires only once the camera passes the column
 @fire:
-    lda spawn_table+3,y          ; type: Chibibo $00, Nokobon $04, Fly $0E
+    lda spawn_tab+3,y          ; type: Chibibo $00, Nokobon $04, Fly $0E
     beq @chib
     cmp #$04
     bne :+
@@ -5320,7 +5290,7 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     lda cam_x+1
     adc #0
     sta o_xh,x
-    lda spawn_table+2,y          ; feet line from the table
+    lda spawn_tab+2,y          ; feet line from the table
     sta o_y,x
     lda #$FF                     ; walks LEFT (toward Mario), 1px/update
     sta o_vx,x
@@ -5344,7 +5314,7 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     lda cam_x+1
     adc #0
     sta o_xh,x
-    lda spawn_table+2,y
+    lda spawn_tab+2,y
     sta o_y,x
     lda #$FF                     ; walks left, same measured speed engine as the Chibibo
     sta o_vx,x
@@ -5368,7 +5338,7 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     lda cam_x+1
     adc #0
     sta o_xh,x
-    lda spawn_table+2,y
+    lda spawn_tab+2,y
     sta o_y,x
     lda #$FF                     ; faces/hops left initially
     sta o_vx,x
@@ -7811,9 +7781,101 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
 .endproc
 
 ; ---------------------------------------------------------------------------
+; load_level: bind the engine's per-level pointers/limits to the CURRENT bank's
+; level_hdr (leveldata.s), and copy the small tables (rooms/pipes/blocks/spawns)
+; to RAM so the rest of the engine keeps absolute indexed addressing. Lives in
+; the LEVELS common prefix: identical bytes at the identical address in every
+; bank, so it stays valid across a bank switch.
+.segment "LEVELS"
+.proc load_level
+    lda cur_level                ; map the level's ROM bank at $8000 (level N = bank N).
+    asl                          ; Safe mid-proc: load_level sits in the common prefix,
+    asl                          ; byte-identical at this address in every bank.
+    asl
+    asl
+    asl
+    ora #(SYSCTRL_NMI_EN | SYSCTRL_TIMER_IRQ)
+    sta SYS_CTRL
+    lda level_hdr+0              ; surface map
+    sta surf_map
+    lda level_hdr+1
+    sta surf_map+1
+    lda level_hdr+2              ; width in columns
+    sta lvl_cols
+    lda level_hdr+3
+    sta lvl_cols+1
+    lda lvl_cols                 ; cam_max = (cols - 20) * 8
+    sec
+    sbc #20
+    sta cam_max
+    lda lvl_cols+1
+    sbc #0
+    sta cam_max+1
+    asl cam_max
+    rol cam_max+1
+    asl cam_max
+    rol cam_max+1
+    asl cam_max
+    rol cam_max+1
+    lda lvl_cols                 ; fbmax_col = cols - 24
+    sec
+    sbc #24
+    sta fbmax_col
+    lda lvl_cols+1
+    sbc #0
+    sta fbmax_col+1
+    ldx #5                       ; room map pointers (3 x .addr)
+:   lda level_hdr+4,x
+    sta room_tbl,x
+    dex
+    bpl :-
+    lda level_hdr+10             ; pipes -> RAM (pipe_cnt * 5 bytes)
+    sta lvl_ptr
+    lda level_hdr+11
+    sta lvl_ptr+1
+    lda level_hdr+12
+    sta pipe_cnt
+    beq @nopipes
+    asl
+    asl
+    adc pipe_cnt                 ; *5 (<= 3 pipes, no carry)
+    tay
+:   dey
+    lda (lvl_ptr),y
+    sta pipe_tab,y
+    cpy #0
+    bne :-
+@nopipes:
+    lda level_hdr+13             ; ?-blocks -> RAM (count * 4 bytes)
+    sta lvl_ptr
+    lda level_hdr+14
+    sta lvl_ptr+1
+    lda level_hdr+15
+    asl
+    asl
+    sta blk_lim                  ; find_block loop limit
+    tay
+    beq @noblocks
+:   dey
+    lda (lvl_ptr),y
+    sta block_tab,y
+    cpy #0
+    bne :-
+@noblocks:
+    lda level_hdr+16             ; spawn list -> RAM (256 bytes; the $FFFF sentinel
+    sta lvl_ptr                  ; inside the data ends the live part)
+    lda level_hdr+17
+    sta lvl_ptr+1
+    ldy #0
+:   lda (lvl_ptr),y
+    sta spawn_tab,y
+    iny
+    bne :-
+    rts
+.endproc
+
 ; animate_player: pick the pose index — jump in the air, the 3-frame GB walk cycle
 ; while moving/gliding, skid during the brake, else standing.
-.segment "LEVELS"                ; (FIXED is full)
 .proc animate_player
     lda jump_state
     beq @ground

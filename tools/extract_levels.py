@@ -77,10 +77,12 @@ PIPE_TABLE = 0x651C               # bank 3: per-level pointer -> pipe entry list
 # Play-start segment: the level loader seeds $ffe5 (segment index) at level start, so the
 # playable surface begins partway into the segment list — the leading segments are a lead-in
 # behind the start (incl. the pipe-rooms) that the camera never reaches (no left-scroll).
-# Verified for 1-1 from the start routine $0DD3 (`ld a,$03; ldh [$ffe5],a`) AND from a live
-# mGBA trace (tools/trace_level.lua): at marioX=50 the surface is already at seg>=3, never <3.
-# Other levels: TODO RE each loader's $ffe5 seed; default 0 until then.
-LEVEL_START_SEG = {0: 3}
+# The seed is UNCONDITIONALLY 3 for every level: Jump_000_0dd3 (`ld a,$03; ldh [$ffe5],a`)
+# is the single level-entry path (fresh game AND State_08 next-level both land there), and a
+# PyBoy capture of a forced 1-2 load confirms $ffe5 starts at 3 (streams to 4 by Mario x=50,
+# same as 1-1). State_02 respawns re-seed $ffe5 from the checkpoint, never below 3.
+LEVEL_START_SEG = {}
+DEFAULT_START_SEG = 3
 
 def decode_seg_columns(d, bank, sp):
     o = bank_file(bank, sp)
@@ -191,7 +193,7 @@ def main():
         spawn_p = u16(d, bank_file(bank, SPAWN_TABLE)  + lvl * 2)
         param   = d[PARAM_TABLE + lvl]
         segs = walk_segments(d, bank, seg_tab)      # segment list, $FF-terminated
-        cols, rooms, seg_flat, seg_room = decode_level(d, bank, seg_tab, LEVEL_START_SEG.get(lvl, 0))
+        cols, rooms, seg_flat, seg_room = decode_level(d, bank, seg_tab, LEVEL_START_SEG.get(lvl, DEFAULT_START_SEG))
         pipes = decode_pipes(d, lvl, seg_flat, seg_room)
         blocks = decode_blocks(d, lvl, seg_flat, cols)
         spawns = decode_spawns(d, bank, spawn_p)

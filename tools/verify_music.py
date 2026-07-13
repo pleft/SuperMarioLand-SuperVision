@@ -155,7 +155,8 @@ def model(frames, rate=3):
 def run_port(frames):
     from py65.devices.mpu65c02 import MPU
     mem=bytearray(0x10000)
-    mem[0x8000:0x10000]=open(os.path.join(ROOT,"build/super-mario-land.sv"),"rb").read()
+    rom=open(os.path.join(ROOT,"build/super-mario-land.sv"),"rb").read()
+    mem[0x8000:0x10000]=rom[:0x4000]+rom[-0x4000:]   # 64K image: [bank0][fixed] view (1-1)
     writes=[]; frame=[0]
     class W(bytearray):
         def __setitem__(s,i,v):
