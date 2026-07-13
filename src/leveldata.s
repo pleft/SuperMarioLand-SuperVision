@@ -7,7 +7,7 @@
 ; prefix. tools/pack_banks.py replicates the same header+blobs layout for banks
 ; 1+ at the identical offset; load_level reads everything through the header.
 
-.segment "LEVELS"
+.segment "LEVEL0"
 
 .export level_hdr
 level_hdr:                                    ; 18-byte level header

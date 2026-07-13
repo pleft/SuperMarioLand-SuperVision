@@ -6,8 +6,8 @@
 .include "supervision.inc"
 .import chardata             ; OBJ tiles (src/gfxdata.s) — also the $8800 BG tiles $80-$FF
 .import bg_chardata          ; BG tiles (level tiles $00-$7F)
-.import level_hdr            ; level header: map/cols/rooms/pipes/blocks/spawns (leveldata.s);
-                             ; same address in EVERY bank — load_level binds the engine to it
+.import level_hdr            ; bank 0's level header (leveldata.s); banks 1+ put theirs at
+.import __TITLE0_LOAD__      ; the TITLE0 range (pack_banks.py) — load_level picks the base
 .import jumparc              ; Mario's jump arc table (27 bytes; $7F = apex)
 .import speedtab            ; horizontal walk speed table (px/frame)
 .import mario_poses          ; 6 poses x 4 tiles (metasprite tiles from ROM $4C37)
@@ -93,7 +93,6 @@ mc_row:      .res 1          ;   ZP is zero-cleared, and col-hi 0 is a real colu
 goal_phase:  .res 1          ; level-clear sequence: 0 none, 1 jingle, 2 hold, 3 tally, 4 end
 goal_tmr:    .res 1          ; frames left in the current goal phase
 goal_top:    .res 1          ; 1 = Mario exited through the TOP door (bonus game; TODO)
-plats_on:    .res 1          ; end-area moving platforms spawned (one-shot)
 ride:        .res 1          ; 0 = not riding; else (slot+1) of the platform under Mario
 bonus_phase: .res 1          ; bonus game: 0 off, 2 play, 3 walk, 5 award
 b_tick:      .res 1          ; 4-frame tick divider ($da22; harness-calibrated)
@@ -192,6 +191,7 @@ mus_lt:      .res 2          ; current track's note-length table (16 bytes)
 .segment "BSS"
 ; --- per-level bindings, set by load_level from the current bank's level_hdr ---
 cur_level:   .res 1          ; level id 0.. (GB $ffe4); selects the ROM bank
+hdr_buf:     .res 18         ; RAM copy of the current bank's level header
 surf_map:    .res 2          ; surface tilemap base (map_base resets to this)
 lvl_cols:    .res 2          ; level width in columns
 cam_max:     .res 2          ; max scroll = (lvl_cols - 20) * 8 px
@@ -200,7 +200,7 @@ room_tbl:    .res 6          ; up to 3 underground-room map pointers
 pipe_cnt:    .res 1          ; pipe entries in pipe_tab
 pipe_tab:    .res 15         ; RAM copy: 5 bytes/pipe, up to 3 pipes
 block_tab:   .res 40         ; RAM copy: 4 bytes/block, up to 10 ?-block entries
-spawn_tab:   .res 256        ; RAM copy: 4 bytes/spawn + $FFFF sentinel
+spawn_tab:   .res 384        ; RAM copy: 5 bytes/spawn + $FFFF sentinel
 revpix:      .res 256        ; reverse the 4 2bpp pixels in a byte (built at boot)
 flipbuf:     .res 16         ; row-reversed tile scratch for the Y-flipped corpse draw
 tile_mod:    .res 640        ; "modified" bitmap, 1 bit per surface (col,row): used ?-block / broken brick
@@ -438,7 +438,6 @@ main_loop:
     jsr move_player              ; walk (updates spr_x) or scroll the camera (cam_x)
     jsr jump_player              ; A = jump (real arc); updates spr_y while airborne
     jsr goal_check               ; walked through the goal door? start the clear sequence
-    jsr plats_check              ; entering the end area? spawn the two moving platforms
     jsr spawn_check              ; enemy spawn list (fires at the camera's right edge)
     jsr coin_collect             ; grab floating coins Mario walked/jumped into
     jsr update_objects           ; mushroom/coin physics + mushroom pickup
@@ -1201,6 +1200,8 @@ main_loop:
     lda spawn_idx
     asl
     asl
+    clc
+    adc spawn_idx                ; entry offset = idx*5 (list <= 51 entries)
     tay
     lda spawn_tab+1,y
     cmp #$FF
@@ -3140,6 +3141,8 @@ NUM_LEVELS = 2
     lda spawn_idx
     asl
     asl
+    clc
+    adc spawn_idx                ; entry offset = idx*5 (list <= 51 entries)
     tay
     lda spawn_tab+1,y
     cmp #$FF
@@ -4436,13 +4439,6 @@ OBJ_PLATV  = 10                  ; end-area moving platform, vertical (SML type 
 OBJ_PLATH  = 11                  ; end-area moving platform, horizontal (SML type $0B)
 PLAT_TILE  = $EF                 ; platform = 3x tile $EF (24px; metasprite param $12)
 ; patrol geometry from the goal trace at cam-max (GB OAM coords -8/-16 -> world):
-PLATV_X    = 2280                ; vertical platform: fixed world x (dedicated trace: OAM x 48)
-PLATV_YT   = 56 + 8              ; o_y bounds (o_y = world top + 8); patrol top..bottom exact
-PLATV_YB   = 116 + 8             ;   from the standing-still trace: OAM y 72..132, 120f half-period
-PLATH_Y    = 32 + 8              ; horizontal platform: fixed o_y (OAM y 48)
-PLATH_X0   = 2291                ; patrol left..right world x, exact (trace: OAM x 59..112,
-PLATH_X1   = 2344                ;   106-frame half-period; both at 0.5px/frame)
-PLATS_AT   = 2120                ; spawn both once the camera reaches this (they enter view)
 DEBRIS_TILE = $62                ; all 4 shards are OBJ tile $62 (mGBA OAM trace)
 DEBRIS_HI  = 7                   ; jump-arc start index: high pair rises 21px (trace: 21px)
 DEBRIS_LO  = 11                  ; low pair rises 13px (trace: 13px)
@@ -4482,6 +4478,25 @@ FLY_TL2    = $A2                 ; frame B
 FLY_BL2    = $B2
 FLY_SQ     = $A8                 ; flattened corpse pair $A8+$A9 (param $2C)
 FLY_SIT    = 55                  ; trace: ~55 grounded frames between hops
+OBJ_BUNBUN = 19                  ; Bunbun bee (SML type $42, 1-2/4-2): flies level toward
+                                 ; Mario, hovers, drops an arrow (slot capture 2026-07-13:
+                                 ; 1px/f x 40f fly, 33f hover, arrow at hover+17, re-face
+                                 ; each cycle; wing flap = params $30/$31 every 8f)
+OBJ_ARROW  = 20                  ; its arrow (type $45): 1px/f straight down, x frozen, no
+                                 ; terrain collision, off the bottom; ANY contact hurts
+OBJ_STONE  = 21                  ; stepping stone (type $36): static rideable 8px block;
+                                 ; landing morphs it ($3186: $36->$37) -> short beat, then
+                                 ; falls 1px/f carrying the rider (script $399D)
+BUN_TL     = $C0                 ; bunbun 16x16, faces LEFT natively: C0 C1 / D0 D1
+BUN_BL     = $D0                 ;   (frame B = +2, like the fly's tile pairs)
+BUN_SQ     = $C8                 ; stomped: flat pair $C8+$C9 (param $34)
+BUN_FLY_T  = 40                  ; cycle: fly frames,
+BUN_HOV_T  = 33                  ;   hover frames,
+BUN_DROP_T = 57                  ;   arrow drop at cycle tick 40+17
+ARROW_T    = $BC                 ; arrow: top tile / bottom tile (param $44: BC over AC)
+ARROW_B    = $AC
+STONE_T    = $EE                 ; the stone's single 8x8 tile (param $21)
+STONE_BEAT = 8                   ; triggered: one script step's pause before the drop ($399D E7)
 STAR_TA    = $86                 ; star twinkles between $86 and $85 (param $19 list)
 STAR_TB    = $85
 BALL_TILE  = $60                 ; superball = 1 OBJ tile (mGBA OAM trace)
@@ -4497,7 +4512,6 @@ FLOWER_RISE = 7                  ; emerge: rise 7px out of the block, then sit (
 ; clear_objects: free all slots (level restart / pipe transition).
 .proc clear_objects
     stz ride                     ; no platforms left to ride
-    stz plats_on                 ; they respawn when the camera re-enters the end area
     ldx #7
 :   stz o_type,x
     stz o_pdr,x
@@ -4981,75 +4995,40 @@ bounce_dy: .byte $FE,$FE,$01,$02
     rts
 .endproc
 
-; --- end-area moving platforms (SML types $0A/$0B: script-driven ping-pong, 1px per
-; object-update = 0.5px/frame, no gravity; goal-trace-verified patrol bounds) ---
-.proc plats_check
-    lda plats_on
-    bne @done
-    lda cam_x+1                  ; camera reached the end area?
-    cmp #>PLATS_AT
-    bcc @done
-    bne @go
-    lda cam_x
-    cmp #<PLATS_AT
-    bcc @done
-@go:
-    inc plats_on
-    jsr find_free_obj            ; vertical platform (rides Mario up to the high route)
-    bcs @h
-    lda #OBJ_PLATV
-    sta o_type,x
-    lda #<PLATV_X
-    sta o_xl,x
-    lda #>PLATV_X
-    sta o_xh,x
-    lda #PLATV_YB                ; start at the bottom of its patrol
-    sta o_y,x
-    lda #1                       ; moving up first (toward the high route)
-    sta o_st,x
-@h:
-    jsr find_free_obj            ; horizontal platform (carries Mario to the top door)
-    bcs @done
-    lda #OBJ_PLATH
-    sta o_type,x
-    lda #<PLATH_X0
-    sta o_xl,x
-    lda #>PLATH_X0
-    sta o_xh,x
-    lda #PLATH_Y
-    sta o_y,x
-    stz o_st,x                   ; moving right first
-@done:
-    rts
-.endproc
+; --- moving platforms (SML types $0A/$0B), TABLE-DRIVEN from the spawn list.
+; GB truth (scripts $3638/$364A + 1-2 slot captures, 2026-07-13): a platform spawns
+; at world x = fire+192+x_off*4 and patrols AWAY first at 0.5px/frame, ping-pong:
+; vertical = spawn y DOWN 60px and back; horizontal = spawn x LEFT 53px and back.
+; (These bounds reproduce 1-1's dedicated goal-trace patrol exactly: o_y 64..124 /
+; x 2291..2344.) o_st = offset from the spawn point, o_vy = returning flag. ---
 
-; upd_platv: ping-pong o_y between PLATV_YT..PLATV_YB; carry Mario when riding this slot.
+; upd_platv: down 60px from the spawn point and back; carries the rider.
 .proc upd_platv
     lda frame_count
     lsr
     bcc :+
     rts
 :   ldx oi
-    lda o_st,x
+    lda o_vy,x
     bne @up
-    inc o_y,x                    ; down
+    inc o_y,x                    ; away: down
     jsr carry_y_dn
     ldx oi
-    lda o_y,x
-    cmp #PLATV_YB
+    inc o_st,x
+    lda o_st,x
+    cmp #60
     bcc @done
     lda #1
-    sta o_st,x
+    sta o_vy,x
 @done:
     rts
 @up:
     dec o_y,x
     jsr carry_y_up
     ldx oi
-    lda o_y,x
-    cmp #PLATV_YT+1              ; turn exactly AT the traced top endpoint (inclusive)
-    bcs @done
-    stz o_st,x
+    dec o_st,x
+    bne @done
+    stz o_vy,x
     rts
 .endproc
 
@@ -5073,34 +5052,16 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     lda #1                       ; clear Z
     rts
 
-; upd_plath: ping-pong o_x between PLATH_X0..PLATH_X1; carry Mario horizontally.
+; upd_plath: left 53px from the spawn point and back; carries the rider.
 .proc upd_plath
     lda frame_count
     lsr
     bcc :+
     rts
 :   ldx oi
-    lda o_st,x
-    bne @left
-    inc o_xl,x                   ; right
-    bne :+
-    inc o_xh,x
-:   jsr riding_this
-    bne :+
-    inc spr_x
-:   ldx oi
-    lda o_xh,x                   ; reached the right bound?
-    cmp #>PLATH_X1
-    bne @done
-    lda o_xl,x
-    cmp #<PLATH_X1
-    bcc @done
-    lda #1
-    sta o_st,x
-@done:
-    rts
-@left:
-    lda o_xl,x
+    lda o_vy,x
+    bne @right
+    lda o_xl,x                   ; away: left
     bne :+
     dec o_xh,x
 :   dec o_xl,x
@@ -5108,14 +5069,25 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     bne :+
     dec spr_x
 :   ldx oi
-    lda o_xh,x                   ; back at the left bound?
-    cmp #>PLATH_X0
+    inc o_st,x
+    lda o_st,x
+    cmp #53
+    bcc @done
+    lda #1
+    sta o_vy,x
+@done:
+    rts
+@right:
+    inc o_xl,x
+    bne :+
+    inc o_xh,x
+:   jsr riding_this
+    bne :+
+    inc spr_x
+:   ldx oi
+    dec o_st,x
     bne @done
-    lda o_xl,x
-    cmp #<PLATH_X0
-    bne @done
-    stz o_st,x
-@done2:
+    stz o_vy,x
     rts
 .endproc
 
@@ -5129,6 +5101,8 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     cmp #OBJ_PLATV
     beq @try
     cmp #OBJ_PLATH
+    beq @try
+    cmp #OBJ_STONE
     beq @try
 @next:
     inc oi2
@@ -5181,13 +5155,25 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     sta tmpL2
     bcc :+
     inc tmpH2
-:   lda o_xl,x                   ; platform centre = o_x + 12
+:   lda o_type,x                 ; platform centre = o_x + 12 (24px); stone = o_x + 4 (8px)
+    cmp #OBJ_STONE
+    bne :+
+    lda o_xl,x
+    clc
+    adc #4
+    sta tmpL3
+    lda o_xh,x
+    adc #0
+    sta tmpH3
+    bra @diff
+:   lda o_xl,x
     clc
     adc #12
     sta tmpL3
     lda o_xh,x
     adc #0
     sta tmpH3
+@diff:
     sec                          ; diff = mario - plat (16-bit, abs)
     lda tmpL2
     sbc tmpL3
@@ -5206,8 +5192,14 @@ riding_this:                     ; Z=1 if Mario rides slot oi
 :   tya
 @pos:
     bne @no                      ; |diff| >= 256
+    ldy #16                      ; overlap window: platform +/-16, stone +/-12
+    lda o_type,x
+    cmp #OBJ_STONE
+    bne :+
+    ldy #12
+:   sty tmpH3
     lda tmpL3
-    cmp #16
+    cmp tmpH3
     bcs @no
     clc
     rts
@@ -5227,6 +5219,8 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     cmp #OBJ_PLATV
     beq :+
     cmp #OBJ_PLATH
+    beq :+
+    cmp #OBJ_STONE
     bne @off
 :   jsr plat_xover
     bcs @off
@@ -5246,6 +5240,8 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     lda spawn_idx
     asl
     asl
+    clc
+    adc spawn_idx                ; entry offset = idx*5 (list <= 51 entries)
     tay
     lda spawn_tab+1,y          ; fire_cam hi ($FF = end of table)
     cmp #$FF
@@ -5257,15 +5253,31 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     cmp cam_x
     bcs @done                    ; STRICT: fires only once the camera passes the column
 @fire:
-    lda spawn_tab+3,y          ; type: Chibibo $00, Nokobon $04, Fly $0E
-    beq @chib
+    lda spawn_tab+3,y          ; type: Chibibo $00, Nokobon $04, Fly $0E, Bunbun $42,
+    beq @chib                  ; stone $36, moving platforms $0A/$0B
     cmp #$04
     bne :+
     jsr spawn_noko
     bra @skip
 :   cmp #$0E
-    bne @skip
+    bne :+
     jsr spawn_fly
+    bra @skip
+:   cmp #$42
+    bne :+
+    jsr spawn_bunbun
+    bra @skip
+:   cmp #$36
+    bne :+
+    jsr spawn_stone
+    bra @skip
+:   cmp #$0A
+    bne :+
+    jsr spawn_platv
+    bra @skip
+:   cmp #$0B
+    bne @skip
+    jsr spawn_plath
     bra @skip
 @chib:
     jsr spawn_chib
@@ -5347,6 +5359,260 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     sta o_tmr,x
 @full:
     rts
+.endproc
+
+.segment "LEVELS"                ; the 1-2 entity pack lives in the banked common
+                                 ; prefix (FIXED is full); identical in every bank
+; spawn_tabx: slot X gets its world x from spawn entry Y — the GB spawner rule
+; ($249B): world x = fire_cam + 192 + x_off*4 (matches both traced 1-1 platforms).
+.proc spawn_tabx
+    lda spawn_tab,y
+    clc
+    adc #192
+    sta o_xl,x
+    lda spawn_tab+1,y
+    adc #0
+    sta o_xh,x
+    lda spawn_tab+4,y
+    asl
+    asl
+    clc
+    adc o_xl,x
+    sta o_xl,x
+    bcc :+
+    inc o_xh,x
+:   rts
+.endproc
+
+.proc spawn_platv                ; vertical: spawns at the patrol TOP, heads down
+    lda #OBJ_PLATV
+    bra spawn_plat
+.endproc
+.proc spawn_plath                ; horizontal: spawns at the RIGHT bound, heads left
+    lda #OBJ_PLATH
+    ; falls through
+.endproc
+.proc spawn_plat                 ; A = platform type; patrol origin from entry Y
+    sta tmpL2
+    phy
+    jsr find_free_obj
+    ply
+    bcs @full
+    lda tmpL2
+    sta o_type,x
+    jsr spawn_tabx
+    lda spawn_tab+2,y            ; o_y = bin oy + 16 (platform top+8 convention; this
+    clc                          ; reproduces 1-1's traced o_y bounds 64..124 exactly)
+    adc #16
+    sta o_y,x
+    stz o_st,x                   ; offset 0 = at the spawn point,
+    stz o_vy,x                   ; heading away (down / left)
+@full:
+    rts
+.endproc
+
+.proc spawn_bunbun               ; the bee flies level at its spawn height
+    phy
+    jsr find_free_obj
+    ply
+    bcs @full
+    lda #OBJ_BUNBUN
+    sta o_type,x
+    jsr spawn_tabx
+    lda spawn_tab+2,y
+    sta o_y,x
+    lda #$FF                     ; enters flying left (re-faces at each cycle start)
+    sta o_vx,x
+    lda #1                       ; cycle tick (0 would re-face immediately off-screen;
+    sta o_tmr,x                  ;  the GB faces once at spawn, then per loop)
+    stz o_st,x
+@full:
+    rts
+.endproc
+
+
+; upd_bunbun: the slot-captured cycle — fly 1px/f toward Mario 40f (wings flap per
+; 8f), hover 33f dropping an arrow at tick 57, loop re-facing Mario each cycle.
+.proc upd_bunbun
+    ldx oi
+    lda o_xl,x                   ; off-screen-left cull (walker rule)
+    clc
+    adc #20
+    sta tmpL3
+    lda o_xh,x
+    adc #0
+    sta tmpH3
+    lda tmpH3
+    cmp cam_x+1
+    bcc @cull
+    bne @alive
+    lda tmpL3
+    cmp cam_x
+    bcs @alive
+@cull:
+    stz o_type,x
+    rts
+@alive:
+    lda o_tmr,x
+    bne @notface
+    lda cam_x                    ; cycle start: face toward Mario (script F0 $10
+    clc                          ; re-runs on every loop)
+    adc spr_x
+    sta tmpL2
+    lda cam_x+1
+    adc #0
+    sta tmpH2
+    lda tmpL2
+    clc
+    adc #8
+    sta tmpL2
+    bcc :+
+    inc tmpH2
+:   lda tmpL2                    ; sign(mario centre - bee x)
+    sec
+    sbc o_xl,x
+    lda tmpH2
+    sbc o_xh,x
+    bmi :+
+    lda #1
+    bra :++
+:   lda #$FF
+:   sta o_vx,x
+@notface:
+    lda o_tmr,x
+    cmp #BUN_FLY_T
+    bcs @hover
+    lda o_vx,x                   ; flying: 1px EVERY frame
+    bmi @ml
+    inc o_xl,x
+    bne @tick
+    inc o_xh,x
+    bra @tick
+@ml:
+    lda o_xl,x
+    bne :+
+    dec o_xh,x
+:   dec o_xl,x
+    bra @tick
+@hover:
+    cmp #BUN_DROP_T
+    bne @tick
+    jsr bunbun_drop
+@tick:
+    ldx oi
+    inc o_tmr,x
+    lda o_tmr,x
+    cmp #BUN_FLY_T+BUN_HOV_T
+    bcc :+
+    stz o_tmr,x
+:   jmp enemy_contact
+.endproc
+
+
+; upd_arrow: 1px/frame straight down, x frozen, straight through terrain, gone off
+; the bottom. ANY contact hurts — no stomp ($3186 row for $45: no morph on top contact).
+.proc upd_arrow
+    ldx oi
+    lda o_y,x
+    ina
+    sta o_y,x
+    cmp #168
+    bcc :+
+    stz o_type,x
+    rts
+:   jsr mario_dx                 ; |mario - arrow| (shared geometry)
+@pdx:
+    lda tmpH3
+    bne @done
+    lda tmpL3
+    cmp #8                       ; the arrow is skinny
+    bcs @done
+    lda spr_y
+    sec
+    sbc o_y,x
+    bpl :+
+    eor #$FF
+    ina
+:   cmp #14
+    bcs @done
+    lda mario_starT              ; star: the arrow just dies (+100, class-0 like walkers)
+    beq @hurt
+    stz o_type,x
+    lda #$01
+    jmp award_kill
+@hurt:
+    jmp hurt_mario
+@done:
+    rts
+.endproc
+
+.segment "CODE"
+
+.proc bunbun_drop                ; release the arrow at the bee's position
+    jsr find_free_obj
+    bcs @full
+    ldy oi
+    lda #OBJ_ARROW
+    sta o_type,x
+    lda o_xl,y
+    sta o_xl,x
+    lda o_xh,y
+    sta o_xh,x
+    lda o_y,y
+    ina                          ; capture: the arrow appears 1px below the flight line
+    sta o_y,x
+    stz o_tmr,x                  ; (o_st/o_vx unused by the arrow)
+@full:
+    rts
+.endproc
+
+.proc spawn_stone                ; stepping stone: static until ridden
+    phy
+    jsr find_free_obj
+    ply
+    bcs @full
+    lda #OBJ_STONE
+    sta o_type,x
+    jsr spawn_tabx
+    lda spawn_tab+2,y
+    sta o_y,x
+    stz o_st,x                   ; 0 = untriggered (o_vx unused by the stone)
+    stz o_tmr,x
+@full:
+    rts
+.endproc
+
+; upd_stone: static and rideable until Mario lands on it; then one script-step beat
+; and a 1px/frame drop, carrying the rider ($36 -> $37, script $399D).
+.proc upd_stone
+    ldx oi
+    lda o_st,x
+    bne @falling
+    lda ride                     ; the landing itself is detected by plat_land
+    beq @done
+    dea
+    cmp oi
+    bne @done
+    lda #1
+    sta o_st,x
+    lda #STONE_BEAT
+    sta o_tmr,x
+@done:
+    rts
+@falling:
+    lda o_tmr,x
+    beq @drop
+    dec o_tmr,x
+    rts
+@drop:
+    inc o_y,x
+    jsr carry_y_dn
+    ldx oi
+    lda o_y,x
+    cmp #168                     ; off the bottom (the rider keeps falling — pit rules)
+    bcc :+
+    stz o_type,x
+:   rts
 .endproc
 
 ; upd_chib: the Chibibo walker -- mushroom-style movement (every other frame) + COMBAT.
@@ -5588,16 +5854,10 @@ fly_dy:
 
 ; enemy_contact: shared enemy-vs-Mario resolution (walkers + the fly): bottom cull,
 ; overlap test, star kill, position-rule stomp (result branched by type), side hurt.
-.proc enemy_contact
-    ldx oi
-    lda o_y,x                    ; cull once fallen off the bottom
-    cmp #160
-    bcc :+
-    cmp #240
-    bcs :+
-    stz o_type,x
-    rts
-:   lda cam_x                    ; |mario_center - enemy_center| < 10 ?
+.segment "LEVELS"                ; (FIXED is full; the common prefix is always mapped)
+; mario_dx: tmpL3(+H3) = |mario centre - slot X's centre (o_x+4)|, 16-bit.
+.proc mario_dx
+    lda cam_x                    ; mario centre = cam + spr_x + 8
     clc
     adc spr_x
     sta tmpL2
@@ -5633,6 +5893,19 @@ fly_dy:
     sbc tmpH3
     sta tmpH3
 @pdx:
+    rts
+.endproc
+
+.proc enemy_contact
+    ldx oi
+    lda o_y,x                    ; cull once fallen off the bottom
+    cmp #160
+    bcc :+
+    cmp #240
+    bcs :+
+    stz o_type,x
+    rts
+:   jsr mario_dx
     lda tmpH3
     beq :+
     jmp @done
@@ -5648,10 +5921,12 @@ fly_dy:
     eor #$FF
     ina
 :   cmp #14
-    bcs @done
-    lda mario_starT              ; star -> instant kill
-    bne @kill
-    lda spr_y                    ; STOMP TEST (RE $08C7): Mario at least 4px above
+    bcc :+
+    jmp @done
+:   lda mario_starT              ; star -> instant kill
+    beq :+
+    jmp @kill
+:   lda spr_y                    ; STOMP TEST (RE $08C7): Mario at least 4px above
     clc
     adc #4
     cmp o_y,x
@@ -5666,6 +5941,8 @@ fly_dy:
     beq @sbomb
     cmp #OBJ_FLY
     beq @sfly
+    cmp #OBJ_BUNBUN
+    beq @sbun
     lda #OBJ_SQUASH              ; Chibibo -> squashed corpse ($91)
     sta o_type,x
     lda #CHIB_TB
@@ -5673,6 +5950,18 @@ fly_dy:
     lda #32
     sta o_tmr,x
     stz o_st,x
+    bra @sboth
+@sbun:
+    lda #$08                     ; Bunbun class 2 = 800 (phys $3375 byte2>>6)
+    sta tmpH2
+    lda #OBJ_SQUASH              ; -> the flat bee pair $C8+$C9 (param $34), then gone
+    sta o_type,x
+    lda #BUN_SQ
+    sta o_vx,x
+    lda #32
+    sta o_tmr,x
+    lda #1                       ; pair flag: two tiles side by side
+    sta o_st,x
     bra @sboth
 @sfly:
     lda #$04                     ; fly class 1 = 400
@@ -5717,6 +6006,10 @@ fly_dy:
     bne :+
     lda #$04                     ; fly class = 400
     sta tmpH2
+:   cmp #OBJ_BUNBUN
+    bne :+
+    lda #$08                     ; bunbun class = 800
+    sta tmpH2
 :   lda #1                       ; thrown away from Mario: he walks into it, so the
     ldy mario_facing             ; drift follows his facing (right -> thrown right)
     beq :+
@@ -5725,6 +6018,8 @@ fly_dy:
     lda tmpH2                    ; base value code, no chain on kills
     jmp award_kill
 .endproc
+
+.segment "CODE"
 
 ; award_stomp / award_kill: score + popup from the VALUE CODE (RE $0A29 class table
 ; + the bank2 popup engine's code->tiles/points map). A = base code ($01/$04/$08/$50).
@@ -6120,7 +6415,8 @@ death_curve:                     ; ROM $0C19 verbatim (signed y deltas + $7F end
     rts
 .endproc
 
-.segment "LEVELS"
+.segment "TITLE0"                ; bank 0 ONLY: banks 1+ overlay this range with their
+                                 ; level region (title runs strictly with bank 0 mapped)
 title_map:                       ; 20x18 remapped indices (build artifact, rule 5)
     .incbin "build/levels/title_map.bin"
 title_tiles:                     ; the used tiles, SV-packed
@@ -6373,6 +6669,8 @@ title_tiles:                     ; the used tiles, SV-packed
     beq :+
     cmp #OBJ_FLY
     beq :+
+    cmp #OBJ_BUNBUN
+    beq :+
     jmp @next
 :   ldy oi                       ; dx = |ball - enemy| (16-bit)
     lda o_xl,y
@@ -6408,7 +6706,12 @@ title_tiles:                     ; the used tiles, SV-packed
     lda #$01                     ; value code: walkers 100
     sta tmpH2
     lda o_type,x
-    cmp #OBJ_FLY
+    cmp #OBJ_BUNBUN
+    bne :+
+    lda #$08                     ; bunbun 800
+    sta tmpH2
+    bra @bkill
+:   cmp #OBJ_FLY
     bne @bkill
     lda #$04                     ; fly 400
     sta tmpH2
@@ -6456,6 +6759,9 @@ title_tiles:                     ; the used tiles, SV-packed
 :   cmp #OBJ_FLY
     bne :+
     ldy #2
+:   cmp #OBJ_BUNBUN
+    bne :+
+    ldy #3
 :   tya
     sta o_tmr,x
     lda #OBJ_CORPSE
@@ -6600,6 +6906,12 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     beq @boom
     cmp #OBJ_FLY
     beq @fly
+    cmp #OBJ_BUNBUN
+    beq @bunbun
+    cmp #OBJ_ARROW
+    beq @arrow
+    cmp #OBJ_STONE
+    beq @stone
     jsr upd_mush                 ; OBJ_MUSH and OBJ_HEART (identical walker engine)
     bra @next
 @chib:
@@ -6646,6 +6958,15 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     bra @next
 @bounce:
     jsr upd_bounce
+    bra @next
+@bunbun:
+    jsr upd_bunbun
+    bra @next
+@arrow:
+    jsr upd_arrow
+    bra @next
+@stone:
+    jsr upd_stone
 @next:
     inc oi
     lda oi
@@ -7151,6 +7472,12 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
 :   cpy #OBJ_FLY
     bne :+
     lda #$83                     ; 16 wide + tall
+:   cpy #OBJ_BUNBUN
+    bne :+
+    lda #$83                     ; 16 wide + tall
+:   cpy #OBJ_ARROW
+    bne :+
+    lda #$82                     ; 8 wide, 16 tall
 :   cpy #OBJ_CORPSE
     bne :+
     lda #2
@@ -7176,8 +7503,9 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     inc oi
     lda oi
     cmp #8
-    bne @p4
-    lda m_dirty
+    beq :+
+    jmp @p4
+:   lda m_dirty
     beq @out
     jsr draw_player
     lda mario_vx
@@ -7339,6 +7667,15 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
 :   cmp #OBJ_SQUASH
     bne :+
     jmp @squash
+:   cmp #OBJ_BUNBUN
+    bne :+
+    jmp draw_bunbun
+:   cmp #OBJ_ARROW
+    bne :+
+    jmp draw_arrow
+:   cmp #OBJ_STONE
+    bne :+
+    jmp draw_stone
 :   cmp #OBJ_STAR
     bne :+
     jmp @stard
@@ -7400,6 +7737,10 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
 @cnoko:
     cmp #2
     beq @cfly
+    cmp #3
+    bne :+
+    jmp draw_cbunbun
+:
     ldx oi                       ; --- nokobon 8x16: bottom tile flipped on TOP ---
     lda o_y,x
     sta dy
@@ -7796,13 +8137,29 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     asl
     ora #(SYSCTRL_NMI_EN | SYSCTRL_TIMER_IRQ)
     sta SYS_CTRL
-    lda level_hdr+0              ; surface map
+    lda #<level_hdr              ; header base: bank 0 = the linked address; banks 1+
+    sta lvl_ptr                  ; keep theirs where bank 0 has the TITLE (the packer
+    lda #>level_hdr              ; overlays it — the title runs only with bank 0 mapped)
+    sta lvl_ptr+1
+    lda cur_level
+    beq @hcopy
+    lda #<__TITLE0_LOAD__
+    sta lvl_ptr
+    lda #>__TITLE0_LOAD__
+    sta lvl_ptr+1
+@hcopy:
+    ldy #17                      ; header -> RAM (18 bytes)
+:   lda (lvl_ptr),y
+    sta hdr_buf,y
+    dey
+    bpl :-
+    lda hdr_buf+0                ; surface map
     sta surf_map
-    lda level_hdr+1
+    lda hdr_buf+1
     sta surf_map+1
-    lda level_hdr+2              ; width in columns
+    lda hdr_buf+2              ; width in columns
     sta lvl_cols
-    lda level_hdr+3
+    lda hdr_buf+3
     sta lvl_cols+1
     lda lvl_cols                 ; cam_max = (cols - 20) * 8
     sec
@@ -7825,15 +8182,15 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     sbc #0
     sta fbmax_col+1
     ldx #5                       ; room map pointers (3 x .addr)
-:   lda level_hdr+4,x
+:   lda hdr_buf+4,x
     sta room_tbl,x
     dex
     bpl :-
-    lda level_hdr+10             ; pipes -> RAM (pipe_cnt * 5 bytes)
+    lda hdr_buf+10             ; pipes -> RAM (pipe_cnt * 5 bytes)
     sta lvl_ptr
-    lda level_hdr+11
+    lda hdr_buf+11
     sta lvl_ptr+1
-    lda level_hdr+12
+    lda hdr_buf+12
     sta pipe_cnt
     beq @nopipes
     asl
@@ -7846,11 +8203,11 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     cpy #0
     bne :-
 @nopipes:
-    lda level_hdr+13             ; ?-blocks -> RAM (count * 4 bytes)
+    lda hdr_buf+13             ; ?-blocks -> RAM (count * 4 bytes)
     sta lvl_ptr
-    lda level_hdr+14
+    lda hdr_buf+14
     sta lvl_ptr+1
-    lda level_hdr+15
+    lda hdr_buf+15
     asl
     asl
     sta blk_lim                  ; find_block loop limit
@@ -7862,18 +8219,169 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     cpy #0
     bne :-
 @noblocks:
-    lda level_hdr+16             ; spawn list -> RAM (256 bytes; the $FFFF sentinel
+    lda hdr_buf+16             ; spawn list -> RAM (256 bytes; the $FFFF sentinel
     sta lvl_ptr                  ; inside the data ends the live part)
-    lda level_hdr+17
+    lda hdr_buf+17
     sta lvl_ptr+1
     ldy #0
 :   lda (lvl_ptr),y
     sta spawn_tab,y
     iny
     bne :-
+    inc lvl_ptr+1
+:   lda (lvl_ptr),y              ; second page (spawn_tab is 384 bytes)
+    sta spawn_tab+256,y
+    iny
+    cpy #128
+    bne :-
     rts
 .endproc
 
+
+.segment "LEVELS"                ; 1-2 entity draw bodies (FIXED is full; the banked
+                                 ; common prefix is always mapped)
+.proc draw_bunbun
+    ldx oi
+    lda o_vx,x                   ; face the flight direction (tiles face left natively)
+    bmi :+
+    lda #1
+    bra :++
+:   lda #0
+:   sta tmpH3
+    lda frame_count              ; wing flap every 8 frames (params $30/$31)
+    and #8
+    beq :+
+    lda #2
+:   sta tmpL3
+    ldx oi                       ; TL
+    lda o_y,x
+    sta dy
+    lda spr_col
+    sta dcol
+    lda tmpH3
+    sta do_flip
+    lda #BUN_TL
+    clc
+    adc tmpL3
+    tax
+    jsr draw_quad
+    ldx oi                       ; TR
+    lda o_y,x
+    sta dy
+    lda spr_col
+    ina
+    ina
+    sta dcol
+    lda tmpH3
+    sta do_flip
+    lda #BUN_TL+1
+    clc
+    adc tmpL3
+    tax
+    jsr draw_quad
+    ldx oi                       ; BL
+    lda o_y,x
+    clc
+    adc #8
+    sta dy
+    lda spr_col
+    sta dcol
+    lda tmpH3
+    sta do_flip
+    lda #BUN_BL
+    clc
+    adc tmpL3
+    tax
+    jsr draw_quad
+    ldx oi                       ; BR
+    lda o_y,x
+    clc
+    adc #8
+    sta dy
+    lda spr_col
+    ina
+    ina
+    sta dcol
+    lda tmpH3
+    sta do_flip
+    lda #BUN_BL+1
+    clc
+    adc tmpL3
+    tax
+    jsr draw_quad
+    stz do_flip
+    rts
+.endproc
+.segment "CODE"
+.proc draw_arrow
+    lda spr_col                  ; 8x16: point over shaft, no flip
+    sta dcol
+    ldx oi
+    lda o_y,x
+    sta dy
+    ldx #ARROW_T
+    jsr draw_quad
+    lda spr_col
+    sta dcol
+    ldx oi
+    lda o_y,x
+    clc
+    adc #8
+    sta dy
+    ldx #ARROW_B
+    jsr draw_quad
+    rts
+.endproc
+.proc draw_stone
+    lda spr_col                  ; one 8x8 tile at the platform line
+    sta dcol
+    ldx oi
+    lda o_y,x
+    clc
+    adc #8
+    sta dy
+    ldx #STONE_T
+    jsr draw_quad
+    rts
+.endproc
+.proc draw_cbunbun
+    ldx oi                       ; --- bunbun 16x16: bottom row flipped on top ---
+    lda o_y,x
+    sta dy
+    ldx #BUN_BL
+    jsr draw_tile_yflip
+    lda spr_col
+    ina
+    ina
+    sta dcol
+    ldx oi
+    lda o_y,x
+    sta dy
+    ldx #BUN_BL+1
+    jsr draw_tile_yflip
+    lda spr_col
+    sta dcol
+    ldx oi
+    lda o_y,x
+    clc
+    adc #8
+    sta dy
+    ldx #BUN_TL
+    jsr draw_tile_yflip
+    lda spr_col
+    ina
+    ina
+    sta dcol
+    ldx oi
+    lda o_y,x
+    clc
+    adc #8
+    sta dy
+    ldx #BUN_TL+1
+    jmp draw_tile_yflip
+.endproc
+
+.segment "LEVELS"
 ; animate_player: pick the pose index — jump in the air, the 3-frame GB walk cycle
 ; while moving/gliding, skid during the brake, else standing.
 .proc animate_player

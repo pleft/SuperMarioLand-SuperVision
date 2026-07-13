@@ -28,11 +28,13 @@ def main():
     img_path, map_path = sys.argv[1], sys.argv[2]
     jobs = [tuple(int(x) for x in a.split(":")) for a in sys.argv[3:]]
     img = bytearray(open(img_path, "rb").read())
-    m = re.search(r"level_hdr\s+([0-9A-Fa-f]{6})", open(map_path).read())
+    # banks 1+ place their level region where bank 0 keeps the TITLE0 segment (the
+    # title runs only with bank 0 mapped, so its range is free in every other bank)
+    m = re.search(r"TITLE0\s+([0-9A-Fa-f]{6})", open(map_path).read())
     if not m:
-        sys.exit("pack_banks: level_hdr not found in the map file")
+        sys.exit("pack_banks: TITLE0 segment not found in the map file")
     hdr_addr = int(m.group(1), 16)
-    hdr_off = hdr_addr - BASE               # offset of the header within a bank
+    hdr_off = hdr_addr - BASE               # offset of the level region within banks 1+
     prefix = img[0:hdr_off]                 # bank 0's common prefix, byte-identical everywhere
 
     for level, bank in jobs:
