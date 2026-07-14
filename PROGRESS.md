@@ -13,8 +13,9 @@ Newest entries at the top. Every entry should be traceable to ROM bytes/code.
 - [x] Port to 65C02: WORLD 1-1 FEATURE-COMPLETE (enemies, goal+bonus game, death/
       game-over/time-up, title, audio: SFX + 7-track music engine, GB-exact movement
       physics incl. skid/glide/momentum) — user-verified on hardware
-- [x] Multi-level foundation: 64K banked cart + level headers; WORLD 1-2 SHIPPED
-      (Bunbun/arrow/falling stones, table-driven platforms)  ← current: hardware test
+- [x] Multi-level foundation: 64K banked cart + level headers; WORLD 1-2 COMPLETE
+      (Bunbun/arrow/falling stones, hidden blocks, block-bounce kill, table-driven
+      platforms, 10 object slots, render budget) — user-verified on hardware
 - [ ] 1-3 (types $02/$08/$0C/$3F, water tile anim, track $03), then W2+; top-score
       on title, hard-mode toggle, over-HUD row-split
 
@@ -22,7 +23,8 @@ Newest entries at the top. Every entry should be traceable to ROM bytes/code.
 rendering/perf rounds, blocks/powerups, enemies, goal+bonus game, death/title,
 audio phase. See docs/22 + docs/23 and the memory index.)
 
-## 2026-07-14 — round 3: 10 slots, bank swap, render budget (c68e5a1)
+## 2026-07-14 — round 3 USER-CONFIRMED on hardware: "flicker is gone, the ending
+## area works fine" — WORLD 1-2 COMPLETE. (c68e5a1)
 - Object pool 8 -> 10 (GB $D100-$D190): the 1-2 goal area really runs 9 objects
   (2 bees + 4 arrows + platform + 2 stones, GB-capture-verified) — 8 slots were
   silently dropping arrows + starving the 2nd stone.
