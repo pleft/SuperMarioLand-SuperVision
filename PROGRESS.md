@@ -22,6 +22,16 @@ Newest entries at the top. Every entry should be traceable to ROM bytes/code.
 rendering/perf rounds, blocks/powerups, enemies, goal+bonus game, death/title,
 audio phase. See docs/22 + docs/23 and the memory index.)
 
+## 2026-07-14 — round 3: 10 slots, bank swap, render budget (c68e5a1)
+- Object pool 8 -> 10 (GB $D100-$D190): the 1-2 goal area really runs 9 objects
+  (2 bees + 4 arrows + platform + 2 stones, GB-capture-verified) — 8 slots were
+  silently dropping arrows + starving the 2nd stone.
+- Bank swap: bank 0 = title + 1-2 (smallest); 1-1 -> bank 1 (packer); ~280B freed
+  in the binding bank. 1-1-view harnesses read file[16K:32K].
+- Render budget: rotated pass-1 origin + max 3 pure movers redrawn per frame
+  (over-budget movers keep last frame's image; propagation/shift frames exempt).
+  Natural end-area: worst 111%, p95 71%, 3/500 frames over.
+
 ## 2026-07-14 — feedback round 2: spawn retry, inert hidden cells, flicker perf (41b8be4)
 - Full slots no longer eat spawn entries (the vanishing H platform / second goal stone).
 - Unlisted $5F hidden cells are INERT (GB $187b: content 0 -> ret) — col 215's "hidden
