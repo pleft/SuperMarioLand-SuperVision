@@ -157,6 +157,8 @@ s2:          .res 1
 m0:          .res 1          ; sub-pixel blit: shifted masks (3)
 m1:          .res 1
 m2:          .res 1
+p_shlo:      .res 2          ; sub-pixel blit: shift table pages for spr_subx (page-
+p_shhi:      .res 2          ; aligned BSS, boot-built; masks = M(shifted) per row)
 ; --- scrolling / camera state ---
 cam_x:       .res 2          ; world scroll in PIXELS (level pixels scrolled off the left)
 fb_col0:     .res 2          ; world column resident at VRAM byte-col 0 (left of framebuffer)
@@ -189,6 +191,11 @@ mus_rate:    .res 1          ; Bresenham add: 3=64Hz, 18=78.8Hz (time 100), 32=9
 mus_lt:      .res 2          ; current track's note-length table (16 bytes)
 
 .segment "BSS"
+; --- sub-pixel blit shift tables (built at boot; page-aligned: BSS starts $0200) ---
+; shtab_lo/hi[subx][b] = the 16-bit b << (subx*2), split. (Transparency masks are
+; computed per row from the SHIFTED bytes — M() commutes with 2-bit-aligned shifts.)
+shtab_lo:    .res 1024      ; 4 pages: subx 0..3
+shtab_hi:    .res 1024
 ; --- per-level bindings, set by load_level from the current bank's level_hdr ---
 cur_level:   .res 1          ; level id 0.. (GB $ffe4); selects the ROM bank
 hdr_buf:     .res 18         ; RAM copy of the current bank's level header
@@ -274,6 +281,9 @@ o_hp:        .res 8          ; extra hits to survive (fly: 1 -- two balls kill, 
 
     jsr build_revpix             ; pixel-reverse lookup for horizontal sprite flip
     jsr build_row48              ; dy*48 VRAM-stride tables
+    jsr build_shtab              ; sub-pixel blit shift tables
+    stz p_shlo                   ; the table pointers' lo bytes stay 0 forever
+    stz p_shhi
     jsr clear_vram
     jsr title_screen             ; the SML title (extracted at build time); waits for Start
     jsr clear_vram
@@ -994,7 +1004,9 @@ main_loop:
 :   ldx arc_idx
     lda jumparc,x
     cmp #$7F                      ; apex marker -> start descending
-    beq @apex
+    bne :+
+    jmp @apex
+:
     sta tmpL
     lda spr_y
     sec
@@ -1009,9 +1021,12 @@ main_loop:
     sbc #2                        ; head row = (new spr_y >> 3) - 2 (tile at his head)
     sta mrow
     jsr read_map_tile             ; effective tile above his head (centre column)
-    cmp #$5F                      ; $5F = INVISIBLE block: bonkable from below only
-    beq @qblock                   ; (blank tile, walk-through until hit; then used)
-    cmp #$60
+    cmp #$5F                      ; $5F = INVISIBLE block: bonkable from below only —
+    bne :+                        ; and ONLY when the contents table lists it (GB $187b:
+    jsr find_block                ; content 0 -> plain ret, the cell is fully inert;
+    bcs @qblock                   ; 1-2 col 215 is such a leftover marker)
+    bra @noceil
+:   cmp #$60
     bcc @noceil                   ; < $60 -> not solid -> keep rising
     cmp #$F4
     beq @noceil                   ; coin -> walk-through (grabbed by coin_collect), not a ceiling
@@ -5293,9 +5308,10 @@ riding_this:                     ; Z=1 if Mario rides slot oi
 @chib:
     jsr spawn_chib
 @skip:
-    inc spawn_idx
-    bra spawn_check              ; several entries can share a fire column
-@done:
+    bcs @done                    ; pool full: DON'T consume — retry this entry next
+    inc spawn_idx                ; frame (spawn x is fire-based so it still lands
+    bra spawn_check              ; right; the GB dodges this with 10 slots). Several
+@done:                           ; entries can share a fire column.
     rts
 .endproc
 
@@ -5319,6 +5335,7 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     sta o_vx,x
     stz o_st,x
     stz o_tmr,x
+    clc                          ; C=0: spawned
 @full:
     rts
 .endproc
@@ -5343,6 +5360,7 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     sta o_vx,x
     stz o_st,x
     stz o_tmr,x
+    clc                          ; C=0: spawned
 @full:
     rts
 .endproc
@@ -5368,6 +5386,7 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     stz o_st,x                   ; state: 0 = sitting
     lda #FLY_SIT
     sta o_tmr,x
+    clc                          ; C=0: spawned
 @full:
     rts
 .endproc
@@ -5418,6 +5437,7 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     sta o_y,x
     stz o_st,x                   ; offset 0 = at the spawn point,
     stz o_vy,x                   ; heading away (down / left)
+    clc                          ; C=0: spawned
 @full:
     rts
 .endproc
@@ -5436,10 +5456,39 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     sta o_vx,x                   ; at the right edge) and never turns
     stz o_tmr,x                  ; cycle tick
     stz o_st,x
+    clc                          ; C=0: spawned
 @full:
     rts
 .endproc
 
+
+; anim_token: A = the animation token for slot X — the dirty test redraws on a
+; token change. Bees flap on a SLOT-STAGGERED 8-frame phase (so two bees never
+; force a same-frame redraw wave); arrows/stones have no animation at all.
+.proc anim_token
+    lda o_type,x
+    cmp #OBJ_ARROW
+    beq @none
+    cmp #OBJ_STONE
+    beq @none
+    cmp #OBJ_BUNBUN
+    bne @raw
+    txa
+    and #1
+    asl
+    asl
+    clc
+    adc frame_count
+    and #8
+    rts
+@raw:
+    lda frame_count
+    and #8
+    rts
+@none:
+    lda #0
+    rts
+.endproc
 
 ; bonk_kill_above: a hopping block bonk (?-block/hidden/brick/multi-coin) kills any
 ; enemy standing ON the bonked cell (feet_col/mrow): dead-flip corpse + the class
@@ -5561,17 +5610,26 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     cmp #BUN_FLY_T               ; the bee never turns to chase — it drops its arrows
                                  ; and leaves the screen)
     bcs @hover
-    lda o_vx,x                   ; flying: 1px EVERY frame
+    txa                          ; move 2px every OTHER frame (slot-staggered): same
+    eor frame_count              ; 1px/f trajectory, but the screen position changes
+    lsr                          ; at 30Hz -> the dirty-skip halves the sprite
+    bcs @tick                    ; blit/erase load (the 2-bee flicker fix)
+    lda o_vx,x
     bmi @ml
-    inc o_xl,x
-    bne @tick
+    lda o_xl,x
+    clc
+    adc #2
+    sta o_xl,x
+    bcc @tick
     inc o_xh,x
     bra @tick
 @ml:
     lda o_xl,x
-    bne :+
+    sec
+    sbc #2
+    sta o_xl,x
+    bcs @tick
     dec o_xh,x
-:   dec o_xl,x
     bra @tick
 @hover:
     cmp #BUN_DROP_T
@@ -5603,21 +5661,29 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     lda o_y,y
     ina                          ; capture: the arrow appears 1px below the flight line
     sta o_y,x
-    stz o_tmr,x                  ; (o_st/o_vx unused by the arrow)
+    tya                          ; the arrow inherits the BEE's motion parity (o_st):
+    and #1                       ; the pair moves on the same frames, so on off-frames
+    sta o_st,x                   ; neither seeds the overlap-dirty chain
 @full:
     rts
 .endproc
 
 .proc upd_arrow
     ldx oi
+    lda o_st,x                   ; fall 2px every OTHER frame on the BEE's parity
+    eor frame_count              ; (30Hz motion, 1px/f average — see the bee note)
+    lsr
+    bcs @coll
     lda o_y,x
+    ina
     ina
     sta o_y,x
     cmp #168
-    bcc :+
+    bcc @coll
     stz o_type,x
     rts
-:   jsr mario_dx                 ; |mario - arrow| (shared geometry)
+@coll:
+    jsr mario_dx                 ; |mario - arrow| (shared geometry)
 @pdx:
     lda tmpH3
     bne @done
@@ -5655,8 +5721,8 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     jsr spawn_tabx
     lda spawn_tab+2,y
     sta o_y,x
-    stz o_st,x                   ; 0 = untriggered (o_vx unused by the stone)
-    stz o_tmr,x
+    stz o_st,x                   ; 0 = untriggered (o_tmr set at trigger; o_vx unused)
+    clc                          ; C=0: spawned
 @full:
     rts
 .endproc
@@ -7394,8 +7460,7 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     lda o_ndy,x
     cmp o_pvy,x
     bne @p1dirty
-    lda frame_count
-    and #8
+    jsr anim_token               ; per-type token (must mirror the pass-4 write)
     cmp o_pfr,x
     beq @p1next
 @p1dirty:
@@ -7573,9 +7638,8 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     bcs :+
     lda #4
 :   sta o_pw,x
-    lda frame_count
-    and #8
-    sta o_pfr,x
+    jsr anim_token               ; per-type anim token (bee flap slot-staggered;
+    sta o_pfr,x                  ; arrows/stones never anim-dirty)
     lda #1
     sta o_pdr,x
 @p4n:
@@ -8327,7 +8391,12 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     bra :++
 :   lda #0
 :   sta tmpH3
-    lda frame_count              ; wing flap every 8 frames (params $30/$31)
+    lda oi                       ; wing flap every 8 frames (params $30/$31), on the
+    and #1                       ; slot-staggered phase (must match anim_token)
+    asl
+    asl
+    clc
+    adc frame_count
     and #8
     beq :+
     lda #2
@@ -8391,26 +8460,6 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     stz do_flip
     rts
 .endproc
-.segment "CODE"
-.proc draw_arrow
-    lda spr_col                  ; 8x16: point over shaft, no flip
-    sta dcol
-    ldx oi
-    lda o_y,x
-    sta dy
-    ldx #ARROW_T
-    jsr draw_quad
-    lda spr_col
-    sta dcol
-    ldx oi
-    lda o_y,x
-    clc
-    adc #8
-    sta dy
-    ldx #ARROW_B
-    jsr draw_quad
-    rts
-.endproc
 .proc draw_stone
     lda spr_col                  ; one 8x8 tile at the platform line
     sta dcol
@@ -8420,6 +8469,24 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     adc #8
     sta dy
     ldx #STONE_T
+    jsr draw_quad
+    rts
+.endproc
+.segment "CODE"
+.proc draw_arrow
+    lda spr_col                  ; 8x16: point over shaft, no flip
+    sta dcol
+    ldx oi
+    lda o_y,x
+    sta dy
+    ldx #ARROW_T
+    jsr draw_quad
+    ldx oi                       ; same column (dcol survives draw_quad)
+    lda o_y,x
+    clc
+    adc #8
+    sta dy
+    ldx #ARROW_B
     jsr draw_quad
     rts
 .endproc
@@ -8553,8 +8620,51 @@ row48_lo: .res 160           ; 320 bytes of ROM in the banked prefix = 320 bytes
 row48_hi: .res 160           ; paid in EVERY bank)
 .segment "CODE"
 
-; build_row48: fill the dy*48 tables (boot).
+; build_shtab: the sub-pixel shift/mask tables — for every byte b and subx k:
+; the 16-bit b<<(2k) split lo/hi, and the same of b's transparency mask (boot).
 .segment "LEVELS"
+.proc build_shtab
+    ldx #0
+@b:
+    stz tmpH
+    txa
+    sta tmpL
+    lda tmpL
+    sta shtab_lo,x
+    lda tmpH
+    sta shtab_hi,x
+    asl tmpL
+    rol tmpH
+    asl tmpL
+    rol tmpH
+    lda tmpL
+    sta shtab_lo+256,x
+    lda tmpH
+    sta shtab_hi+256,x
+    asl tmpL
+    rol tmpH
+    asl tmpL
+    rol tmpH
+    lda tmpL
+    sta shtab_lo+512,x
+    lda tmpH
+    sta shtab_hi+512,x
+    asl tmpL
+    rol tmpH
+    asl tmpL
+    rol tmpH
+    lda tmpL
+    sta shtab_lo+768,x
+    lda tmpH
+    sta shtab_hi+768,x
+    inx
+    beq @done
+    jmp @b
+@done:
+    rts
+.endproc
+
+; build_row48: fill the dy*48 tables (boot).
 .proc build_row48
     stz tmpL
     stz tmpH
@@ -8756,7 +8866,23 @@ row48_hi: .res 160           ; paid in EVERY bank)
     sta cur_dst
     lda dst_ptr+1
     sta cur_dst+1
-    lda #8
+    lda #>shtab_lo               ; table pages for this subx (hi = lo + 4 pages;
+                                 ; the lo bytes are zeroed once at boot)
+    clc
+    adc spr_subx
+    sta p_shlo+1
+    adc #4
+    sta p_shhi+1
+    lda blit_opaque              ; opaque: constant masks = the shifted $FF pair,
+    beq :+                       ; hoisted out of the row loop
+    ldy #$FF
+    lda (p_shlo),y
+    sta m0
+    lda (p_shhi),y
+    sta m2
+    ora m0
+    sta m1
+:   lda #8
     sta blit_row
 @row:
     lda do_flip
@@ -8769,46 +8895,37 @@ row48_hi: .res 160           ; paid in EVERY bank)
     ldy #0                       ; new-right = revpix[src left]
     lda (cur_src),y
     tax
-    lda revpix,x
-    sta s1
-    bra @lr
+    ldy revpix,x
+    bra @vals
 @noflip:
     ldy #0
     lda (cur_src),y
     sta s0
     ldy #1
     lda (cur_src),y
+    tay
+@vals:
+    lda (p_shhi),y               ; Y = right src byte: v1|v2 parts
+    sta s2
+    lda (p_shlo),y
     sta s1
-@lr:
-    stz s2
+    ldy s0
+    lda (p_shhi),y
+    ora s1
+    sta s1
+    lda (p_shlo),y
+    sta s0
     lda blit_opaque
-    bne @opaquemask
-    lda s0                       ; transparency masks (only nonzero pixels are written)
-    jsr calc_mask_A
+    bne @merge                   ; opaque: masks preset
+    lda s0                       ; transparency: M(shifted) — M commutes with the
+    jsr calc_mask_A              ; 2-bit-aligned shift
     sta m0
     lda s1
     jsr calc_mask_A
     sta m1
-    bra @m2
-@opaquemask:
-    lda #$FF                     ; opaque: cover all 8 px (replace, masking preserves neighbours)
-    sta m0
-    sta m1
-@m2:
-    stz m2
-    lda spr_subx                 ; shift count = subx*2
-    asl
-    tax
-    beq @merge
-@sh:
-    asl s0
-    rol s1
-    rol s2
-    asl m0
-    rol m1
-    rol m2
-    dex
-    bne @sh
+    lda s2
+    jsr calc_mask_A
+    sta m2
 @merge:
     ldy #0                       ; dst = (dst & ~mask) | shifted
     lda m0
