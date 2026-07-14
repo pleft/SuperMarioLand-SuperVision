@@ -209,13 +209,37 @@ plus 5× $36 stones (done) — AND the $d014 animated water tiles + music track 
   Mario passes through the cell) is an INVISIBLE block: bonkable from below only. The
   bonk materializes it — the hop shows the used block `$7F` — and pays out through the
   same contents table (bank3 $6536; the extractor already keyed rows off $80/$81/**$5F**).
-  Once modded, the cell draws AND collides as `$7F`. Instances: 1-2 col 95 row 11 = a
-  1-UP heart ($2A); 1-3 has cols 2 & 150 row 9 with **value $07 (unidentified — RE at
-  the 1-3 round)** and col 193 row 8 = a hidden MULTI-COIN ($C0). CAVEAT for 1-3: the
-  live multi-coin's draws-as-brick rule (`@mcchk`) only fires for raw $80/$81 — the
-  hidden multi-coin needs the $5F case added there.
+  Once modded, the cell draws AND collides as `$7F`. **An UNLISTED $5F cell is fully
+  INERT** — GB `Jump_000_187b` reads the content plane and plain-returns on 0: no bump,
+  no coin, the jump passes through (unlike an unlisted $80/$81 ?-block, which pays a
+  coin via $19E1). The port gates $5F bonks on find_block. Instances: 1-2 col 95
+  row 11 = the 1-UP heart ($2A); col 215 row 11 = an inert leftover marker. 1-3 has
+  cols 2 & 150 row 9 with **value $07 (unidentified — RE at the 1-3 round)** and
+  col 193 row 8 = a hidden MULTI-COIN ($C0). CAVEAT for 1-3: the live multi-coin's
+  draws-as-brick rule (`@mcchk`) only fires for raw $80/$81 — the hidden multi-coin
+  needs the $5F case added there.
 - **Block-bounce kill** (`bonk_kill_above`): any hopping bonk (?-block, hidden block,
   brick hop or smash, multi-coin re-bonk) kills an enemy standing on the bonked cell:
   the walkers' own ground rule (`o_y>>3 == mrow`) + |enemy centre − cell centre| < 10
   → dead-flip corpse keeping its walk direction + the class kill score (100 walkers /
   400 fly / 800 bunbun). Plain used/solid bonks (no hop) don't kill.
+
+## Round 2: spawn retry, goal stones live-verified, the flicker fix [2026-07-14, 41b8be4]
+
+- **Spawn entries retry when the pool is full** (they were being consumed and lost —
+  the user's H platform and second goal stone vanished until a respawn rewound the
+  list). Deviation: the GB consumes-on-full but has 10 slots vs the port's 8.
+- **Goal stones live-captured on the GB**: two adjacent static 8px stones; riding one
+  morphs $36→$37 on overlap, ~8-frame beat, 1px/f fall carrying Mario (his y tracks
+  the stone), DESPAWNS at y≈190 — one-shot, no wrap/stream. Port behavior confirmed
+  exact once both spawn.
+- **Flicker with 2+ bees** (measured 176% of the 65574-cycle budget): bees/arrows now
+  move 2px every other frame (same trajectories — fly still 40px/40-tick phase, drop
+  at tick 57; arrows on their bee's parity so a bee+arrow pair never seeds the
+  overlap-dirty chain on its off-frames); per-type anim tokens (`anim_token`: bee flap
+  slot-staggered, arrows/stones token-constant); `sprite_blit_subpx` rewritten on
+  boot-built shift tables (`shtab_lo/hi[subx][b]` = b<<(2·subx), 2K RAM) with per-row
+  masks M(shifted) — M commutes with 2-bit-aligned shifts. Worst synthetic 176%→130%,
+  realistic runs under budget. Boot frame pixel-identical before/after.
+- HARNESS LESSON (twice now): rebuild build/dbg.txt after ANY code move — a stale
+  main_loop symbol makes the py65 frame loop "hang" (it waits on a dead address).

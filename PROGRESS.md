@@ -22,6 +22,15 @@ Newest entries at the top. Every entry should be traceable to ROM bytes/code.
 rendering/perf rounds, blocks/powerups, enemies, goal+bonus game, death/title,
 audio phase. See docs/22 + docs/23 and the memory index.)
 
+## 2026-07-14 — feedback round 2: spawn retry, inert hidden cells, flicker perf (41b8be4)
+- Full slots no longer eat spawn entries (the vanishing H platform / second goal stone).
+- Unlisted $5F hidden cells are INERT (GB $187b: content 0 -> ret) — col 215's "hidden
+  1-up" was a leftover marker; the real one (col 95, heart) works.
+- Goal stones GB-live-verified: two adjacent one-shot ride-and-fall stones — port exact.
+- Flicker (2+ bees): 30Hz staggered motion for bees/arrows + per-type anim tokens +
+  a table-driven sprite blitter (2K boot-built shift tables; masks = M(shifted)).
+  Worst synthetic frame 176% -> 130% of budget; realistic runs under budget.
+
 ## 2026-07-13 (evening) — 1-2 hardware feedback round (a6c0e53)
 User hardware test caught four fidelity gaps, all fixed + py65-verified:
 - Bunbun NEVER turns to chase (direction fixed at spawn; exits the screen) — the
