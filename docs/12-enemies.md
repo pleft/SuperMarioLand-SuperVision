@@ -243,3 +243,13 @@ plus 5× $36 stones (done) — AND the $d014 animated water tiles + music track 
   realistic runs under budget. Boot frame pixel-identical before/after.
 - HARNESS LESSON (twice now): rebuild build/dbg.txt after ANY code move — a stale
   main_loop symbol makes the py65 frame loop "hang" (it waits on a dead address).
+
+## Round 3: the end-area cast needs TEN slots [2026-07-14, c68e5a1 — 1-2 user-confirmed]
+
+GB capture of 1-2's goal area (parked at cab $84): BOTH bees drop arrows continuously —
+peak cast `42,42,45,45,45,45` = 6 objects, 6 arrow spawns in 900f — plus the vertical
+platform and 2 stones once cab $85/$88/$89 fire: NINE concurrent objects. The port's
+8-slot pool silently dropped the arrows (bunbun_drop found no slot) and starved the
+second stone. Pool is now `OBJ_MAX = 10` like the GB's $D100-$D190. With that + the
+render budget (docs/22), the whole area is hardware-confirmed ("flicker is gone, the
+ending area works fine") — **WORLD 1-2 COMPLETE**.

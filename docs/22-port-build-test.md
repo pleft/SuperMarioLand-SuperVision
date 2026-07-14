@@ -144,3 +144,43 @@ Method: drive/measure the ORIGINAL headless, diff against the port (py65). Findi
 - OPEN for round 2: legit top-door run (bonus walk/climb/award timings, and whether the
   original's bonus TIMES OUT if A is never pressed); a scripted full-level playthrough of the
   PORT as a regression harness.
+
+## Perf round 3 — the 1-2 flicker (2026-07-14, 41b8be4 + c68e5a1)
+
+1-2's bees/arrows move 1px EVERY frame (walkers: 1px/3f), and a 2-bee scene measured
+**176%** of the 65574-cycle frame budget (chronic deadline misses = the visible
+flicker). Fixes, in order of impact:
+
+1. **30Hz staggered motion**: bees/arrows move 2px every OTHER frame (identical
+   trajectories and cycle timings; the GB's own 1px/f cadence is preserved on
+   average). Each arrow moves on ITS BEE's parity (`o_st`), so a bee+arrow pair
+   never seeds the overlap-dirty chain on its off frames.
+2. **Per-type anim tokens** (`anim_token`, used by BOTH the pass-1 dirty check and
+   the pass-4 write — keep in sync): the bee's 8-frame wing flap is slot-staggered
+   so two bees never force a same-frame redraw wave; arrows/stones have no
+   animation and never anim-dirty.
+3. **Table-driven `sprite_blit_subpx`**: the per-row `asl/rol` shift chain (up to 6
+   double-shifts/row at subx 3) became two page-aligned table lookups
+   (`shtab_lo/hi[subx][b]` = b<<(2·subx), 2K of BSS built at boot). Transparency
+   masks are computed per row from the SHIFTED bytes — M() operates per 2-bit pixel,
+   so it commutes with 2-bit-aligned shifts. Opaque masks hoist out of the row loop.
+   Boot frame verified pixel-identical before/after.
+4. **Render budget**: render_all pass 1 walks slots from a rotating origin
+   (`rot1`+1 per frame; `p1_init`/`p1_next`) and accepts at most 3 PURE MOVERS per
+   frame (`dirty_bud`); an over-budget mover keeps last frame's image (≤ a few px
+   of lag under pile-ups instead of a missed deadline). Overlap propagation still
+   force-redraws (erase consistency), and DMA-shift frames bypass the budget.
+5. **dy*48 tables + shift tables moved to boot-built RAM** (row48: −320B of ROM per
+   bank; enabled by the same trick).
+
+Result on the NATURAL heaviest scene (1-2 goal area, 9-object cast): worst 111%,
+p95 71%, median 30%, 3/500 frames over — isolated single-frame overruns that the
+race-the-beam design absorbs (the beam sees the previous intact image).
+Hardware-confirmed: no visible flicker.
+
+Profiling harness: scratchpad perf scripts on svharness — inject `mem[0]=1`
+(frame_flag) + count `mpu.processorCycles` between `main_loop` visits; bucket by
+nearest dbg.txt label. Pitfalls: park Mario SAFELY (pit deaths freeze the loop in
+death_anim and every frame times out); plant test objects OUT of contact range
+(a bee touch kills small Mario and freezes everything); rebuild dbg.txt after any
+code move.
