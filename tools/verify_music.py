@@ -156,7 +156,9 @@ def run_port(frames):
     from py65.devices.mpu65c02 import MPU
     mem=bytearray(0x10000)
     rom=open(os.path.join(ROOT,"build/super-mario-land.sv"),"rb").read()
-    mem[0x8000:0x10000]=rom[:0x4000]+rom[-0x4000:]   # 64K image: [bank0][fixed] view (1-1)
+    mem[0x8000:0x10000]=rom[0x4000:0x8000]+rom[-0x4000:]  # [bank1][fixed] view: bank 1
+    # holds 1-1 (bank 0 = title + 1-2); the title draws garbage in this view but Start
+    # still works and load_level(0) reads 1-1's header at the TITLE0 address
     writes=[]; frame=[0]
     class W(bytearray):
         def __setitem__(s,i,v):

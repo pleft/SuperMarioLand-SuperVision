@@ -67,6 +67,7 @@ fall_v:      .res 1          ; fall mode: 0 = jump-arc descent, nonzero = free-f
 respawn_req: .res 1          ; set when Mario falls into a pit -> restart the level
 map_base:    .res 2          ; current tilemap base (the surface map, or a pipe room)
 lvl_ptr:     .res 2          ; load_level scratch: header table source pointer
+dirty_bud:   .res 1          ; movers accepted for redraw this frame (flicker cap)
 room_mode:   .res 1          ; 0 = surface (scrolls), 1 = inside a single-screen pipe room
 save_cam_x:  .res 2          ; surface camera saved on pipe entry (restored on exit)
 save_spr_x:  .res 1
@@ -199,6 +200,8 @@ shtab_hi:    .res 1024
 ; --- per-level bindings, set by load_level from the current bank's level_hdr ---
 cur_level:   .res 1          ; level id 0.. (GB $ffe4); selects the ROM bank
 hdr_buf:     .res 18         ; RAM copy of the current bank's level header
+p1c:         .res 1          ; render pass-1 loop counter (rotated scan)
+rot1:        .res 1          ; pass-1 scan origin, +1 per frame (fairness)
 surf_map:    .res 2          ; surface tilemap base (map_base resets to this)
 lvl_cols:    .res 2          ; level width in columns
 cam_max:     .res 2          ; max scroll = (lvl_cols - 20) * 8 px
@@ -211,25 +214,26 @@ spawn_tab:   .res 384        ; RAM copy: 5 bytes/spawn + $FFFF sentinel
 revpix:      .res 256        ; reverse the 4 2bpp pixels in a byte (built at boot)
 flipbuf:     .res 16         ; row-reversed tile scratch for the Y-flipped corpse draw
 tile_mod:    .res 640        ; "modified" bitmap, 1 bit per surface (col,row): used ?-block / broken brick
-; --- object slots (items / coin-pop / brick debris). SoA, 8 entries (a brick break spawns
-;     4 debris pieces on top of whatever item is live). ---
-o_type:      .res 8          ; 0 free, else OBJ_*
-o_xl:        .res 8          ; world pixel X (16-bit)
-o_xh:        .res 8
-o_y:         .res 8          ; world pixel Y (same space as spr_y: feet line)
-o_vx:        .res 8          ; signed velocity X
-o_vy:        .res 8          ; signed velocity Y (gravity / phase)
-o_tmr:       .res 8          ; state timer / lifetime
-o_pvx:       .res 8          ; last drawn VRAM pixel X (for erase)
-o_pvy:       .res 8          ; last drawn VRAM pixel Y
-o_pdr:       .res 8          ; was drawn last frame?
-o_st:        .res 8          ; sub-state (star: vy ramp index; debris: jump-arc index)
-o_pw:        .res 8          ; last drawn width in tile cols (2 = one quad, 3 = popup pair)
-o_pfr:       .res 8          ; anim token at the last draw (flip/twinkle cadence dirty test)
-o_nvx:       .res 8          ; this frame's computed screen x (render_all pass 1)
-o_ndy:       .res 8          ; this frame's computed dy
-o_nfl:       .res 8          ; bit0 = dirty, bit1 = visible (render_all flags)
-o_hp:        .res 8          ; extra hits to survive (fly: 1 -- two balls kill, user/GB)
+; --- object slots (items / coin-pop / brick debris / enemies). SoA, 10 entries like the
+;     GB ($D100-$D190): 1-2's goal area runs 2 bees + 4 arrows + platform + 2 stones. ---
+OBJ_MAX = 10
+o_type:      .res 10          ; 0 free, else OBJ_*
+o_xl:        .res 10          ; world pixel X (16-bit)
+o_xh:        .res 10
+o_y:         .res 10          ; world pixel Y (same space as spr_y: feet line)
+o_vx:        .res 10          ; signed velocity X
+o_vy:        .res 10          ; signed velocity Y (gravity / phase)
+o_tmr:       .res 10          ; state timer / lifetime
+o_pvx:       .res 10          ; last drawn VRAM pixel X (for erase)
+o_pvy:       .res 10          ; last drawn VRAM pixel Y
+o_pdr:       .res 10          ; was drawn last frame?
+o_st:        .res 10          ; sub-state (star: vy ramp index; debris: jump-arc index)
+o_pw:        .res 10          ; last drawn width in tile cols (2 = one quad, 3 = popup pair)
+o_pfr:       .res 10          ; anim token at the last draw (flip/twinkle cadence dirty test)
+o_nvx:       .res 10          ; this frame's computed screen x (render_all pass 1)
+o_ndy:       .res 10          ; this frame's computed dy
+o_nfl:       .res 10          ; bit0 = dirty, bit1 = visible (render_all flags)
+o_hp:        .res 10          ; extra hits to survive (fly: 1 -- two balls kill, user/GB)
 
 .segment "ZEROPAGE"
 
@@ -1021,12 +1025,9 @@ main_loop:
     sbc #2                        ; head row = (new spr_y >> 3) - 2 (tile at his head)
     sta mrow
     jsr read_map_tile             ; effective tile above his head (centre column)
-    cmp #$5F                      ; $5F = INVISIBLE block: bonkable from below only —
-    bne :+                        ; and ONLY when the contents table lists it (GB $187b:
-    jsr find_block                ; content 0 -> plain ret, the cell is fully inert;
-    bcs @qblock                   ; 1-2 col 215 is such a leftover marker)
-    bra @noceil
-:   cmp #$60
+    cmp #$5F                      ; $5F = INVISIBLE block (see @hidden below)
+    beq @hidden
+    cmp #$60
     bcc @noceil                   ; < $60 -> not solid -> keep rising
     cmp #$F4
     beq @noceil                   ; coin -> walk-through (grabbed by coin_collect), not a ceiling
@@ -1070,6 +1071,10 @@ main_loop:
     lda #1
     sta fall_v
     jmp @done
+@hidden:
+    jsr find_block                ; hidden blocks bonk ONLY when the contents table
+    bcs @qblock                   ; lists them (GB $187b: content 0 -> plain ret, the
+    bra @noceil                   ; cell is fully inert; 1-2 col 215 is such a marker)
 @noceil:
     lda tmpH                      ; clear -> apply the upward move
     sta spr_y
@@ -4538,7 +4543,7 @@ FLOWER_RISE = 7                  ; emerge: rise 7px out of the block, then sit (
 ; clear_objects: free all slots (level restart / pipe transition).
 .proc clear_objects
     stz ride                     ; no platforms left to ride
-    ldx #7
+    ldx #OBJ_MAX-1
 :   stz o_type,x
     stz o_pdr,x
     dex
@@ -4553,7 +4558,7 @@ FLOWER_RISE = 7                  ; emerge: rise 7px out of the block, then sit (
     lda o_type,x
     beq @ok
     inx
-    cpx #8
+    cpx #OBJ_MAX
     bne @l
     sec
     rts
@@ -4821,7 +4826,7 @@ STAR_ARC_N = 42
 ; the low pair from index 11 (13px), hold at the $7F apex, then fall back down the mirrored
 ; table. Exactly how the original steps $c218/28/38/48 along JumpArcTable each frame.
 .proc spawn_debris4
-    ldx #7                       ; the original keeps debris in 4 FIXED slots ($c218/28/38/48):
+    ldx #OBJ_MAX-1               ; the original keeps debris in 4 FIXED slots ($c218/28/38/48):
 :   lda o_type,x                 ; a second break OVERWRITES the first set -- never 8 shards.
     cmp #OBJ_DEBRIS              ; (their pending erase survives: o_pdr stays set, so the old
     bne :+                       ; images are wiped this frame before the new ones draw)
@@ -5133,7 +5138,7 @@ riding_this:                     ; Z=1 if Mario rides slot oi
 @next:
     inc oi2
     lda oi2
-    cmp #8
+    cmp #OBJ_MAX
     bne @loop
     lda #0
     rts
@@ -5462,6 +5467,41 @@ riding_this:                     ; Z=1 if Mario rides slot oi
 .endproc
 
 
+; p1_init / p1_next: rotated pass-1 slot walk. The scan origin advances once per
+; frame so the redraw budget (dirty_bud) starves no slot: an over-budget mover just
+; keeps last frame's image (<= a few px of lag under extreme load, instead of the
+; whole frame missing its deadline = the visible flicker).
+.proc p1_init
+    lda rot1
+    ina
+    cmp #OBJ_MAX
+    bcc :+
+    lda #0
+:   sta rot1
+    sta oi
+    stz p1c
+    lda #3                       ; movers redrawn per frame, at most (Mario exempt)
+    sta dirty_bud
+    rts
+.endproc
+.proc p1_next                    ; C=1 when all slots visited; else oi = next slot
+    inc p1c
+    lda p1c
+    cmp #OBJ_MAX
+    bcs @done
+    lda oi
+    ina
+    cmp #OBJ_MAX
+    bcc :+
+    lda #0
+:   sta oi
+    clc
+    rts
+@done:
+    sec
+    rts
+.endproc
+
 ; anim_token: A = the animation token for slot X — the dirty test redraws on a
 ; token change. Bees flap on a SLOT-STAGGERED 8-frame phase (so two bees never
 ; force a same-frame redraw wave); arrows/stones have no animation at all.
@@ -5510,7 +5550,7 @@ riding_this:                     ; Z=1 if Mario rides slot oi
 @next:
     inc oi2
     lda oi2
-    cmp #8
+    cmp #OBJ_MAX
     bne @loop
     rts
 @cand:
@@ -6570,7 +6610,7 @@ title_tiles:                     ; the used tiles, SV-packed
 
 ; ball_active: C=1 if a superball is already live (only one at a time, per the original).
 .proc ball_active
-    ldx #7
+    ldx #OBJ_MAX-1
 :   lda o_type,x
     cmp #OBJ_BALL
     beq @yes
@@ -6884,7 +6924,7 @@ title_tiles:                     ; the used tiles, SV-packed
 @next:
     inc oi2
     lda oi2
-    cmp #8
+    cmp #OBJ_MAX
     beq :+
     jmp @loop
 :   rts
@@ -7115,7 +7155,7 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
 @next:
     inc oi
     lda oi
-    cmp #8
+    cmp #OBJ_MAX
     beq :+
     jmp @loop
 :   rts
@@ -7411,8 +7451,8 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
 ; Clean sprites cost nothing (dirty-skip): a 1px/3f walker skips 2 of 3 frames,
 ; platforms every other frame, an idle scene everything.
 .proc render_all
-    ; ---------- pass 1: classify slots ----------
-    stz oi
+    ; ---------- pass 1: classify slots (rotated origin + redraw budget) ----------
+    jsr p1_init
 @p1:
     ldx oi
     stz o_nfl,x
@@ -7456,13 +7496,17 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     beq @p1dirty
     lda o_nvx,x
     cmp o_pvx,x
-    bne @p1dirty
+    bne @p1move
     lda o_ndy,x
     cmp o_pvy,x
-    bne @p1dirty
+    bne @p1move
     jsr anim_token               ; per-type token (must mirror the pass-4 write)
     cmp o_pfr,x
     beq @p1next
+@p1move:
+    dec dirty_bud                ; pure movement/anim: over budget -> keep last
+    bpl @p1dirty                 ; frame's image (overlap propagation may still
+    bra @p1next                  ; force it later — consistency preserved)
 @p1dirty:
     lda o_nfl,x
     ora #1
@@ -7475,10 +7519,8 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     lda #1
     sta o_nfl,x
 @p1next:
-    inc oi
-    lda oi
-    cmp #8
-    beq :+
+    jsr p1_next
+    bcs :+
     jmp @p1
 :
     ; ---------- Mario: classify ----------
@@ -7557,7 +7599,7 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
 @p3n:
     inc oi
     lda oi
-    cmp #8
+    cmp #OBJ_MAX
     bne @p3
     lda m_dirty                  ; Mario's erase
     beq @p4s
@@ -7645,7 +7687,7 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
 @p4n:
     inc oi
     lda oi
-    cmp #8
+    cmp #OBJ_MAX
     beq :+
     jmp @p4
 :   lda m_dirty
@@ -7706,12 +7748,12 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
 @sp_jn:
     inc tmpL3
     lda tmpL3
-    cmp #8
+    cmp #OBJ_MAX
     bne @sp_j
 @sp_in:
     inc oi2
     lda oi2
-    cmp #8
+    cmp #OBJ_MAX
     bne @sp_i
     ; Mario vs slots (both directions)
     stz tmpL3
@@ -7750,7 +7792,7 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
 @sp_mn:
     inc tmpL3
     lda tmpL3
-    cmp #8
+    cmp #OBJ_MAX
     bne @sp_m
     rts
 .endproc
@@ -8271,8 +8313,10 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
 ; the LEVELS common prefix: identical bytes at the identical address in every
 ; bank, so it stays valid across a bank switch.
 .segment "LEVELS"
+lvl_bank_tab: .byte 1, 0, 2     ; level id -> ROM bank (1-2 shares bank 0 with the title)
 .proc load_level
-    lda cur_level                ; map the level's ROM bank at $8000 (level N = bank N).
+    ldx cur_level                ; map the level's ROM bank at $8000 (bank 0 hosts 1-2
+    lda lvl_bank_tab,x           ; beside the title — the smallest W1 level; 1-1 = bank 1).
     asl                          ; Safe mid-proc: load_level sits in the common prefix,
     asl                          ; byte-identical at this address in every bank.
     asl
@@ -8285,6 +8329,7 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     lda #>level_hdr              ; overlays it — the title runs only with bank 0 mapped)
     sta lvl_ptr+1
     lda cur_level
+    cmp #1                       ; bank 0's linked resident is LEVEL 1 (1-2)
     beq @hcopy
     lda #<__TITLE0_LOAD__
     sta lvl_ptr
@@ -8472,24 +8517,6 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     jsr draw_quad
     rts
 .endproc
-.segment "CODE"
-.proc draw_arrow
-    lda spr_col                  ; 8x16: point over shaft, no flip
-    sta dcol
-    ldx oi
-    lda o_y,x
-    sta dy
-    ldx #ARROW_T
-    jsr draw_quad
-    ldx oi                       ; same column (dcol survives draw_quad)
-    lda o_y,x
-    clc
-    adc #8
-    sta dy
-    ldx #ARROW_B
-    jsr draw_quad
-    rts
-.endproc
 .proc draw_cbunbun
     ldx oi                       ; --- bunbun 16x16: bottom row flipped on top ---
     lda o_y,x
@@ -8525,6 +8552,24 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     sta dy
     ldx #BUN_TL+1
     jmp draw_tile_yflip
+.endproc
+.segment "CODE"
+.proc draw_arrow
+    lda spr_col                  ; 8x16: point over shaft, no flip
+    sta dcol
+    ldx oi
+    lda o_y,x
+    sta dy
+    ldx #ARROW_T
+    jsr draw_quad
+    ldx oi                       ; same column (dcol survives draw_quad)
+    lda o_y,x
+    clc
+    adc #8
+    sta dy
+    ldx #ARROW_B
+    jsr draw_quad
+    rts
 .endproc
 
 .segment "LEVELS"
