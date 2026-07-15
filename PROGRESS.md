@@ -23,6 +23,14 @@ Newest entries at the top. Every entry should be traceable to ROM bytes/code.
 rendering/perf rounds, blocks/powerups, enemies, goal+bonus game, death/title,
 audio phase. See docs/22 + docs/23 and the memory index.)
 
+## 2026-07-15 (later still) — round 6: the second-half slowdown (faa7fea)
+User: corruption + barrels fixed, but the second half of 1-2 "hogs". The margin fix
+was redrawing edge sprites EVERY frame (bees/arrows live there after spawning) =
+chronic over-budget = sustained sub-61Hz. Fixes: margin redraw only on frames where
+a column actually streamed (stream_flag); corpses move 2 steps every other frame
+(slot-staggered, same trajectory) — a double-kill (2 corpses+3 arrows+2 popups,
+all chained) was the 139% worst frame. Busy-half now p95 97%, longest streak 4f.
+
 ## 2026-07-15 (later) — round 5: the streaming-margin conflict (d5bf8b8)
 User reported 1-2 visual corruption (trails/notches/garbled sprites) + the second
 goal stone invisible until a nearby jump. Root cause: sprites drawn in the fb's
