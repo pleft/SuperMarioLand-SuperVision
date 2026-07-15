@@ -23,6 +23,12 @@ Newest entries at the top. Every entry should be traceable to ROM bytes/code.
 rendering/perf rounds, blocks/powerups, enemies, goal+bonus game, death/title,
 audio phase. See docs/22 + docs/23 and the memory index.)
 
+## 2026-07-15 (night) — round 7: hiccups (aee9e9c)
+Residual 2-4-frame over-budget streaks at kill clusters. Fixes: REFRESH-ONLY
+chained redraws (propagation-dirtied objects are unmoved -> draw without erase;
+bit2 in o_nfl), subx==0 blitter fast path, slot-staggered popups, 20px propagation
+boxes for narrow sprite pairs. Busy half: worst 117%, p95 90%, max streak 1 frame.
+
 ## 2026-07-15 (later still) — round 6: the second-half slowdown (faa7fea)
 User: corruption + barrels fixed, but the second half of 1-2 "hogs". The margin fix
 was redrawing edge sprites EVERY frame (bees/arrows live there after spawning) =
