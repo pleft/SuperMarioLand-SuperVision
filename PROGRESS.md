@@ -23,6 +23,15 @@ Newest entries at the top. Every entry should be traceable to ROM bytes/code.
 rendering/perf rounds, blocks/powerups, enemies, goal+bonus game, death/title,
 audio phase. See docs/22 + docs/23 and the memory index.)
 
+## 2026-07-15 (night, later) — round 8: debris trails (71a849e)
+User: bonking a block with an enemy on it left debris crumbs. Root cause = a hole
+in round 7's refresh-only rule: a budget-DEFERRED mover is 'clean' but HAS moved;
+chain-marking it refresh-only drew it at the new spot without erasing the old image.
+mark_slot_y now grants erase-free refresh only when position+token truly match.
+Also dropped 1-2's unreachable rooms (empty ROM pipe list, 640 dead bytes in bank 0).
+Repro lesson (x3): harness camera/Mario teleports pre-pollute the fb (unstreamed
+columns) — every "residue" found in teleported scenes was the plume, not the engine.
+
 ## 2026-07-15 (night) — round 7: hiccups (aee9e9c)
 Residual 2-4-frame over-budget streaks at kill clusters. Fixes: REFRESH-ONLY
 chained redraws (propagation-dirtied objects are unmoved -> draw without erase;
