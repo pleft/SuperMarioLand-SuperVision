@@ -6107,11 +6107,6 @@ fly_dy:
     stz ride
     lda tmpH2                    ; value code saved at @stomp entry (fly 400, walkers 100)
     jsr award_stomp              ; combo-chained score + the right popup tag
-    lda tmpH2
-    cmp #4
-    bne @done
-    lda #SFX_DFF8_03             ; the fly's death sound (user-ID'd) overrides the thud
-    jsr sfx_play
 @done:
     rts
 @kill:
@@ -6423,6 +6418,16 @@ death_curve:                     ; ROM $0C19 verbatim (signed y deltas + $7F end
 :   ldx oi
     dec o_tmr,x
     bne :+
+    lda o_vx,x                   ; a stomped fly/bee thumps as the flat frames end
+    cmp #FLY_SQ                  ; (GB: the $0F->$15 / $43->$44 morph plays F9 03)
+    beq @thump
+    cmp #BUN_SQ
+    bne @gone
+@thump:
+    lda #SFX_DFF8_03
+    jsr sfx_play
+    ldx oi
+@gone:
     stz o_type,x
 :   rts
 .endproc
@@ -6988,7 +6993,11 @@ title_tiles:                     ; the used tiles, SV-packed
     lda #OBJ_CORPSE
     sta o_type,x
     stz o_st,x
-    rts
+    cpy #2                       ; fly/bunbun kill chains ($15/$44 scripts) play the
+    bcc :+                       ; F9 03 kill thump ($dff8=$03) the moment they morph
+    lda #SFX_DFF8_03
+    jsr sfx_play
+:   rts
 .endproc
 
 ; upd_corpse: the captured arc -- corpse_dy for 23 ticks, then +2/frame; x += o_vx
@@ -7487,6 +7496,36 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
 ; Clean sprites cost nothing (dirty-skip): a 1px/3f walker skips 2 of 3 frames,
 ; platforms every other frame, an idle scene everything.
 .proc render_all
+    ; ---------- pass 0: fold a DMA shift into the stored positions ----------
+    ; The shift moves every drawn image 32px left INSIDE the framebuffer while the
+    ; scroll latch keeps its SCREEN position — so an unmoved sprite is still drawn
+    ; correctly. Folding shift_px into o_pvx/prev_vx (same clamp the erases used)
+    ; lets the normal dirty test + budget work on shift frames instead of the old
+    ; redraw-everything (which made every 32px of scroll a 160%+ frame).
+    lda shift_px
+    beq @nofold
+    ldx #OBJ_MAX-1
+@fold:
+    lda o_pdr,x
+    beq @fnext
+    lda o_pvx,x
+    cmp shift_px
+    bcs :+
+    lda shift_px
+:   sec
+    sbc shift_px
+    sta o_pvx,x
+@fnext:
+    dex
+    bpl @fold
+    lda prev_vx                  ; Mario's stored fb x
+    cmp shift_px
+    bcs :+
+    lda shift_px
+:   sec
+    sbc shift_px
+    sta prev_vx
+@nofold:
     ; ---------- pass 1: classify slots (rotated origin + redraw budget) ----------
     jsr p1_init
 @p1:
@@ -7526,8 +7565,6 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     lda #2                       ; visible
     sta o_nfl,x
     ; dirty?
-    lda shift_px
-    bne @p1dirty
     lda o_pdr,x
     beq @p1dirty
     lda o_nvx,x
@@ -7566,8 +7603,6 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     sta mario_vx
     lda #1
     sta m_dirty
-    lda shift_px
-    bne @mclassd
     lda mario_grow
     ora mario_shrink
     ora mario_starT
@@ -7601,13 +7636,8 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     beq @p3n
     lda o_pdr,x
     beq @p3n
-    lda o_pvx,x                  ; shift-compensated erase at the old drawn spot
-    cmp shift_px
-    bcs :+
-    lda shift_px
-:   sec
-    sbc shift_px
-    sta rb_vx
+    lda o_pvx,x                  ; erase at the old drawn spot (a DMA shift was
+    sta rb_vx                    ; already folded into o_pvx by pass 0)
     lda o_pvy,x
     sta rb_y
     lda o_pw,x
@@ -7637,14 +7667,9 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     lda oi
     cmp #OBJ_MAX
     bne @p3
-    lda m_dirty                  ; Mario's erase
+    lda m_dirty                  ; Mario's erase (prev_vx pre-folded by pass 0)
     beq @p4s
     lda prev_vx
-    cmp shift_px
-    bcs :+
-    lda shift_px
-:   sec
-    sbc shift_px
     sta rb_vx
     lda prev_y
     sta rb_y
@@ -8998,14 +9023,32 @@ row48_hi: .res 160           ; paid in EVERY bank)
     sta s0
     lda blit_opaque
     bne @merge                   ; opaque: masks preset
-    lda s0                       ; transparency: M(shifted) — M commutes with the
-    jsr calc_mask_A              ; 2-bit-aligned shift
+    lda s0                       ; transparency: M(shifted), inlined — M spreads each
+    sta tmp_src                  ; nonzero 2-bit pixel to a full 2-bit mask and
+    lsr                          ; commutes with the 2-bit-aligned shift
+    ora tmp_src
+    and #$55
+    sta m0
+    asl
+    ora m0
     sta m0
     lda s1
-    jsr calc_mask_A
+    sta tmp_src
+    lsr
+    ora tmp_src
+    and #$55
+    sta m1
+    asl
+    ora m1
     sta m1
     lda s2
-    jsr calc_mask_A
+    sta tmp_src
+    lsr
+    ora tmp_src
+    and #$55
+    sta m2
+    asl
+    ora m2
     sta m2
 @merge:
     ldy #0                       ; dst = (dst & ~mask) | shifted

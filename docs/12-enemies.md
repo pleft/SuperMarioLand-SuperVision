@@ -253,3 +253,23 @@ platform and 2 stones once cab $85/$88/$89 fire: NINE concurrent objects. The po
 second stone. Pool is now `OBJ_MAX = 10` like the GB's $D100-$D190. With that + the
 render budget (docs/22), the whole area is hardware-confirmed ("flicker is gone, the
 ending area works fine") — **WORLD 1-2 COMPLETE**.
+
+## The kill THUMP: VM `F9 03` in the corpse scripts [2026-07-15]
+
+The user heard a missing "noise-like" sound. Hooked GB capture (PyBoy `hook_register`
+on every `ld [$dfXX],a` site — the mailboxes are consumed same-frame, so per-frame
+sampling NEVER sees them): killing the bee fires `$dfe0=$03` (the chirp, ported) AND
+**`$dff8=$03`** simultaneously. Site $2828 = the AI VM's **`F9 nn` opcode** (write nn
+to $dff8; `FA nn` → $dfe0 at $282C) — decode_ai_scripts.py now decodes both (they were
+mis-read as velocity bytes!). Ground truth per kill chain:
+- Chibibo `$01`/kicked `$11`, Nokobon `$05`/`$12`: **NO sound opcode** — silent (the
+  stomp chirp only). Port was already correct.
+- Fly `$15` and Bunbun `$44`: **`F9 03`** — the kill thump plays when the corpse
+  MORPHS: immediately on star/ball/bounce kills, ~24-32f AFTER a stomp (the flat
+  squash frames run first).
+Port: `kill_flip` plays `SFX_DFF8_03` for corpse kinds >= 2 (fly/bunbun); the stomped
+fly/bee thump moved to the squash-expiry (`upd_squash`, `o_vx` == FLY_SQ/BUN_SQ) —
+the fly's old stomp-time override (24f early) is gone. py65: chirp at the stomp,
+thump exactly 32f later.
+Also: the bee's ARROW drop is SILENT on the GB (hooked capture, 4 drops, zero
+triggers), and so is riding/falling with a goal stone.

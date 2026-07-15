@@ -23,6 +23,19 @@ Newest entries at the top. Every entry should be traceable to ROM bytes/code.
 rendering/perf rounds, blocks/powerups, enemies, goal+bonus game, death/title,
 audio phase. See docs/22 + docs/23 and the memory index.)
 
+## 2026-07-15 — round 4: level select, the kill thump, shift-frame fold
+- TITLE LEVEL SELECT (user request): Select cycles 1-1/1-2/... (shown top right,
+  HUD font); Start launches straight in. Sound test moved to B. (18f8c35)
+- Missing sound found via hooked GB capture: the kill THUMP = AI VM opcode F9 03
+  ($dff8=$03) in the fly's $15 / bee's $44 corpse scripts (the decoder had been
+  mis-reading F9/FA as velocities). Port: kill_flip plays it for fly/bee kills;
+  stomped ones thump at squash-expiry (GB-exact delay). Chibibo/Nokobon kill
+  chains verified silent. Arrow drops + stone rides verified silent.
+- Flicker root cause #2: DMA-shift frames force-redrew every sprite (164% with
+  2 bees). render_all pass 0 now folds shift_px into the stored positions; shift
+  frames use the normal dirty test + budget. + inlined blitter masks.
+  Real 1-2 bee-zone run: p95 90%, p99 106%, 16/900 over (was 176% typical).
+
 ## 2026-07-14 — round 3 USER-CONFIRMED on hardware: "flicker is gone, the ending
 ## area works fine" — WORLD 1-2 COMPLETE. (c68e5a1)
 - Object pool 8 -> 10 (GB $D100-$D190): the 1-2 goal area really runs 9 objects

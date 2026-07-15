@@ -184,3 +184,26 @@ nearest dbg.txt label. Pitfalls: park Mario SAFELY (pit deaths freeze the loop i
 death_anim and every frame times out); plant test objects OUT of contact range
 (a bee touch kills small Mario and freezes everything); rebuild dbg.txt after any
 code move.
+
+## Perf round 4 — shift frames + the mask inline (2026-07-15)
+
+The remaining flicker was the DMA-SHIFT frames: every 32px of scroll force-redrew
+EVERY sprite (their stored fb coordinates went stale when the framebuffer shifted),
+measuring 164-167% of budget with 2 bees. The insight: the scroll latch keeps a
+shifted image at the SAME screen position — an unmoved sprite is still drawn
+correctly after a shift. So render_all pass 0 now FOLDS shift_px into the stored
+positions (`o_pvx`/`prev_vx`, with the erases' old left-edge clamp), the shift
+force-dirty paths are gone, and the erases' per-use compensation is gone (the fold
+is the single source of truth). Shift frames now behave like ordinary frames: the
+dirty test + redraw budget apply.
+
+Also inlined the transparency-mask math in the blitter row loop (was 3 calc_mask_A
+calls/row ≈ 12k on heavy frames).
+
+REAL 1-2 play through the bee zone (hop-run, star): p95 = 90%, p99 = 106%,
+16/900 frames over budget, worst 132% (a transient bee+arrow+Mario overlap chain).
+Each isolated late frame = the previous intact image for one frame (race-the-beam).
+
+Note on synthetic scenes: planting clustered objects overstates load — the overlap
+propagation correctly chains everything within a 32x28 box, defeating the budget by
+design. Measure with REAL spawns.

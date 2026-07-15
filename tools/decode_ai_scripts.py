@@ -28,6 +28,7 @@ OPS = {
     0xF0: ("face/track", 1), 0xF1: ("spawn", 0), 0xF2: ("set_accel", 1),
     0xF3: ("morph_type", 1), 0xF4: ("set_ffc9", 1), 0xF5: ("cond", 1),
     0xF6: ("jump_pc", 1), 0xF8: ("set_param", 1), 0xFF: ("loop", 0),
+    0xF9: ("SOUND dff8", 1), 0xFA: ("SOUND dfe0", 1),   # VM handlers at $2820/$282C
 }
 
 def decode_script(d, addr, maxlen=64):
