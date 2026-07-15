@@ -339,16 +339,16 @@ main_loop:
 :   jsr scroll_apply             ; shift decision + DMA + fb_col0 + scroll_s, ALL here at
     lda scroll_s                 ; frame start: pixels, coords and the scroll register mutate
     sta scroll_vis               ; together, and the logic phase only ever sees coherent state
-    jsr render_all               ; sprites: overlap-safe erase set -> erases -> draws
     lda shift_px                 ; a shift queues its 4 margin columns
     beq :+
     lda #4
     sta stream_pend
 :   lda stream_pend
     beq :+
-    jsr stream_one               ; one margin column per frame (right edge, mostly off-screen)
-    dec stream_pend
-:   lda hud_dirty
+    jsr stream_one               ; one margin column per frame — BEFORE the sprites, so a
+    dec stream_pend              ; streamed column never covers a same-frame sprite draw
+:   jsr render_all               ; sprites: overlap-safe erase set -> erases -> draws
+    lda hud_dirty
     beq :+
     stz hud_dirty
     jsr draw_hud                 ; after the beam leaves rows 0-15: clean next frame
@@ -7565,6 +7565,9 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     lda #2                       ; visible
     sta o_nfl,x
     ; dirty?
+    lda tmpL                     ; in/near the streaming margin (fb x >= 144: a 16px
+    cmp #144                     ; sprite reaches the streamed cols 160+): ALWAYS
+    bcs @p1dirty                 ; redraw — streamed columns overwrite sprites there
     lda o_pdr,x
     beq @p1dirty
     lda o_nvx,x
@@ -7603,6 +7606,9 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     sta mario_vx
     lda #1
     sta m_dirty
+    lda mario_vx                 ; Mario in the streaming margin: always redraw
+    cmp #144
+    bcs @mclassd
     lda mario_grow
     ora mario_shrink
     ora mario_starT
