@@ -4975,7 +4975,8 @@ STAR_ARC_N = 42
 .endproc
 
 .proc upd_popup
-    lda frame_count              ; 1px up every 2nd frame
+    lda frame_count              ; 1px up every 2nd frame (slot-staggered so several
+    eor oi                       ; popups don't concentrate on the same frames)
     lsr
     bcc :+
     rts
@@ -7716,8 +7717,14 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
 @p4:
     ldx oi
     lda o_nfl,x
-    cmp #3                       ; dirty AND visible
-    bne @p4n
+    and #5                       ; needs a draw (dirty or refresh-only) ...
+    beq @p4skip
+    lda o_nfl,x
+    and #2                       ; ... and visible
+    bne @p4go
+@p4skip:
+    jmp @p4n
+@p4go:
     lda o_nvx,x
     sta ovx
     jsr draw_obj_sprite
@@ -7815,6 +7822,24 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     bne @sp_jn                   ; j already dirty
     lda o_pdr,y
     beq @sp_jn                   ; j not drawn
+    lda o_pw,x                   ; box width by the pair's real widths: two narrow
+    and #$7F                     ; (8px) sprites need only a 20px box — the wide 32px
+    cmp #3                       ; box was chaining arrows to everything nearby
+    bcs @sp_wide
+    lda o_pw,y
+    and #$7F
+    cmp #3
+    bcs @sp_wide
+    lda o_pvx,x
+    sec
+    sbc o_pvx,y
+    bpl :+
+    eor #$FF
+    ina
+:   cmp #20
+    bcs @sp_jn
+    bra @sp_ychk
+@sp_wide:
     lda o_pvx,x
     sec
     sbc o_pvx,y
@@ -7823,6 +7848,7 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     ina
 :   cmp #32
     bcs @sp_jn
+@sp_ychk:
     lda o_pvy,x
     sec
     sbc o_pvy,y
@@ -7831,9 +7857,9 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     ina
 :   cmp #28
     bcs @sp_jn
-    lda o_nfl,y                  ; overlap: j joins the dirty set
-    ora #1
-    sta o_nfl,y
+    lda o_nfl,y                  ; overlap: j REDRAWS but need not erase — it did
+    ora #4                       ; not move (it was clean), so its draw repaints its
+    sta o_nfl,y                  ; exact old pixels over the neighbour's restore
 @sp_jn:
     inc tmpL3
     lda tmpL3
@@ -7876,7 +7902,7 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     bra @sp_mn
 @sp_mset:
     lda o_nfl,y
-    ora #1
+    ora #4                       ; refresh-only (unmoved; Mario's erase restored BG)
     sta o_nfl,y
 @sp_mn:
     inc tmpL3
@@ -9039,6 +9065,12 @@ row48_hi: .res 160           ; paid in EVERY bank)
     lda (cur_src),y
     tay
 @vals:
+    lda spr_subx                 ; byte-aligned: the shift is identity, third byte
+    bne @shifted                 ; empty — skip the table walk
+    sty s1
+    stz s2
+    bra @masks
+@shifted:
     lda (p_shhi),y               ; Y = right src byte: v1|v2 parts
     sta s2
     lda (p_shlo),y
@@ -9049,6 +9081,7 @@ row48_hi: .res 160           ; paid in EVERY bank)
     sta s1
     lda (p_shlo),y
     sta s0
+@masks:
     lda blit_opaque
     bne @merge                   ; opaque: masks preset
     lda s0                       ; transparency: M(shifted), inlined — M spreads each
