@@ -289,9 +289,8 @@ o_hp:        .res 10          ; extra hits to survive (fly: 1 -- two balls kill,
     stz p_shlo                   ; the table pointers' lo bytes stay 0 forever
     stz p_shhi
     jsr clear_vram
-    jsr title_screen             ; the SML title (extracted at build time); waits for Start
+    jsr title_screen             ; the SML title; waits for Start (Select = level select)
     jsr clear_vram
-    stz cur_level                ; a fresh game starts at 1-1 (bank 0)
     jsr load_level               ; map the bank + bind level pointers/limits to its header
     lda surf_map                 ; start on the surface map
     sta map_base
@@ -3792,6 +3791,7 @@ TIMER_RATE = 40                  ; frames per clock unit (SML's $da00 sub-counte
     rts
 world_tab: .byte 1,1,1,2,2,2,3,3,3,4,4,4   ; level id -> displayed world digit
 stage_tab: .byte 1,2,3,1,2,3,1,2,3,1,2,3   ; level id -> displayed stage digit
+.export world_tab, stage_tab               ; (title level-select reuses them)
 .endproc
 
 ; tick_timer: count down the level clock; dirties the HUD when the displayed value changes.
@@ -5502,33 +5502,6 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     rts
 .endproc
 
-; anim_token: A = the animation token for slot X — the dirty test redraws on a
-; token change. Bees flap on a SLOT-STAGGERED 8-frame phase (so two bees never
-; force a same-frame redraw wave); arrows/stones have no animation at all.
-.proc anim_token
-    lda o_type,x
-    cmp #OBJ_ARROW
-    beq @none
-    cmp #OBJ_STONE
-    beq @none
-    cmp #OBJ_BUNBUN
-    bne @raw
-    txa
-    and #1
-    asl
-    asl
-    clc
-    adc frame_count
-    and #8
-    rts
-@raw:
-    lda frame_count
-    and #8
-    rts
-@none:
-    lda #0
-    rts
-.endproc
 
 ; bonk_kill_above: a hopping block bonk (?-block/hidden/brick/multi-coin) kills any
 ; enemy standing ON the bonked cell (feet_col/mrow): dead-flip corpse + the class
@@ -6039,48 +6012,7 @@ fly_dy:
 
 ; enemy_contact: shared enemy-vs-Mario resolution (walkers + the fly): bottom cull,
 ; overlap test, star kill, position-rule stomp (result branched by type), side hurt.
-.segment "LEVELS"                ; (FIXED is full; the common prefix is always mapped)
-; mario_dx: tmpL3(+H3) = |mario centre - slot X's centre (o_x+4)|, 16-bit.
-.proc mario_dx
-    lda cam_x                    ; mario centre = cam + spr_x + 8
-    clc
-    adc spr_x
-    sta tmpL2
-    lda cam_x+1
-    adc #0
-    sta tmpH2
-    lda tmpL2
-    clc
-    adc #8
-    sta tmpL2
-    bcc :+
-    inc tmpH2
-:   lda o_xl,x
-    clc
-    adc #4
-    sta tmpL3
-    lda o_xh,x
-    adc #0
-    sta tmpH3
-    sec
-    lda tmpL2
-    sbc tmpL3
-    sta tmpL3
-    lda tmpH2
-    sbc tmpH3
-    sta tmpH3
-    bpl @pdx
-    sec
-    lda #0
-    sbc tmpL3
-    sta tmpL3
-    lda #0
-    sbc tmpH3
-    sta tmpH3
-@pdx:
-    rts
-.endproc
-
+.segment "LEVELS"                
 .proc enemy_contact
     ldx oi
     lda o_y,x                    ; cull once fallen off the bottom
@@ -6498,6 +6430,7 @@ death_curve:                     ; ROM $0C19 verbatim (signed y deltas + $7F end
 ; title_screen: the original's title, dumped at build time by tools/extract_title.py
 ; (PyBoy boots the user's ROM and captures the rendered tilemap + tiles). 18 GB rows
 ; centered on the SV's 20 (rows 1-18). Static; exits on Start.
+.segment "TITLE0"               ; the title runs ONLY with bank 0 mapped (code + data)
 .proc title_screen
     lda #<title_map              ; 16-bit walk over the 360-byte map (row*20+col
     sta feet_col                 ; overflowed 8 bits past row 12 -> doubled image)
@@ -6548,14 +6481,27 @@ death_curve:                     ; ROM $0C19 verbatim (signed y deltas + $7F end
     lda tmpL3
     cmp #18
     bne @row
+    stz cur_level                ; default = 1-1; Select cycles (level-select debug)
+    jsr title_lvl_show
 @wait:
     lda frame_flag               ; hold until Start is pressed
     beq @wait
     stz frame_flag
     jsr sfx_tick                 ; the sound test needs the player running
     jsr read_input
-    lda pad_pressed              ; SOUND TEST: Select cycles the SFX id, A replays it.
-    and #GB_SELECT               ; The id shows as two digits in the top-left corner.
+    lda pad_pressed              ; LEVEL SELECT (debug): Select cycles the start level;
+    and #GB_SELECT               ; the "1-1"-style pick shows at the top right.
+    beq :+
+    lda cur_level
+    ina
+    cmp #NUM_LEVELS
+    bcc @lsel
+    lda #0
+@lsel:
+    sta cur_level
+    jsr title_lvl_show
+:   lda pad_pressed              ; SOUND TEST: B cycles the SFX id, A replays it.
+    and #GB_B                    ; The id shows as two digits in the top-left corner.
     beq :+
     inc b_i
     lda b_i
@@ -6600,6 +6546,28 @@ death_curve:                     ; ROM $0C19 verbatim (signed y deltas + $7F end
     rts
 .endproc
 
+; title_lvl_show: draw the level-select pick ("1-1".."1-3") at the title's top right.
+.proc title_lvl_show
+    ldx cur_level
+    lda draw_hud::world_tab,x
+    ldy #28                      ; cells at dcol 28/30/32 (cols 14-16), row 0
+    jsr @put
+    lda #$29                     ; the HUD font's '-'
+    ldy #30
+    jsr @put
+    ldx cur_level
+    lda draw_hud::stage_tab,x
+    ldy #32
+@put:
+    pha
+    sty dcol
+    stz dy
+    jsr set_dst
+    pla
+    jsr get_tile_src
+    jmp blit_tile
+.endproc
+
 .segment "TITLE0"                ; bank 0 ONLY: banks 1+ overlay this range with their
                                  ; level region (title runs strictly with bank 0 mapped)
 title_map:                       ; 20x18 remapped indices (build artifact, rule 5)
@@ -6609,6 +6577,74 @@ title_tiles:                     ; the used tiles, SV-packed
 .segment "CODE"
 
 ; ball_active: C=1 if a superball is already live (only one at a time, per the original).
+; (FIXED is full; the common prefix is always mapped)
+; mario_dx: tmpL3(+H3) = |mario centre - slot X's centre (o_x+4)|, 16-bit.
+.proc mario_dx
+    lda cam_x                    ; mario centre = cam + spr_x + 8
+    clc
+    adc spr_x
+    sta tmpL2
+    lda cam_x+1
+    adc #0
+    sta tmpH2
+    lda tmpL2
+    clc
+    adc #8
+    sta tmpL2
+    bcc :+
+    inc tmpH2
+:   lda o_xl,x
+    clc
+    adc #4
+    sta tmpL3
+    lda o_xh,x
+    adc #0
+    sta tmpH3
+    sec
+    lda tmpL2
+    sbc tmpL3
+    sta tmpL3
+    lda tmpH2
+    sbc tmpH3
+    sta tmpH3
+    bpl @pdx
+    sec
+    lda #0
+    sbc tmpL3
+    sta tmpL3
+    lda #0
+    sbc tmpH3
+    sta tmpH3
+@pdx:
+    rts
+.endproc
+; anim_token: A = the animation token for slot X — the dirty test redraws on a
+; token change. Bees flap on a SLOT-STAGGERED 8-frame phase (so two bees never
+; force a same-frame redraw wave); arrows/stones have no animation at all.
+.proc anim_token
+    lda o_type,x
+    cmp #OBJ_ARROW
+    beq @none
+    cmp #OBJ_STONE
+    beq @none
+    cmp #OBJ_BUNBUN
+    bne @raw
+    txa
+    and #1
+    asl
+    asl
+    clc
+    adc frame_count
+    and #8
+    rts
+@raw:
+    lda frame_count
+    and #8
+    rts
+@none:
+    lda #0
+    rts
+.endproc
 .proc ball_active
     ldx #OBJ_MAX-1
 :   lda o_type,x
