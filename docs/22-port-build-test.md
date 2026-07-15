@@ -244,3 +244,32 @@ Fixes:
    when full; live enemies are never evicted; the stolen slot keeps its o_p* draw
    state so the old image erases normally. py65-verified: 10-popup pool → coin +
    hop land; 10-enemy pool → graceful fail; mixed → the corpse is the victim.
+
+## Perf round 10 — stream-hit narrowing + shift-frame budget (2026-07-15)
+
+User re-test after round 9: much better, but flicker/rough-scroll hiccups persist
+at the SAME spots (the platform stretch cam~1400-1650 and the bee+arrow cluster).
+Cluster profiling (walk12c: log every over-budget frame + bucket-profile its
+successor) showed nearly every over frame was a SHIFT frame in a sprite-heavy
+zone, dominated by sprite_blit_subpx (up to 29k): the round-5/6 margin rule
+force-redrew EVERY sprite at fb x >= 144 on EVERY streaming frame (5 frames per
+32px shift), though each frame only rewrites one 8px column strip.
+
+1. **stream_hit** (LEVELS): stream_one publishes the fb-x span it rewrites this
+   frame (`stream_x0/x1`; on shift frames extended to the blanked bytes). Pass 1
+   redraws only sprites (and Mario) actually OVERLAPPING that span. A budget-
+   deferred mover whose kept image intersects the span is force-redrawn (the
+   round-8 invariant: never keep an image whose pixels were wiped).
+2. **blank_margin trimmed to bytes 42-43**: 44-45 refill at shift+2 but need
+   scroll_s>16 (~10 frames) to show; 46-47 likewise at +3 vs s>24. Only 42-43
+   race their refill (visible at s>8 ≈ 1 frame at run speed).
+3. **Shift frames accept 1 mover** (dirty_bud 3→1 when shift_px≠0): the shift
+   frame already carries fold+blank+stream; deferred movers catch up on the pend
+   frames (60-75% load), costing 2px of lag for one frame.
+
+Full-level walk (same hop-run driver): worst 130%→118%, shift-frame median
+91%→82%, over-budget 39→28/2400, max streak 3. Strip captures pixel-identical
+to round 9. Remaining over frames are REAL load (2 bees + 3 arrows + platforms
+all moving, 101-118%, isolated) — the next lever is the composite BG+sprite
+draw (kills the erase side, big rewrite, parked). Boot pixel-identical; stomp/
+eviction/music (1431/1431)/glide T1-T5 green.

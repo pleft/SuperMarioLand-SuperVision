@@ -172,6 +172,8 @@ dbcol:       .res 1          ; draw_column input: dest VRAM byte column
 strk:        .res 1          ; scroll streaming loop counter
 shift_px:    .res 1          ; pixels the framebuffer shifted this frame (0 or 32 per DMA shift)
 stream_flag: .res 1          ; stream_one drew a margin column this frame (margin sprites redraw)
+stream_x0:  .res 1           ; fb-x span [x0,x1) rewritten this frame by stream/blank
+stream_x1:  .res 1           ; (valid only while stream_flag=1)
 ; --- music sequencer state (two channel blocks, stride 12, X = 0/12) ---
 mus_pos:     .res 2          ; +0  phrase read pointer (hi 0 = channel inactive)
 mus_list:    .res 2          ; +2  phrase-list read pointer
@@ -4215,27 +4217,6 @@ PIN_X   = 64
 
 ; stream_cols: draw the 4 new right-margin columns (fb_col0+20..+23) into the
 ; off-screen VRAM byte columns 40,42,44,46 after a shift.
-.proc stream_one
-    lda #4                       ; x = 4 - stream_pend (0..3: which margin column this frame)
-    sec
-    sbc stream_pend
-    tax
-    txa                          ; wcol = fb_col0 + 20 + x
-    clc
-    adc #20
-    clc
-    adc fb_col0
-    sta wcol
-    lda fb_col0+1
-    adc #0
-    sta wcol+1
-    txa                          ; dbcol = 40 + x*2
-    asl
-    clc
-    adc #40
-    sta dbcol
-    jmp draw_column
-.endproc
 
 ; fb_shift8: shift the PLAYFIELD (scanlines 16..159) left 8 bytes via the VRAM DMA.
 ; The DMA does a clean linear copy (upperRam[i]=upperRam[i+8]); restricting it to the
@@ -5489,8 +5470,11 @@ riding_this:                     ; Z=1 if Mario rides slot oi
 :   sta rot1
     sta oi
     stz p1c
-    lda #3                       ; movers redrawn per frame, at most (Mario exempt)
-    sta dirty_bud
+    lda #3                       ; movers redrawn per frame, at most (Mario exempt);
+    ldy shift_px                 ; the shift frame already carries blank+stream+fold —
+    beq :+                       ; take 1 mover and push the rest to the pend frames,
+    lda #1                       ; which run at 60-75% (a 30Hz mover deferred once =
+:   sta dirty_bud                ; 2px of lag for one frame, invisible)
     rts
 .endproc
 .proc p1_next                    ; C=1 when all slots visited; else oi = next slot
@@ -7620,12 +7604,10 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     lda #2                       ; visible
     sta o_nfl,x
     ; dirty?
-    lda tmpL                     ; in/near the streaming margin (fb x >= 144: a 16px
-    cmp #144                     ; sprite reaches the streamed cols 160+): redraw on
-    bcc :+                       ; frames where a column actually STREAMED (those
-    lda stream_flag              ; overwrite sprite pixels there) — constant redraws
-    bne @p1dirty                 ; were dragging the busy second half under 61 Hz
-:   lda o_pdr,x
+    lda tmpL                     ; overlaps the strip a streamed column / margin
+    jsr stream_hit               ; blank rewrote THIS frame? those pixels are gone —
+    bcs @p1dirty                 ; redraw; everyone else keeps the dirty test
+    lda o_pdr,x
     beq @p1dirty
     lda o_nvx,x
     cmp o_pvx,x
@@ -7639,7 +7621,10 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
 @p1move:
     dec dirty_bud                ; pure movement/anim: over budget -> keep last
     bpl @p1dirty                 ; frame's image (overlap propagation may still
-    bra @p1next                  ; force it later — consistency preserved)
+    lda o_pvx,x                  ; force it later — consistency preserved)...
+    jsr stream_hit               ; UNLESS the kept image intersects the strip a
+    bcs @p1dirty                 ; streamed column just wiped — must redraw
+    bra @p1next
 @p1dirty:
     lda o_nfl,x
     ora #1
@@ -7663,12 +7648,10 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     sta mario_vx
     lda #1
     sta m_dirty
-    lda mario_vx                 ; Mario in the streaming margin on a stream frame:
-    cmp #144                     ; redraw (the streamed column wiped his pixels)
-    bcc :+
-    lda stream_flag
-    bne @mclassd
-:   lda mario_grow
+    lda mario_vx                 ; the streamed/blanked strip wiped his pixels?
+    jsr stream_hit
+    bcs @mclassd
+    lda mario_grow
     ora mario_shrink
     ora mario_starT
     ora hurt_inv
@@ -8889,6 +8872,62 @@ row48_hi: .res 160           ; paid in EVERY bank)
     rts
 .endproc
 
+.proc stream_one
+    lda #4                       ; x = 4 - stream_pend (0..3: which margin column this frame)
+    sec
+    sbc stream_pend
+    tax
+    txa                          ; wcol = fb_col0 + 20 + x
+    clc
+    adc #20
+    clc
+    adc fb_col0
+    sta wcol
+    lda fb_col0+1
+    adc #0
+    sta wcol+1
+    txa                          ; publish the rewritten fb-x span for the sprite
+    asl                          ; overlap test: this column = [160+x*8, +8); on a
+    asl                          ; shift frame blank_margin also zeroed bytes 42-43
+    asl                          ; (fb x 168-176), contiguous with column x=0
+    clc
+    adc #160
+    sta stream_x0
+    adc #8
+    sta stream_x1
+    lda shift_px
+    beq :+
+    lda #176
+    sta stream_x1
+:   txa
+    asl                          ; dbcol = 40 + x*2
+    clc
+    adc #40
+    sta dbcol
+    jmp draw_column
+.endproc
+
+; stream_hit: C=1 if a sprite at fb x = A (width <= 24px) overlaps the span
+; rewritten this frame by stream_one/blank_margin ([stream_x0, stream_x1)).
+; Only that strip loses sprite pixels -- redrawing everything at fb x >= 144 on
+; stream frames was the residual shift-frame flicker in sprite-heavy scenes.
+.proc stream_hit
+    ldy stream_flag
+    beq @no
+    cmp stream_x1
+    bcs @no
+    clc
+    adc #24
+    cmp stream_x0
+    bcc @no
+    beq @no
+    sec
+    rts
+@no:
+    clc
+    rts
+.endproc
+
 ; flush_stream: drain any queued margin columns immediately (pre-double-shift guard).
 .proc flush_stream
     lda stream_pend
@@ -8904,17 +8943,16 @@ row48_hi: .res 160           ; paid in EVERY bank)
 ; shift just filled them with the next line's left edge (see fb_shift8). Blank
 ; reads as sky until the stream queue refills the 4 columns.
 .proc blank_margin
-    lda #<($4000 + 16*48 + 42)   ; only bytes 42..45 can scroll into view before the
-    sta cur_dst                  ; 4-frame queue refills them (40-41 = col 20, streamed
-    lda #>($4000 + 16*48 + 42)   ; this same frame; 46-47 need scroll_s>24 = ~12 frames)
-    sta cur_dst+1
+    lda #<($4000 + 16*48 + 42)   ; only bytes 42..43 can scroll into view before the
+    sta cur_dst                  ; queue refills them (40-41 stream this same frame;
+    lda #>($4000 + 16*48 + 42)   ; 44-45 refill at shift+2 yet need scroll_s>16 =
+    sta cur_dst+1                ; ~10 frames; 46-47 likewise at shift+3 vs s>24)
     ldx #144                     ; lines 16..159
 @l:
     lda #0
-    ldy #3
-:   sta (cur_dst),y
-    dey
-    bpl :-
+    sta (cur_dst)
+    ldy #1
+    sta (cur_dst),y
     lda cur_dst                  ; += stride
     clc
     adc #48

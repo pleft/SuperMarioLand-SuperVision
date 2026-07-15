@@ -23,6 +23,16 @@ Newest entries at the top. Every entry should be traceable to ROM bytes/code.
 rendering/perf rounds, blocks/powerups, enemies, goal+bonus game, death/title,
 audio phase. See docs/22 + docs/23 and the memory index.)
 
+## 2026-07-15 (late night) — round 10: stream-hit narrowing (the residual hiccups)
+User: much better, hiccups remain at the platform/bee stretches. Profiling the
+over-budget clusters: shift frames force-redrew EVERY sprite at fb x>=144 on all
+5 streaming frames per shift, though each frame rewrites one 8px strip. Now
+stream_one publishes its span and only overlapping sprites redraw (stream_hit);
+blank trimmed to the 2 racing bytes; shift frames take 1 budget mover (pend
+frames absorb the rest). worst 130->118%, shift median 91->82%, over 39->28/2400,
+streak 3. What remains is real load (bees+arrows+platforms all moving, isolated
+101-118% singles) — next lever = composite BG+sprite draw (big rewrite, parked).
+
 ## 2026-07-15 (night, latest) — round 9: THE root cause — the DMA shift bleed
 User: pyramid-to-end flicker/corruption + invisible bonk outcomes, "identify the
 root cause". It was in fb_shift8's contract all along: the linear whole-playfield
