@@ -171,6 +171,7 @@ wcol:        .res 2          ; draw_column input: world column to draw
 dbcol:       .res 1          ; draw_column input: dest VRAM byte column
 strk:        .res 1          ; scroll streaming loop counter
 shift_px:    .res 1          ; pixels the framebuffer shifted this frame (0 or 32 per DMA shift)
+stream_flag: .res 1          ; stream_one drew a margin column this frame (margin sprites redraw)
 ; --- music sequencer state (two channel blocks, stride 12, X = 0/12) ---
 mus_pos:     .res 2          ; +0  phrase read pointer (hi 0 = channel inactive)
 mus_list:    .res 2          ; +2  phrase-list read pointer
@@ -339,6 +340,7 @@ main_loop:
 :   jsr scroll_apply             ; shift decision + DMA + fb_col0 + scroll_s, ALL here at
     lda scroll_s                 ; frame start: pixels, coords and the scroll register mutate
     sta scroll_vis               ; together, and the logic phase only ever sees coherent state
+    stz stream_flag
     lda shift_px                 ; a shift queues its 4 margin columns
     beq :+
     lda #4
@@ -347,6 +349,8 @@ main_loop:
     beq :+
     jsr stream_one               ; one margin column per frame — BEFORE the sprites, so a
     dec stream_pend              ; streamed column never covers a same-frame sprite draw
+    lda #1
+    sta stream_flag
 :   jsr render_all               ; sprites: overlap-safe erase set -> erases -> draws
     lda hud_dirty
     beq :+
@@ -7004,6 +7008,20 @@ title_tiles:                     ; the used tiles, SV-packed
 ; every frame; despawns off the bottom. No collision with anything.
 .proc upd_corpse
     ldx oi
+    txa                          ; two steps every OTHER frame (slot-staggered):
+    eor frame_count              ; the same captured trajectory at 30Hz screen
+    lsr                          ; updates — half the redraw/erase load (a double
+    bcs @skip                    ; kill was the worst measured frame)
+    jsr corpse_step
+    ldx oi
+    lda o_type,x                 ; despawned inside step 1?
+    beq @skip
+    jmp corpse_step
+@skip:
+    rts
+.endproc
+.proc corpse_step
+    ldx oi
     lda o_st,x
     cmp #23
     bcs @term
@@ -7566,9 +7584,11 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     sta o_nfl,x
     ; dirty?
     lda tmpL                     ; in/near the streaming margin (fb x >= 144: a 16px
-    cmp #144                     ; sprite reaches the streamed cols 160+): ALWAYS
-    bcs @p1dirty                 ; redraw — streamed columns overwrite sprites there
-    lda o_pdr,x
+    cmp #144                     ; sprite reaches the streamed cols 160+): redraw on
+    bcc :+                       ; frames where a column actually STREAMED (those
+    lda stream_flag              ; overwrite sprite pixels there) — constant redraws
+    bne @p1dirty                 ; were dragging the busy second half under 61 Hz
+:   lda o_pdr,x
     beq @p1dirty
     lda o_nvx,x
     cmp o_pvx,x
@@ -7606,10 +7626,12 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     sta mario_vx
     lda #1
     sta m_dirty
-    lda mario_vx                 ; Mario in the streaming margin: always redraw
-    cmp #144
-    bcs @mclassd
-    lda mario_grow
+    lda mario_vx                 ; Mario in the streaming margin on a stream frame:
+    cmp #144                     ; redraw (the streamed column wiped his pixels)
+    bcc :+
+    lda stream_flag
+    bne @mclassd
+:   lda mario_grow
     ora mario_shrink
     ora mario_starT
     ora hurt_inv
