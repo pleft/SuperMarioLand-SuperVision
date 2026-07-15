@@ -207,3 +207,40 @@ Each isolated late frame = the previous intact image for one frame (race-the-bea
 Note on synthetic scenes: planting clustered objects overstates load — the overlap
 propagation correctly chains everything within a 32x28 box, defeating the budget by
 design. Measure with REAL spawns.
+
+## Root-cause round 9 — the DMA shift bleed (2026-07-15)
+
+User: pyramid-to-end still flickers, bonk outcomes sometimes invisible, corruption
+returns — "identify the root cause". Found in `fb_shift8`'s own contract: the
+whole-playfield scroll shift is a LINEAR DMA copy (2 chunks), so each line's right
+8 bytes (fb bytes 40-47, screen x 160-191) are filled with the NEXT line's left
+edge — garbage by construction. The original design masked this by streaming all 4
+margin columns the SAME frame; the round-1 perf amortization (1 col/frame) broke
+that invariant, leaving the bleed on screen for up to 3 frames whenever
+`scroll_s > 0`. Position-dependence explained: the open-sky first half bleeds
+white-on-white (invisible); the dense second-half terrain (pyramid, platform rows)
+bleeds visible garbage — which is why "the level is not big" but only its back half
+corrupted.
+
+Fixes:
+1. **`blank_margin`** (LEVELS prefix): on shift frames, zero the bled margin bytes
+   of lines 16-159 right after the DMA, keeping the 1-col/frame streaming. Trimmed
+   to bytes **42-45**: 40-41 (col 20) are re-streamed the same frame, and 46-47
+   only become visible at `scroll_s > 24` — ~12 frames away, far beyond the
+   4-frame queue drain. Bytes 42-43 hit visibility right at the drain horizon, so
+   they (plus 44-45 as margin) must be blanked.
+2. **`flush_stream`** guard in `scroll_apply`: a second shift before the queue
+   drained would strand undrawn columns INSIDE the visible area (`stream_pend`
+   was simply reset to 4). Now pending columns are drawn before a new shift.
+   Practically never fires at play speeds; correctness insurance for multi-shift
+   camera jumps.
+3. **`find_free_evict`** for block outcomes: `spawn_coin`/`spawn_bounce`/
+   `spawn_walker`/`spawn_flower`/`spawn_star` silently RTS'd on a full pool while
+   `mark_used` still converted the block — a brick break (4 shards + popup) fills
+   the pool for ~30 frames, so a quick follow-up bonk showed NO hop/coin, and a
+   powerup block could consume its contents with nothing emerging. The GB never
+   fails here (its block machinery lives OUTSIDE the $D100 pool). The port's
+   allocator now steals a cosmetic slot (popup/debris shard/squash/flip corpse)
+   when full; live enemies are never evicted; the stolen slot keeps its o_p* draw
+   state so the old image erases normally. py65-verified: 10-popup pool → coin +
+   hop land; 10-enemy pool → graceful fail; mixed → the corpse is the victim.

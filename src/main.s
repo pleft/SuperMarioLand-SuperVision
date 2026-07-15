@@ -341,10 +341,11 @@ main_loop:
     lda scroll_s                 ; frame start: pixels, coords and the scroll register mutate
     sta scroll_vis               ; together, and the logic phase only ever sees coherent state
     stz stream_flag
-    lda shift_px                 ; a shift queues its 4 margin columns
-    beq :+
-    lda #4
-    sta stream_pend
+    lda shift_px                 ; the linear DMA shift BLEEDS each line's right 8 bytes
+    beq :+                       ; from the line below (fb_shift8): BLANK the bled tails
+    jsr blank_margin             ; NOW (blank = sky) — they were showing as garbage bands
+    lda #4                       ; over dense second-half terrain whenever scroll_s > 0,
+    sta stream_pend              ; then queue the 4 fresh columns (1 drawn per frame)
 :   lda stream_pend
     beq :+
     jsr stream_one               ; one margin column per frame — BEFORE the sprites, so a
@@ -4189,6 +4190,9 @@ PIN_X   = 64
     lda #32
     bra @apply
 @doshift:
+    jsr flush_stream             ; a queued margin column from the PREVIOUS shift must
+                                 ; be drawn before shifting again, or it strands as a
+                                 ; stale band inside the visible area
     jsr fb_shift8                ; shift framebuffer left 8 bytes (4 cols)
     lda fb_col0                  ; fb_col0 += 4
     clc
@@ -4595,7 +4599,7 @@ FLOWER_RISE = 7                  ; emerge: rise 7px out of the block, then sit (
     jsr spawn_item_snd
     pla
     sta tmpH
-    jsr find_free_obj
+    jsr find_free_evict
     bcs @full
     lda tmpH
     sta o_type,x
@@ -4625,7 +4629,7 @@ FLOWER_RISE = 7                  ; emerge: rise 7px out of the block, then sit (
 .endproc
 .proc spawn_flower
     jsr spawn_item_snd
-    jsr find_free_obj
+    jsr find_free_evict
     bcs @full
     lda #OBJ_FLOWER
     sta o_type,x
@@ -4663,7 +4667,7 @@ STAR_ARC_N = 42
 ; spawn_star: rise straight out of the block (script: 2 updates x 4px), then bounce forward.
 .proc spawn_star
     jsr spawn_item_snd
-    jsr find_free_obj
+    jsr find_free_evict
     bcs @full
     lda #OBJ_STAR
     sta o_type,x
@@ -4996,7 +5000,7 @@ bounce_dy: .byte $FE,$FE,$01,$02
 
 .proc spawn_bounce               ; A = the pre-bonk display tile ($80/$81, $82 for bricks/mc)
     sta tmpL
-    jsr find_free_obj
+    jsr find_free_evict
     bcs @full
     lda #OBJ_BOUNCE
     sta o_type,x
@@ -7129,7 +7133,7 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
 
 ; spawn_coin: a coin pops straight up from the block and falls away (~24 frames).
 .proc spawn_coin
-    jsr find_free_obj
+    jsr find_free_evict
     bcs @full
     lda #OBJ_COIN
     sta o_type,x
@@ -8849,6 +8853,76 @@ row48_hi: .res 160           ; paid in EVERY bank)
     beq @done
     jmp @b
 @done:
+    rts
+.endproc
+
+; find_free_evict: find_free_obj, but a FULL pool steals a cosmetic slot
+; (popup / debris shard / squash corpse / flip corpse) instead of failing.
+; Block outcomes (coin pop, block hop, mushroom/flower/star) must not vanish:
+; the GB runs its block machinery OUTSIDE the object pool, so it never fails,
+; but a brick break (4 shards + popup) can fill the port's pool for a moment.
+; The stolen slot keeps its o_p* draw state, so the old image erases normally.
+.proc find_free_evict
+    jsr find_free_obj
+    bcs @steal
+    rts
+@steal:
+    ldx #0
+@l:
+    lda o_type,x
+    cmp #OBJ_POPUP
+    beq @take
+    cmp #OBJ_DEBRIS
+    beq @take
+    cmp #OBJ_SQUASH
+    beq @take
+    cmp #OBJ_CORPSE
+    beq @take
+    inx
+    cpx #OBJ_MAX
+    bne @l
+    sec
+    rts
+@take:
+    stz o_hp,x
+    clc
+    rts
+.endproc
+
+; flush_stream: drain any queued margin columns immediately (pre-double-shift guard).
+.proc flush_stream
+    lda stream_pend
+    beq @done
+    jsr stream_one
+    dec stream_pend
+    bra flush_stream
+@done:
+    rts
+.endproc
+
+; blank_margin: clear the 8 margin bytes of every playfield line — the linear DMA
+; shift just filled them with the next line's left edge (see fb_shift8). Blank
+; reads as sky until the stream queue refills the 4 columns.
+.proc blank_margin
+    lda #<($4000 + 16*48 + 42)   ; only bytes 42..45 can scroll into view before the
+    sta cur_dst                  ; 4-frame queue refills them (40-41 = col 20, streamed
+    lda #>($4000 + 16*48 + 42)   ; this same frame; 46-47 need scroll_s>24 = ~12 frames)
+    sta cur_dst+1
+    ldx #144                     ; lines 16..159
+@l:
+    lda #0
+    ldy #3
+:   sta (cur_dst),y
+    dey
+    bpl :-
+    lda cur_dst                  ; += stride
+    clc
+    adc #48
+    sta cur_dst
+    bcc :+
+    inc cur_dst+1
+:   dex
+    bne @l
     rts
 .endproc
 

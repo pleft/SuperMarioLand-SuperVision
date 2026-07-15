@@ -23,6 +23,21 @@ Newest entries at the top. Every entry should be traceable to ROM bytes/code.
 rendering/perf rounds, blocks/powerups, enemies, goal+bonus game, death/title,
 audio phase. See docs/22 + docs/23 and the memory index.)
 
+## 2026-07-15 (night, latest) — round 9: THE root cause — the DMA shift bleed
+User: pyramid-to-end flicker/corruption + invisible bonk outcomes, "identify the
+root cause". It was in fb_shift8's contract all along: the linear whole-playfield
+DMA copy fills each line's right 8 bytes with the NEXT line's left edge. The
+original design streamed all 4 margin columns the same frame to mask it; the
+1-col/frame amortization broke that, leaving garbage visible for up to 3 frames
+whenever scroll_s>0 — invisible over the open-sky first half (white-on-white),
+garbage bands over the dense second-half terrain. Fixes: blank_margin zeroes the
+bled bytes 42-45 on shift frames (40-41 re-stream same frame; 46-47 can't reach
+visibility before the queue drains); flush_stream drains a stale queue before a
+second shift; find_free_evict lets block outcomes (coin/hop/mushroom/flower/star)
+steal a cosmetic slot (popup/debris/squash/corpse) on a full pool — a brick break
+fills the pool and made follow-up bonks consume blocks invisibly (GB block
+machinery is outside the pool and never fails). Full detail: docs/22 round 9.
+
 ## 2026-07-15 (night, later) — round 8: debris trails (71a849e)
 User: bonking a block with an enemy on it left debris crumbs. Root cause = a hole
 in round 7's refresh-only rule: a budget-DEFERRED mover is 'clean' but HAS moved;
