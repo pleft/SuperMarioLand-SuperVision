@@ -23,6 +23,14 @@ Newest entries at the top. Every entry should be traceable to ROM bytes/code.
 rendering/perf rounds, blocks/powerups, enemies, goal+bonus game, death/title,
 audio phase. See docs/22 + docs/23 and the memory index.)
 
+## 2026-07-15 (later) — round 5: the streaming-margin conflict (d5bf8b8)
+User reported 1-2 visual corruption (trails/notches/garbled sprites) + the second
+goal stone invisible until a nearby jump. Root cause: sprites drawn in the fb's
+streaming margin (x 160-191, visible when scroll_s>0) get overwritten by streamed
+map columns while marked drawn+clean — every right-edge spawn crosses that zone.
+Fix: stream before sprites + force-dirty anything at fb x >= 144 (objects + Mario).
+Walk-in goal shows both stones; all regressions green. Awaiting corruption re-test.
+
 ## 2026-07-15 — round 4: level select, the kill thump, shift-frame fold
 - TITLE LEVEL SELECT (user request): Select cycles 1-1/1-2/... (shown top right,
   HUD font); Start launches straight in. Sound test moved to B. (18f8c35)
