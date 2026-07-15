@@ -13,9 +13,9 @@
 level_hdr:                                    ; 18-byte level header
     .addr level0_map                          ; +0  surface map (column-major, 16 B/col)
     .word (level0_end - level0_map) / 16      ; +2  column count
-    .addr room0_map                           ; +4  room 0 map (0 = none)
-    .addr room1_map                           ; +6  room 1 map
-    .word 0                                   ; +8  room 2 map (1-2 has two rooms)
+    .word 0                                   ; +4  room 0 map (0 = none — 1-2's two ROM
+    .word 0                                   ; +6  room 1 map   rooms are unreachable
+    .word 0                                   ; +8  room 2 map   leftovers: empty pipe list)
     .addr pipe_table                          ; +10 pipe entries (5 B each)
     .byte (pipe_table_end - pipe_table) / 5   ; +12 pipe count
     .addr block_table                         ; +13 ?-block contents (4 B each)
@@ -26,12 +26,8 @@ level0_map:
     .incbin "build/levels/level_01.bin"      ; World 1-2, 16 tiles/column
 level0_end:
 
-; Underground pipe rooms (one 20-column screen each) + the pipe table.
-room0_map:
-    .incbin "build/levels/level_01_room0.bin"
-room1_map:
-    .incbin "build/levels/level_01_room1.bin"
-
+; (1-2's two room blobs are dropped: its pipe list is empty in the ROM, so they are
+;  unreachable leftovers — see docs/24. The header's room ptrs are 0.)
 pipe_table:                                   ; 5 bytes/pipe: entry_col(16), room, resume_col(16)
     .incbin "build/levels/level_01_pipes.bin"
 pipe_table_end:

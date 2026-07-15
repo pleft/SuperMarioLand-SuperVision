@@ -5507,6 +5507,36 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     rts
 .endproc
 
+; mark_slot_y: overlap propagation hit on slot Y. If its drawn state truly matches
+; (same position AND anim token) it can redraw WITHOUT an erase — the draw repaints
+; its exact old pixels. A budget-DEFERRED mover is 'clean' but HAS moved: it gets a
+; FULL dirty (erase + draw) or its old image would linger (debris-crumb bug).
+.proc mark_slot_y
+    lda o_nvx,y
+    cmp o_pvx,y
+    bne @full
+    lda o_ndy,y
+    cmp o_pvy,y
+    bne @full
+    phx
+    tya
+    tax
+    jsr anim_token
+    plx
+    cmp o_pfr,y
+    bne @full
+    lda o_nfl,y                  ; truly unmoved: draw-only refresh
+    ora #4
+    bra @st
+@full:
+    lda o_nfl,y                  ; moved while deferred (or mid anim flip):
+    ora #1                       ; full erase + draw
+@st:
+    sta o_nfl,y
+    rts
+.endproc
+
+
 
 ; bonk_kill_above: a hopping block bonk (?-block/hidden/brick/multi-coin) kills any
 ; enemy standing ON the bonked cell (feet_col/mrow): dead-flip corpse + the class
@@ -6628,6 +6658,8 @@ title_tiles:                     ; the used tiles, SV-packed
 @pdx:
     rts
 .endproc
+
+
 ; anim_token: A = the animation token for slot X — the dirty test redraws on a
 ; token change. Bees flap on a SLOT-STAGGERED 8-frame phase (so two bees never
 ; force a same-frame redraw wave); arrows/stones have no animation at all.
@@ -7857,9 +7889,7 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     ina
 :   cmp #28
     bcs @sp_jn
-    lda o_nfl,y                  ; overlap: j REDRAWS but need not erase — it did
-    ora #4                       ; not move (it was clean), so its draw repaints its
-    sta o_nfl,y                  ; exact old pixels over the neighbour's restore
+    jsr mark_slot_y              ; overlap: j must redraw (erase too if it moved)
 @sp_jn:
     inc tmpL3
     lda tmpL3
@@ -7901,9 +7931,7 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     sta m_dirty
     bra @sp_mn
 @sp_mset:
-    lda o_nfl,y
-    ora #4                       ; refresh-only (unmoved; Mario's erase restored BG)
-    sta o_nfl,y
+    jsr mark_slot_y
 @sp_mn:
     inc tmpL3
     lda tmpL3
