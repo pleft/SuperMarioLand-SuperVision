@@ -172,6 +172,9 @@ dbcol:       .res 1          ; draw_column input: dest VRAM byte column
 strk:        .res 1          ; scroll streaming loop counter
 shift_px:    .res 1          ; pixels the framebuffer shifted this frame (0 or 32 per DMA shift)
 stream_flag: .res 1          ; stream_one drew a margin column this frame (margin sprites redraw)
+water_on:   .res 1           ; 1-3: animate the $5D shore tiles (GB $d014)
+w_i:        .res 1           ; l3_water: fb column / map row cursors
+w_row:      .res 1
 stream_x0:  .res 1           ; fb-x span [x0,x1) rewritten this frame by stream/blank
 stream_x1:  .res 1           ; (valid only while stream_flag=1)
 ; --- music sequencer state (two channel blocks, stride 12, X = 0/12) ---
@@ -320,8 +323,7 @@ o_hp:        .res 10          ; extra hits to survive (fly: 1 -- two balls kill,
     jsr draw_player
     lda #3                       ; 64Hz driver (GB: TMA=0 at level init, $0769)
     sta mus_rate
-    lda #MUS_LEVEL               ; the 1-1 tune (the original writes track $07 from the
-    jsr mus_start                ; per-level table at bank0 $07CE on level entry)
+    jsr lvl_music                ; per-level tune (GB table $07CE)
     cli
 
 main_loop:
@@ -354,6 +356,9 @@ main_loop:
     dec stream_pend              ; streamed column never covers a same-frame sprite draw
     lda #1
     sta stream_flag
+:   lda water_on                 ; 1-3: the $5D shore tiles shimmer every 8 frames
+    beq :+
+    jsr l3_water
 :   jsr render_all               ; sprites: overlap-safe erase set -> erases -> draws
     lda hud_dirty
     beq :+
@@ -443,7 +448,8 @@ main_loop:
 @starout:
     stz mario_starT
     stz star_flash               ; expired -> visible for good
-    lda #MUS_LEVEL               ; music back via the level table ($1F1C -> $07A3):
+    ldx cur_level                ; music back via the level table ($1F1C -> $07A3):
+    lda lvl_track_tab,x
     ldx room_mode                ; the underground rooms restore their own tune
     beq @strestore
     lda #MUS_UNDER
@@ -555,7 +561,9 @@ main_loop:
     cmp #$80                     ; unmodified ?-block: if it's the ACTIVE multi-coin block,
     beq @mcchk                   ; it draws (and collides) as a brick ($82) after its 1st bonk
     cmp #$81
-    bne @ret
+    beq @mcchk
+    cmp #$5F                     ; a HIDDEN cell hosting the LIVE multi-coin also reads
+    bne @ret                     ; as the brick once registered (1-3 col 193)
 @mcchk:
     pha
     lda mc_colh
@@ -705,6 +713,8 @@ main_loop:
     beq @heart
     cmp #$2c                     ; $2c = star
     beq @star
+    cmp #$07                     ; $07 = the 1-3 hidden-block secret (GB object $13:
+    beq @gift                    ; emerges, sits; stomp -> floats off with a thump)
     bra @coinspawn               ; unknown listed value -> coin (defensive)
 @powerup:                        ; SML size rule: big Mario gets a Superball Flower, small a Mushroom
     lda mario_big
@@ -721,6 +731,9 @@ main_loop:
     rts
 @star:
     jsr spawn_star
+    rts
+@gift:
+    jsr l3_gift
     rts
 @coin:
     jsr mark_used
@@ -1299,8 +1312,7 @@ main_loop:
     jsr draw_player              ; place Mario at the start
     lda #3                       ; 64Hz driver (GB: TMA=0 at level init)
     sta mus_rate
-    lda #MUS_LEVEL               ; level restart -> the music restarts from the top
-    jsr mus_start
+    jsr lvl_music                ; per-level tune (GB table $07CE)
     rts
 .endproc
 
@@ -3146,7 +3158,7 @@ music_data:
 ; start it FRESH from column 0. Score, coins, lives and Mario's power-ups
 ; (big/superball) PERSIST; everything level-local resets. Levels shipped so far:
 ; 1-1 and 1-2 — the wrap constant grows as more of World 1 comes online.
-NUM_LEVELS = 2
+NUM_LEVELS = 3
 .proc next_level
     stz goal_phase
     stz room_mode
@@ -3238,8 +3250,7 @@ NUM_LEVELS = 2
     jsr draw_player
     lda #3                       ; 64Hz driver (GB: TMA=0 at level init)
     sta mus_rate
-    lda #MUS_LEVEL               ; fresh level -> the tune from the top
-    jsr mus_start
+    jsr lvl_music                ; per-level tune (GB table $07CE)
     rts
 .endproc
 
@@ -3429,8 +3440,7 @@ NUM_LEVELS = 2
     jsr draw_player
     lda mario_starT               ; surface music restored via the level table ($07A3),
     bne :+                        ; which returns early while the star is active
-    lda #MUS_LEVEL
-    jsr mus_start
+    jsr lvl_music                ; per-level tune (GB table $07CE)
 :   rts
 .endproc
 
@@ -4490,6 +4500,16 @@ BOMB_FUSE  = 63                  ; trace-exact: stomp f694 -> explosion f757 (~1
 BOOM_LIFE  = 44                  ; trace: >=43 frames live (capture ended mid-cloud)
 OBJ_FLY    = 17                  ; the Fly (SML type $0E): sits, then hops toward Mario
 OBJ_CORPSE = 18                  ; ball/star kill: the enemy Y-FLIPPED, hops and falls off
+; --- the 1-3 kit (types >= OBJ_SUU dispatch into the bank-2 RAM overlay, L3CODE) ---
+OBJ_SUU    = 22                  ; $02: bobbing spider (8x16, rises 16px, anim at the top)
+OBJ_ROCK   = 23                  ; $0C: spiky ball (16x8): hangs ~174f, falls thru terrain
+OBJ_GAO    = 24                  ; $3F: sphinx statue (16x16): fires every 137f
+OBJ_FIRE   = 25                  ; $23: Gao's fireball (8x8 $E2): 1px/f x, 0.5px/f aimed y
+OBJ_BAT    = 26                  ; $08: moai flyer (32x16): bobs, launches 2 shots/cycle
+OBJ_BULL   = 27                  ; $1E: the flyer's shot (16x8): 1px/f horizontal
+OBJ_GIFT   = 28                  ; $13: hidden-block secret ($E6): stomp -> floats away
+OBJ_GSQ    = 29                  ; $40: stomped Gao (flat pair ~48f, then the corpse)
+OBJ_GCORP  = 30                  ; $41: Gao corpse: kill_flip-style hop + fall
                                  ; the screen (GB type $0D; slot capture: rise 7px, fall to
                                  ; +2px/f, 1px/f sideways drift away from the killer)
 FLY_TL     = $A0                 ; 16x16 metasprite, frame A: A0 A1 / B0 B1
@@ -5297,8 +5317,19 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     jsr spawn_platv
     bra @skip
 :   cmp #$0B
-    bne @skip
+    bne :+
     jsr spawn_plath
+    bra @skip
+:   cmp #$02                     ; 1-3 kit (RAM overlay): $02 spider, $0C spiky ball,
+    beq @l3                      ; $3F Gao, $08 moai flyer
+    cmp #$0C
+    beq @l3
+    cmp #$3F
+    beq @l3
+    cmp #$08
+    bne @skip
+@l3:
+    jsr l3_spawn
     bra @skip
 @chib:
     jsr spawn_chib
@@ -5437,6 +5468,7 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     rts
 .endproc
 
+.segment "L12"
 .proc spawn_bunbun               ; the bee flies level at its spawn height
     phy
     jsr find_free_obj
@@ -5455,6 +5487,7 @@ riding_this:                     ; Z=1 if Mario rides slot oi
 @full:
     rts
 .endproc
+.segment "LEVELS"
 
 
 ; p1_init / p1_next: rotated pass-1 slot walk. The scan origin advances once per
@@ -5543,6 +5576,8 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     beq @cand
     cmp #OBJ_BUNBUN
     beq @cand
+    cmp #OBJ_SUU                 ; 1-3 kit: victim handling via the overlay
+    bcs @cand
 @next:
     inc oi2
     lda oi2
@@ -5598,6 +5633,12 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     lda tmpL3
     cmp #10
     bcs @next
+    lda o_type,x
+    cmp #OBJ_SUU
+    bcc :+
+    jsr l3_bonk                  ; 1-3 kit: per-type bonk outcome
+    jmp @next
+:
     lda #$01                     ; kill value by class (star/ball convention):
     sta tmpH3                    ; walkers 100, fly 400, bunbun 800
     lda o_type,x
@@ -5622,6 +5663,7 @@ riding_this:                     ; Z=1 if Mario rides slot oi
 
 ; upd_bunbun: the slot-captured cycle — fly 1px/f toward Mario 40f (wings flap per
 ; 8f), hover 33f dropping an arrow at tick 57, loop re-facing Mario each cycle.
+.segment "L12"
 .proc upd_bunbun
     ldx oi
     lda o_xl,x                   ; off-screen-left cull (walker rule)
@@ -5680,10 +5722,12 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     stz o_tmr,x
 :   jmp enemy_contact
 .endproc
+.segment "LEVELS"
 
 
 ; upd_arrow: 1px/frame straight down, x frozen, straight through terrain, gone off
 ; the bottom. ANY contact hurts — no stomp ($3186 row for $45: no morph on top contact).
+.segment "L12"
 .proc bunbun_drop                ; release the arrow at the bee's position
     jsr find_free_obj
     bcs @full
@@ -5703,7 +5747,9 @@ riding_this:                     ; Z=1 if Mario rides slot oi
 @full:
     rts
 .endproc
+.segment "LEVELS"
 
+.segment "L12"
 .proc upd_arrow
     ldx oi
     lda o_st,x                   ; fall 2px every OTHER frame on the BEE's parity
@@ -5744,6 +5790,7 @@ riding_this:                     ; Z=1 if Mario rides slot oi
 @done:
     rts
 .endproc
+.segment "LEVELS"
 
 .segment "CODE"
 
@@ -6607,6 +6654,7 @@ title_tiles:                     ; the used tiles, SV-packed
 ; ball_active: C=1 if a superball is already live (only one at a time, per the original).
 ; (FIXED is full; the common prefix is always mapped)
 ; mario_dx: tmpL3(+H3) = |mario centre - slot X's centre (o_x+4)|, 16-bit.
+.segment "LEVELS"
 .proc mario_dx
     lda cam_x                    ; mario centre = cam + spr_x + 8
     clc
@@ -6646,14 +6694,19 @@ title_tiles:                     ; the used tiles, SV-packed
 @pdx:
     rts
 .endproc
+.segment "CODE"
 
 
 ; anim_token: A = the animation token for slot X — the dirty test redraws on a
 ; token change. Bees flap on a SLOT-STAGGERED 8-frame phase (so two bees never
 ; force a same-frame redraw wave); arrows/stones have no animation at all.
+.segment "LEVELS"                ; (moved from FIXED for the 1-3 hooks' code space)
 .proc anim_token
     lda o_type,x
-    cmp #OBJ_ARROW
+    cmp #OBJ_SUU
+    bcc :+
+    jmp l3_token                 ; per-type tokens for the 1-3 kit
+:   cmp #OBJ_ARROW
     beq @none
     cmp #OBJ_STONE
     beq @none
@@ -6675,6 +6728,7 @@ title_tiles:                     ; the used tiles, SV-packed
     lda #0
     rts
 .endproc
+.segment "CODE"
 .proc ball_active
     ldx #OBJ_MAX-1
 :   lda o_type,x
@@ -6688,6 +6742,8 @@ title_tiles:                     ; the used tiles, SV-packed
     sec
     rts
 .endproc
+.segment "CODE"
+.segment "CODE"
 
 ; try_fire: B newly pressed + Superball Mario + no ball live -> fire a superball.
 .proc try_fire
@@ -6922,6 +6978,8 @@ title_tiles:                     ; the used tiles, SV-packed
     beq :+
     cmp #OBJ_BUNBUN
     beq :+
+    cmp #OBJ_GAO                 ; the only 1-3 type a superball kills ($3186 +1 col)
+    beq :+
     jmp @next
 :   ldy oi                       ; dx = |ball - enemy| (16-bit)
     lda o_xl,y
@@ -6957,7 +7015,21 @@ title_tiles:                     ; the used tiles, SV-packed
     lda #$01                     ; value code: walkers 100
     sta tmpH2
     lda o_type,x
-    cmp #OBJ_BUNBUN
+    cmp #OBJ_GAO
+    bne :+
+    ldy oi                       ; drift along the ball's flight
+    lda o_vx,y
+    bmi @gleft
+    lda #1
+    bra @gball
+@gleft:
+    lda #$FF
+@gball:
+    jsr l3_gao_kill              ; thump + flipped corpse + 800
+    ldx oi
+    stz o_type,x                 ; the ball expires against it
+    rts
+:   cmp #OBJ_BUNBUN
     bne :+
     lda #$08                     ; bunbun 800
     sta tmpH2
@@ -7142,6 +7214,10 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     ldx oi
     lda o_type,x
     bne :+
+    jmp @next
+:   cmp #OBJ_SUU
+    bcc :+
+    jsr l3_update                ; the 1-3 kit (bank-2 RAM overlay, types 22+)
     jmp @next
 :   cmp #OBJ_COIN
     beq @coin
@@ -7754,6 +7830,11 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     sta o_pvy,x
     lda #2                       ; drawn width: 2 cols; 3 popup/explosion; 4 platform;
     ldy o_type,x                 ; bit7 = TALL (16px: the Nokobon)
+    cpy #OBJ_SUU
+    bcc :+
+    jsr l3_width                 ; erase widths for the 1-3 kit
+    bra @wset
+:
     cpy #OBJ_POPUP
     bne :+
     lda #3
@@ -7794,7 +7875,9 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     cpy #OBJ_PLATH+1
     bcs :+
     lda #4
-:   sta o_pw,x
+:
+@wset:
+    sta o_pw,x
     jsr anim_token               ; per-type anim token (bee flap slot-staggered;
     sta o_pfr,x                  ; arrows/stones never anim-dirty)
     lda #1
@@ -7940,7 +8023,10 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     sta spr_col
     ldx oi
     lda o_type,x
-    cmp #OBJ_COIN
+    cmp #OBJ_SUU
+    bcc :+
+    jmp l3_draw                  ; the 1-3 kit draws (RAM overlay)
+:   cmp #OBJ_COIN
     bne :+
     jmp @coin
 :   cmp #OBJ_FLOWER
@@ -8461,10 +8547,16 @@ lvl_bank_tab: .byte 1, 0, 2     ; level id -> ROM bank (1-2 shares bank 0 with t
     lda cur_level
     cmp #1                       ; bank 0's linked resident is LEVEL 1 (1-2)
     beq @hcopy
-    lda #<__TITLE0_LOAD__
-    sta lvl_ptr
-    lda #>__TITLE0_LOAD__
-    sta lvl_ptr+1
+    ldy #<__TITLE0_LOAD__
+    sty lvl_ptr
+    ldy #>__TITLE0_LOAD__
+    sty lvl_ptr+1
+    cmp #2                       ; bank 2: the L3 overlay blob precedes the header
+    bne @hcopy
+    ldy #<(__TITLE0_LOAD__+__L3CODE_SIZE__)
+    sty lvl_ptr
+    ldy #>(__TITLE0_LOAD__+__L3CODE_SIZE__)
+    sty lvl_ptr+1
 @hcopy:
     ldy #17                      ; header -> RAM (18 bytes)
 :   lda (lvl_ptr),y
@@ -8552,12 +8644,42 @@ lvl_bank_tab: .byte 1, 0, 2     ; level id -> ROM bank (1-2 shares bank 0 with t
     iny
     cpy #128
     bne :-
+    stz water_on
+    lda cur_level                ; 1-3 (bank 2): copy the L3 overlay to RAM + enable
+    cmp #2                       ; the water shimmer (GB LevelParamTable / $d014).
+    bne @nol3                    ; The packer stores the blob at the TITLE0 address
+    lda #<__TITLE0_LOAD__        ; (the header follows it — see @hdr2 above).
+    sta lvl_ptr
+    lda #>__TITLE0_LOAD__
+    sta lvl_ptr+1
+    lda #<__L3CODE_RUN__
+    sta tmpL2
+    lda #>__L3CODE_RUN__
+    sta tmpH2
+    ldx #8                       ; 8 pages cover the asserted max size
+@l3pg:
+    ldy #0
+:   lda (lvl_ptr),y
+    sta (tmpL2),y
+    iny
+    bne :-
+    inc lvl_ptr+1
+    inc tmpH2
+    dex
+    bne @l3pg
+    lda #1
+    sta water_on
+@nol3:
     rts
 .endproc
+
+.import __L3CODE_LOAD__, __L3CODE_RUN__, __L3CODE_SIZE__
+.assert __L3CODE_SIZE__ <= $7C0, error, "L3CODE overlay exceeds the RAM window"
 
 
 .segment "LEVELS"                ; 1-2 entity draw bodies (FIXED is full; the banked
                                  ; common prefix is always mapped)
+.segment "L12"
 .proc draw_bunbun
     ldx oi
     lda o_vx,x                   ; face the flight direction (tiles face left natively)
@@ -8635,6 +8757,7 @@ lvl_bank_tab: .byte 1, 0, 2     ; level id -> ROM bank (1-2 shares bank 0 with t
     stz do_flip
     rts
 .endproc
+.segment "CODE"
 .proc draw_stone
     lda spr_col                  ; one 8x8 tile at the platform line
     sta dcol
@@ -8647,6 +8770,7 @@ lvl_bank_tab: .byte 1, 0, 2     ; level id -> ROM bank (1-2 shares bank 0 with t
     jsr draw_quad
     rts
 .endproc
+.segment "L12"
 .proc draw_cbunbun
     ldx oi                       ; --- bunbun 16x16: bottom row flipped on top ---
     lda o_y,x
@@ -8683,7 +8807,9 @@ lvl_bank_tab: .byte 1, 0, 2     ; level id -> ROM bank (1-2 shares bank 0 with t
     ldx #BUN_TL+1
     jmp draw_tile_yflip
 .endproc
+.segment "LEVELS"
 .segment "CODE"
+.segment "L12"
 .proc draw_arrow
     lda spr_col                  ; 8x16: point over shaft, no flip
     sta dcol
@@ -8701,6 +8827,7 @@ lvl_bank_tab: .byte 1, 0, 2     ; level id -> ROM bank (1-2 shares bank 0 with t
     jsr draw_quad
     rts
 .endproc
+.segment "CODE"
 
 .segment "LEVELS"
 ; animate_player: pick the pose index — jump in the air, the 3-frame GB walk cycle
@@ -8929,6 +9056,7 @@ row48_hi: .res 160           ; paid in EVERY bank)
 .endproc
 
 ; flush_stream: drain any queued margin columns immediately (pre-double-shift guard).
+.segment "CODE"
 .proc flush_stream
     lda stream_pend
     beq @done
@@ -8938,6 +9066,7 @@ row48_hi: .res 160           ; paid in EVERY bank)
 @done:
     rts
 .endproc
+.segment "LEVELS"
 
 ; blank_margin: clear the 8 margin bytes of every playfield line — the linear DMA
 ; shift just filled them with the next line's left edge (see fb_shift8). Blank
@@ -9485,6 +9614,1169 @@ HUD_SPLIT_LINE = 16              ; timer reload = split scanline (IPeriod=256 cy
 ; GB-bit X is set from this SV-input mask:
 sv_masks:  .byte PAD_A, PAD_B, PAD_SELECT, PAD_START, PAD_RIGHT, PAD_LEFT, PAD_UP, PAD_DOWN
 bit_masks: .byte $01,$02,$04,$08,$10,$20,$40,$80
+
+
+; ---------------------------------------------------------------------------
+; THE 1-3 KIT (L3CODE): bank-2-only code + data, linked to run at $1900 in RAM.
+; load_level copies it there when level 2 (1-3) loads; every entry point below is
+; reached only through type/level guards, so other levels never execute this RAM.
+; All behavior is GB-capture-verified (docs/12 "1-3 kit"): PyBoy slot traces for
+; the spider cycle, spiky-ball timer, Gao fire cycle + fireball aim, moai flyer
+; bob + shot drops, the hidden-block secret, and the $3186 contact-table rows.
+; ---------------------------------------------------------------------------
+.segment "LEVELS"
+
+MUS_T13 = 7                      ; track $03's index in the extractor's TRACKS list
+lvl_track_tab:  .byte MUS_LEVEL, MUS_LEVEL, MUS_T13   ; GB per-level table $07CE
+
+.proc lvl_music                  ; start the current level's tune
+    ldx cur_level
+    lda lvl_track_tab,x
+    jmp mus_start
+.endproc
+
+.segment "L3CODE"
+
+; --- tiles (GB OBJ set = SV chardata, indices identical) ---
+SUU_TA  = $92                    ; frame A top / +1 bottom; frame B = $94/$95
+ROCK_TL = $DD                    ; spiky ball left / $DE right
+GAO_TL  = $A4                    ; A4 A5 / B4 B5; mouth open = +2
+GAO_SQA = $B9                    ; stomped: B9 + B8 flat pair
+FIRE_T  = $E2
+GIFT_T  = $E6                    ; (bat tiles: see bat_row_a/b below)
+
+.proc l3_spawn                   ; A = GB type, Y = spawn entry offset; C=0 spawned
+    pha
+    phy
+    jsr find_free_obj
+    ply
+    pla
+    bcs @full
+    cmp #$02
+    bne :+
+    lda #OBJ_SUU
+    bra @common
+:   cmp #$0C
+    bne :+
+    lda #OBJ_ROCK
+    bra @common
+:   cmp #$3F
+    bne :+
+    lda #OBJ_GAO
+    bra @common
+:   lda #OBJ_BAT
+@common:
+    sta o_type,x
+    jsr spawn_tabx               ; exact rule: world x = fire + 192 + x_off*4
+    lda o_type,x
+    cmp #OBJ_BAT                 ; the 32px flyer anchors at its LEFT edge
+    bne :+
+    lda o_xl,x
+    sec
+    sbc #8
+    sta o_xl,x
+    bcs :+
+    dec o_xh,x
+:   lda spawn_tab+2,y
+    sta o_y,x
+    stz o_vx,x
+    stz o_vy,x
+    stz o_tmr,x
+    stz o_st,x
+    clc
+@full:
+    rts
+.endproc
+
+; --- update dispatch (X = oi on entry) ---
+.proc l3_update
+    lda o_type,x
+    sec
+    sbc #OBJ_SUU
+    asl
+    tay
+    lda l3_updtab+1,y
+    pha
+    lda l3_updtab,y
+    pha
+    rts                          ; rts-dispatch into the handler
+.endproc
+l3_updtab:
+    .word upd_suu-1, upd_rock-1, upd_gao-1, upd_fire-1, upd_bat-1
+    .word upd_bull-1, upd_gift-1, upd_gsq-1, upd_gcorp-1
+
+; cull once the camera passes 20px beyond (the walker rule)
+.proc l3_cull                    ; C=1 -> culled (slot freed)
+    lda o_xl,x
+    clc
+    adc #20
+    sta tmpL3
+    lda o_xh,x
+    adc #0
+    cmp cam_x+1
+    bcc @cull
+    bne @keep
+    lda tmpL3
+    cmp cam_x
+    bcc @cull
+@keep:
+    clc
+    rts
+@cull:
+    stz o_type,x
+    sec
+    rts
+.endproc
+
+; Mario overlap (the enemy_contact box): |dx|<10 (centres) and |spr_y-o_y|<14
+.proc l3_box                     ; C=1 -> touching
+    jsr mario_dx
+    lda tmpH3
+    bne @no
+    lda tmpL3
+    cmp #10
+    bcs @no
+    lda spr_y
+    sec
+    sbc o_y,x
+    bpl :+
+    eor #$FF
+    ina
+:   cmp #14
+    bcs @no
+    sec
+    rts
+@no:
+    clc
+    rts
+.endproc
+
+.proc l3_above                   ; C=1 -> Mario is the stomp side (4+px above)
+    lda spr_y
+    clc
+    adc #4
+    cmp o_y,x
+    rts                          ; bcc = above
+.endproc
+
+; --- SUU $02: 200f cycle -- 62f hold low, 16f rise, 105f hold high (anim
+; toggles every ~16f), 16f descend (trace: y 120<->104 GB) ---
+.proc upd_suu
+    jsr l3_cull
+    bcc :+
+    rts
+:   lda o_tmr,x
+    cmp #62
+    bcc @tick                    ; bottom hold
+    cmp #78
+    bcs :+
+    dec o_y,x                    ; rising 1px/f
+    bra @tick
+:   cmp #183
+    bcc @tick                    ; top hold (anim via l3_token/draw)
+    inc o_y,x                    ; descending
+@tick:
+    inc o_tmr,x
+    lda o_tmr,x
+    cmp #199
+    bcc :+
+    stz o_tmr,x
+:   ; contact: star -> silent despawn +100 ($3186 +3 = $FF); else ANY touch hurts
+    jsr l3_box
+    bcs :+
+    rts
+:   lda mario_starT
+    beq @hurt
+    stz o_type,x
+    lda #$01
+    jmp award_kill
+@hurt:
+    jmp hurt_mario               ; not stompable (+0 = 0): top contact hurts too
+.endproc
+
+; --- ROCK $0C: hangs 174f, then falls 1px/f THROUGH terrain; gone at y>=168.
+; Spiky: any contact hurts; star/ball have no effect ($3186: 00 00 FF 00 00) ---
+.proc upd_rock
+    lda o_tmr,x
+    cmp #174
+    bcs @fall
+    inc o_tmr,x
+    bra @touch
+@fall:
+    inc o_y,x
+    lda o_y,x
+    cmp #168
+    bcc @touch
+    stz o_type,x
+    rts
+@touch:
+    jsr l3_box
+    bcs :+
+    rts
+:   lda mario_starT              ; the star does NOT clear it -- but it must not
+    bne @no                      ; hurt starred Mario either
+    jmp hurt_mario
+@no:
+    rts
+.endproc
+
+; --- GAO $3F: static; 137f cycle -- mouth opens at tick 89 (+SFX $04 + fireball
+; from the muzzle), closes at wrap. Stomp -> flat 48f; ball/star/bonk -> corpse ---
+.proc upd_gao
+    jsr l3_cull
+    bcc :+
+    rts
+:   inc o_tmr,x
+    lda o_tmr,x
+    cmp #89
+    bne :+
+    jsr gao_fire
+    ldx oi
+:   lda o_tmr,x
+    cmp #137
+    bcc :+
+    stz o_tmr,x
+:   ; contact
+    jsr l3_box
+    bcs :+
+    rts
+:   lda mario_starT
+    beq :+
+    lda #1                       ; star: thrown along Mario's facing
+    ldy mario_facing
+    beq @sd
+    lda #$FF
+@sd:
+    jsr l3_gao_kill
+    lda #$08
+    jmp award_kill
+:   jsr l3_above
+    bcc @hurt
+    lda #OBJ_GSQ                 ; stomp: the flat pair ~48f, then the corpse
+    sta o_type,x
+    lda #48
+    sta o_tmr,x
+    lda #1                       ; Mario's stomp bounce
+    sta jump_state
+    lda #14
+    sta arc_idx
+    stz fall_v
+    stz ride
+    lda #$08                     ; Gao class 2 = 800, stomp combo chains
+    jmp award_stomp
+@hurt:
+    jmp hurt_mario
+.endproc
+
+.proc gao_fire                   ; muzzle = the statue position; aim = Mario's side
+    lda #SFX_DFF8_04
+    jsr sfx_play
+    jsr find_free_obj
+    bcs @full
+    ldy oi
+    lda #OBJ_FIRE
+    sta o_type,x
+    lda o_xl,y
+    sta o_xl,x
+    lda o_xh,y
+    sta o_xh,x
+    lda o_y,y
+    sta o_y,x
+    jsr l3_aim_vx                ; vx: toward Mario
+    sta o_vx,x
+    ; vy: 0.5px/f toward Mario's side of the muzzle (capture: up if above, down if below)
+    lda spr_y
+    cmp o_y,y
+    bcs :+
+    lda #$FF
+    bra @vy
+:   lda #1
+@vy:
+    sta o_vy,x
+    stz o_tmr,x
+    stz o_st,x
+@full:
+    rts
+.endproc
+
+.proc l3_aim_vx                  ; Y = shooter slot -> A = +1/-1 toward Mario
+    lda cam_x
+    clc
+    adc spr_x
+    sta tmpL2
+    lda cam_x+1
+    adc #0
+    cmp o_xh,y
+    bcc @left
+    bne @right
+    lda tmpL2
+    cmp o_xl,y
+    bcs @right
+@left:
+    lda #$FF
+    rts
+@right:
+    lda #1
+    rts
+.endproc
+
+.proc l3_gao_kill                ; A = corpse drift dir; X = the Gao slot
+    pha
+    lda #SFX_DFF8_03             ; the kill thump ($41 script: F9 03)
+    jsr sfx_play
+    pla
+    sta o_vx,x
+    lda #OBJ_GCORP
+    sta o_type,x
+    stz o_tmr,x
+    rts
+.endproc
+
+; --- FIRE $23: 1px/f horizontal, 0.5px/f vertical (slot-staggered), through
+; everything; despawns off-screen. Any contact hurts; star/ball no effect ---
+.proc upd_fire
+    lda o_vx,x
+    bmi @ml
+    inc o_xl,x
+    bne @xd
+    inc o_xh,x
+    bra @xd
+@ml:
+    lda o_xl,x
+    bne :+
+    dec o_xh,x
+:   dec o_xl,x
+@xd:
+.endproc                          ; (fall through)
+.proc upd_fire2
+    ldx oi
+    txa                          ; y at half rate, slot-staggered like the arrows
+    eor frame_count
+    lsr
+    bcs @ychk
+    lda o_y,x
+    clc
+    adc o_vy,x
+    sta o_y,x
+@ychk:
+    lda o_y,x
+    cmp #2                       ; off the top / bottom
+    bcc @gone
+    cmp #168
+    bcs @gone
+    jsr l3_xoff                  ; off-screen x -> freed
+    bcs @done
+    jsr l3_box
+    bcs :+
+@done:
+    rts
+:   lda mario_starT
+    bne @done
+    jmp hurt_mario
+@gone:
+    stz o_type,x
+    rts
+.endproc
+
+.proc l3_xoff                    ; X = slot; C=1 -> off-screen (slot freed)
+    lda o_xl,x
+    sec
+    sbc cam_x
+    sta tmpL3
+    lda o_xh,x
+    sbc cam_x+1
+    bne @off
+    lda tmpL3
+    cmp #200
+    bcc @on
+@off:
+    stz o_type,x
+    sec
+    rts
+@on:
+    clc
+    rts
+.endproc
+
+; --- BAT $08 (moai flyer, 32x16): fixed x; 162f cycle -- hold, bob up 17px and
+; back at 0.5px/f; launches a shot at ticks 64 and 121 (SFX $04). Star -> BOOM
+; (5000, $3186 class 3); stomp/touch hurt; ball no effect ---
+.proc upd_bat
+    jsr l3_cull
+    bcc :+
+    rts
+:   lda o_tmr,x
+    cmp #64
+    beq @shot
+    cmp #121
+    beq @shot
+    bra @bob
+@shot:
+    jsr bat_shot
+    ldx oi
+@bob:
+    lda o_tmr,x
+    cmp #80
+    bcc @tick                    ; hold
+    cmp #114
+    bcs :+
+    txa                          ; rise 0.5px/f
+    eor frame_count
+    lsr
+    bcs @tick
+    dec o_y,x
+    bra @tick
+:   cmp #148
+    bcs @tick
+    txa                          ; sink 0.5px/f
+    eor frame_count
+    lsr
+    bcs @tick
+    inc o_y,x
+@tick:
+    inc o_tmr,x
+    lda o_tmr,x
+    cmp #162
+    bcc :+
+    stz o_tmr,x
+:   ; contact box: 32px wide -> test vs the sprite centre (o_x+16): widen |dx|<18
+    jsr mario_dx
+    lda tmpH3
+    bne @no
+    lda tmpL3
+    cmp #26                      ; centres: mario vs LEFT edge +8; accept < 26
+    bcs @no
+    lda spr_y
+    sec
+    sbc o_y,x
+    bpl :+
+    eor #$FF
+    ina
+:   cmp #14
+    bcs @no
+    lda mario_starT
+    beq @hurt
+    lda #SFX_DFF8_01             ; star: the stone head BURSTS ($4F script, F9 01)
+    jsr sfx_play
+    ldx oi
+    lda #OBJ_BOOM
+    sta o_type,x
+    lda #BOOM_LIFE
+    sta o_tmr,x
+    lda o_xl,x                   ; centre the 16px cloud on the 32px body
+    clc
+    adc #8
+    sta o_xl,x
+    bcc :+
+    inc o_xh,x
+:   lda #$50                     ; class 3 = 5000
+    jmp award_kill
+@hurt:
+    jmp hurt_mario               ; not stompable (stone)
+@no:
+    rts
+.endproc
+
+.proc bat_shot                   ; launch the $1E shot at (x+8, y-4), toward Mario
+    lda #SFX_DFF8_04
+    jsr sfx_play
+    jsr find_free_obj
+    bcs @full
+    ldy oi
+    lda o_xl,y
+    clc
+    adc #8
+    sta o_xl,x
+    lda o_xh,y
+    adc #0
+    sta o_xh,x
+    lda o_y,y
+    sec
+    sbc #4
+    sta o_y,x
+    lda #OBJ_BULL
+    sta o_type,x
+    jsr l3_aim_vx                ; direction: toward Mario
+    sta o_vx,x
+    stz o_tmr,x
+    stz o_st,x
+@full:
+    rts
+.endproc
+
+; --- BULL $1E: 1px/f horizontal, anim pair every 8f; any contact hurts ---
+.proc upd_bull
+    lda o_vx,x
+    bmi @ml
+    inc o_xl,x
+    bne @xd
+    inc o_xh,x
+    bra @xd
+@ml:
+    lda o_xl,x
+    bne :+
+    dec o_xh,x
+:   dec o_xl,x
+@xd:
+    jsr l3_xoff                  ; keep while on screen
+    bcs @done
+    jsr l3_box
+    bcs :+
+@done:
+    rts
+:   lda mario_starT
+    bne @done
+    jmp hurt_mario
+.endproc
+
+; --- GIFT $13: sits on its block; stomp -> floats away 0.5px/f to the top row,
+; holds ~230f, pops with the kill thump (capture f395). No score, no hurt ---
+.proc upd_gift
+    lda o_st,x
+    beq @sit
+    cmp #1
+    beq @float
+    inc o_tmr,x                  ; holding at the top
+    lda o_tmr,x
+    cmp #229
+    bcc @done
+    lda #SFX_DFF8_03
+    jsr sfx_play
+    ldx oi
+    stz o_type,x
+@done:
+    rts
+@float:
+    txa                          ; 0.5px/f rise
+    eor frame_count
+    lsr
+    bcs @sit0
+    dec o_y,x
+    lda o_y,x
+    cmp #9
+    bcs @done
+    lda #2                       ; reached the top row: hold
+    sta o_st,x
+    stz o_tmr,x
+    rts
+@sit:
+    lda o_tmr,x                  ; emerge: 4px rise over 8f
+    cmp #8
+    bcs @sit0
+    inc o_tmr,x
+    lsr
+    bcs @sit0
+    dec o_y,x
+@sit0:
+    ldx oi
+    ; stomp only (walk-through otherwise; the star does NOT clear it)
+    jsr l3_box
+    bcs :+
+    rts
+:   jsr l3_above
+    bcs @stomp
+    rts
+@stomp:
+    lda o_st,x
+    bne @done2                   ; already flying
+    lda #1
+    sta o_st,x
+    stz o_tmr,x
+    lda #1                       ; Mario bounces (GB stomp path), NO score (capture)
+    sta jump_state
+    lda #14
+    sta arc_idx
+    stz fall_v
+    stz ride
+@done2:
+    rts
+.endproc
+
+.proc l3_gift                    ; hit_qblock content $07: emerge on top of the block
+    jsr find_free_obj
+    bcs @full
+    lda #OBJ_GIFT
+    sta o_type,x
+    jsr obj_set_x8
+    lda mrow
+    asl
+    asl
+    asl
+    clc
+    adc #4                       ; emerges 4px (rises to mrow*8 over 8 frames)
+    sta o_y,x
+    stz o_st,x
+    stz o_tmr,x
+    stz o_vx,x
+@full:
+    rts
+.endproc
+
+; --- GSQ: the stomped Gao pair, 48f, then thump + corpse ---
+.proc upd_gsq
+    dec o_tmr,x
+    bne @done
+    lda #1                       ; falls thrown along Mario's facing
+    ldy mario_facing
+    beq :+
+    lda #$FF
+:   jsr l3_gao_kill
+@done:
+    rts
+.endproc
+
+; --- GCORP: kill_flip motion -- 7f rise, then +2px/f fall, 1px/f drift ---
+.proc upd_gcorp
+    lda o_tmr,x
+    cmp #7
+    bcs @fall
+    inc o_tmr,x
+    dec o_y,x
+    bra @drift
+@fall:
+    lda o_y,x
+    clc
+    adc #2
+    sta o_y,x
+    cmp #168
+    bcc @drift
+    stz o_type,x
+    rts
+@drift:
+    lda o_vx,x
+    bmi @dl
+    inc o_xl,x
+    bne @done
+    inc o_xh,x
+    rts
+@dl:
+    lda o_xl,x
+    bne :+
+    dec o_xh,x
+:   dec o_xl,x
+@done:
+    rts
+.endproc
+
+; --- bonk outcomes (a block hop under them; $3186 +4 column) ---
+.proc l3_bonk                    ; X = victim slot
+    lda o_type,x
+    cmp #OBJ_GAO
+    bne :+
+    lda #1
+    ldy mario_facing
+    beq @gd
+    lda #$FF
+@gd:
+    jsr l3_gao_kill
+    lda #$08
+    jmp award_kill
+:   cmp #OBJ_GIFT
+    bne :+
+    lda #1                       ; the secret floats away (GB +4 = morph $14)
+    sta o_st,x
+    stz o_tmr,x
+    rts
+:   cmp #OBJ_BAT
+    bne :+
+    lda #OBJ_BOOM                ; the moai bursts ($4F)
+    sta o_type,x
+    lda #BOOM_LIFE
+    sta o_tmr,x
+    lda #SFX_DFF8_01
+    jsr sfx_play
+    lda #$50
+    jmp award_kill
+:   stz o_type,x                 ; spider/rock/shots: silent despawn ($FF), 100
+    lda #$01
+    jmp award_kill
+.endproc
+
+; --- draw dispatch (spr_col/dy conventions of draw_obj_sprite) ---
+.proc l3_draw
+    sec
+    sbc #OBJ_SUU
+    asl
+    tay
+    lda l3_drwtab+1,y
+    pha
+    lda l3_drwtab,y
+    pha
+    rts
+.endproc
+l3_drwtab:
+    .word draw_suu-1, draw_rock-1, draw_gao-1, draw_fire-1, draw_bat13-1
+    .word draw_bull-1, draw_gift-1, draw_gsq-1, draw_gcorp-1
+
+.proc suu_frame                  ; X = slot -> A = 0/2 (tile offset)
+    lda o_tmr,x
+    cmp #78
+    bcc @a
+    cmp #183
+    bcs @a
+    sec
+    sbc #78
+    lsr
+    lsr
+    lsr
+    lsr
+    and #1
+    beq @a
+    lda #2
+    rts
+@a:
+    lda #0
+    rts
+.endproc
+
+.proc draw_suu
+    ldx oi
+    jsr suu_frame
+    sta tmpL3
+    ldx oi
+    lda o_y,x                    ; top tile
+    sta dy
+    lda spr_col
+    sta dcol
+    lda #SUU_TA
+    clc
+    adc tmpL3
+    tax
+    jsr draw_quad
+    ldx oi
+    lda o_y,x                    ; bottom tile
+    clc
+    adc #8
+    sta dy
+    lda spr_col
+    sta dcol
+    lda #SUU_TA+1
+    clc
+    adc tmpL3
+    tax
+    jsr draw_quad
+    rts
+.endproc
+
+.proc draw_rock
+    lda #ROCK_TL
+    sta tmpL3
+    lda #ROCK_TL+1
+    sta tmpH3
+    jmp l3_pair
+.endproc
+
+.proc l3_pair                    ; tmpL3/tmpH3 = left/right tiles, at o_y+8
+    ldx oi
+    lda o_y,x
+    clc
+    adc #8
+    sta dy
+    lda spr_col
+    sta dcol
+    ldx tmpL3
+    jsr draw_quad
+    ldx oi
+    lda o_y,x
+    clc
+    adc #8
+    sta dy
+    lda spr_col
+    ina
+    ina
+    sta dcol
+    ldx tmpH3
+    jmp draw_quad
+.endproc
+
+.proc l3_one                     ; X = tile, at o_y+8 (8x8 items)
+    ldy oi
+    lda o_y,y
+    clc
+    adc #8
+    sta dy
+    lda spr_col
+    sta dcol
+    jmp draw_quad
+.endproc
+
+.proc draw_gao
+    ldx oi
+    lda #0
+    ldy o_tmr,x
+    cpy #89
+    bcc :+
+    lda #2                       ; mouth open ($A6/$A7/$B6/$B7)
+:   sta tmpL3
+    ldy #0                       ; quad index 0..3: (dx,dy) = (0,0)(8,0)(0,8)(8,8)
+@q:
+    phy
+    ldx oi
+    lda o_y,x
+    sta dy
+    tya
+    and #2
+    beq :+
+    lda #8
+:   clc
+    adc o_y,x
+    sta dy
+    lda spr_col
+    sta dcol
+    tya
+    and #1
+    beq :+
+    lda spr_col
+    ina
+    ina
+    sta dcol
+:   tya                          ; tile: A4+off (+1 right, +$10 bottom row)
+    and #1
+    sta tmpH3
+    tya
+    and #2
+    beq :+
+    lda #$10
+    ora tmpH3
+    sta tmpH3
+:   lda #GAO_TL
+    clc
+    adc tmpH3
+    clc
+    adc tmpL3
+    tax
+    jsr draw_quad
+    ply
+    iny
+    cpy #4
+    bne @q
+    rts
+.endproc
+
+.proc draw_fire
+    ldx #FIRE_T
+    jmp l3_one
+.endproc
+
+bat_row_a: .byte $CA,$CB,$CC,$BA,$DA,$DB,$DC   ; frame A: top 4, bottom 3
+bat_row_b: .byte $AB,$C6,$C7,$AA,$BB,$D6,$D7   ; frame B
+
+.proc draw_bat13
+    ldy #0
+@q:
+    phy
+    ldx oi
+    lda o_y,x                    ; rows: quads 0-3 top, 4-6 bottom
+    sta dy
+    cpy #4
+    bcc :+
+    lda o_y,x
+    clc
+    adc #8
+    sta dy
+:   tya                          ; column: (i&3 for top, i-4 for bottom) * 2
+    cpy #4
+    bcc :+
+    sec
+    sbc #4
+:   asl
+    clc
+    adc spr_col
+    sta dcol
+    ldx oi
+    lda o_tmr,x                  ; frame B while animating/bobbing (tick >= 31)
+    cmp #31
+    bcs @fb
+    lda bat_row_a,y
+    bra @t
+@fb:
+    lda bat_row_b,y
+@t:
+    tax
+    jsr draw_quad
+    ply
+    iny
+    cpy #7
+    bne @q
+    rts
+.endproc
+
+.proc draw_bull
+    lda frame_count              ; C4 C5 <-> D4 D5 every 8f
+    and #8
+    beq :+
+    lda #$10
+:   clc
+    adc #$C4
+    sta tmpL3
+    ina
+    sta tmpH3
+    jmp l3_pair
+.endproc
+
+.proc draw_gift
+    ldx #GIFT_T
+    jmp l3_one
+.endproc
+
+.proc draw_gsq                   ; the flat pair: $B9 left, $B8 right
+    lda #GAO_SQA
+    sta tmpL3
+    lda #GAO_SQA-1
+    sta tmpH3
+    jmp l3_pair
+.endproc
+
+.proc draw_gcorp                 ; the Gao Y-FLIPPED: bottom row on top, all flipped
+    ldy #0
+@q:
+    phy
+    ldx oi
+    lda o_y,x
+    sta dy
+    cpy #2
+    bcs :+
+    bra @row                     ; quads 0,1: the (flipped) BOTTOM row drawn on top
+:   lda o_y,x
+    clc
+    adc #8
+    sta dy
+@row:
+    lda spr_col
+    sta dcol
+    tya
+    and #1
+    beq :+
+    lda spr_col
+    ina
+    ina
+    sta dcol
+:   tya                          ; tiles: B4/B5 (flipped) on top, A4/A5 below
+    and #1
+    sta tmpH3
+    cpy #2
+    bcs @bot
+    lda #$10
+    ora tmpH3
+    sta tmpH3
+@bot:
+    lda #GAO_TL
+    clc
+    adc tmpH3
+    tax
+    jsr draw_tile_yflip
+    ply
+    iny
+    cpy #4
+    bne @q
+    rts
+.endproc
+
+; --- pass-4 erase widths ---
+.proc l3_width                   ; Y = type -> A = o_pw
+    cpy #OBJ_SUU
+    bne :+
+    lda #$82                     ; 8 wide, 16 tall
+    rts
+:   cpy #OBJ_GAO
+    beq @w83
+    cpy #OBJ_GCORP
+    beq @w83
+    cpy #OBJ_BAT
+    bne :+
+    lda #$85                     ; 32 wide + tall
+    rts
+:   cpy #OBJ_FIRE
+    beq @w2
+    cpy #OBJ_GIFT
+    beq @w2
+    lda #3                       ; rock / bull / gsq: 16 wide
+    rts
+@w83:
+    lda #$83                     ; 16 wide + tall
+    rts
+@w2:
+    lda #2
+    rts
+.endproc
+
+; --- anim tokens (MUST mirror the draw-frame choices above) ---
+.proc l3_token                   ; X = slot -> A = token
+    lda o_type,x
+    cmp #OBJ_SUU
+    bne :+
+    jmp suu_frame
+:   cmp #OBJ_GAO
+    bne :+
+    lda o_tmr,x
+    cmp #89
+    lda #0
+    rol                          ; C -> bit0: the mouth state
+    rts
+:   cmp #OBJ_BAT
+    bne :+
+    lda o_tmr,x
+    cmp #31
+    lda #0
+    rol
+    rts
+:   cmp #OBJ_BULL
+    bne :+
+    lda frame_count
+    and #8
+    rts
+:   lda #0                       ; rock/fire/gift/gsq static; gcorp moves every frame
+    rts
+.endproc
+
+; --- the water shimmer: every 8 frames re-blit visible $5D cells (rows 4-6)
+; with the phase source; cells under a drawn sprite are skipped this tick ---
+water_alt: .incbin "build/gfx/water_alt.svt"   ; tile $5D, high plane = ROM $3fc4
+
+; STOPGAP (until the boss phase): the real 1-3 ending is King Totomesu + the
+; switch + the rescue scene — dedicated GB machinery, NOT pool objects; the map
+; itself dead-ends at the arena wall (rope $EC, no exit tiles). Until that
+; ships, reaching the wall at max camera runs the standard clear sequence so
+; the level is completable. Runs from l3_water = every frame, 1-3 only.
+.proc l3_goal_chk
+    lda goal_phase
+    bne @done
+    lda cam_x+1
+    cmp cam_max+1
+    bne @done
+    lda cam_x
+    cmp cam_max
+    bne @done
+    lda jump_state
+    bne @done
+    lda spr_x
+    cmp #126                     ; the arena wall stops him at ~130
+    bcc @done
+    lda #1
+    sta goal_phase
+    lda #240
+    sta goal_tmr
+    stz goal_top
+    stz mario_frame
+    stz mario_duck
+    stz ride
+    lda #3
+    sta mus_rate
+    jsr mus_stop
+    lda #MUS_GOAL
+    jsr mus_start
+@done:
+    rts
+.endproc
+
+.proc l3_water
+    jsr l3_goal_chk
+    lda frame_count
+    and #7
+    beq :+
+    rts
+:   stz w_i
+@col:
+    lda fb_col0                  ; feet_col = fb_col0 + i
+    clc
+    adc w_i
+    sta feet_col
+    lda fb_col0+1
+    adc #0
+    sta feet_col+1
+    lda #4
+    sta w_row
+@row:
+    lda w_row
+    sta mrow
+    jsr read_map_tile
+    cmp #$5D
+    bne @next
+    ; sprite veto: skip the cell if a drawn sprite overlaps it
+    lda w_i
+    asl
+    asl
+    asl
+    sta tmpL2                    ; cell fb x
+    lda w_row
+    ina
+    ina
+    asl
+    asl
+    asl
+    sta tmpH2                    ; cell dy
+    ldx #OBJ_MAX-1
+@veto:
+    lda o_pdr,x
+    beq @vn
+    lda o_pvx,x
+    sec
+    sbc tmpL2
+    bpl :+
+    eor #$FF
+    ina
+:   cmp #16
+    bcs @vn
+    lda o_pvy,x
+    sec
+    sbc tmpH2
+    bpl :+
+    eor #$FF
+    ina
+:   cmp #24
+    bcc @next                    ; overlapped: leave it this tick
+@vn:
+    dex
+    bpl @veto
+    lda prev_vx                  ; Mario too
+    sec
+    sbc tmpL2
+    bpl :+
+    eor #$FF
+    ina
+:   cmp #24
+    bcs @clear
+    lda prev_y
+    sec
+    sbc tmpH2
+    bpl :+
+    eor #$FF
+    ina
+:   cmp #32
+    bcc @next
+@clear:
+    lda frame_count              ; phase source
+    and #8
+    beq @orig
+    lda #<water_alt
+    sta src_ptr
+    lda #>water_alt
+    sta src_ptr+1
+    bra @blit
+@orig:
+    lda #$5D
+    jsr get_tile_src
+@blit:
+    lda w_i
+    asl
+    sta dcol
+    lda tmpH2
+    sta dy
+    jsr set_dst
+    jsr blit_tile
+@next:
+    inc w_row
+    lda w_row
+    cmp #7
+    beq :+
+    jmp @row
+:   inc w_i
+    lda w_i
+    cmp #24
+    beq :+
+    jmp @col
+:   rts
+.endproc
 
 ; ---------------------------------------------------------------------------
 .segment "VECTORS"

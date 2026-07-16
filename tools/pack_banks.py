@@ -28,6 +28,12 @@ def main():
     img_path, map_path = sys.argv[1], sys.argv[2]
     jobs = [tuple(int(x) for x in a.split(":")) for a in sys.argv[3:]]
     img = bytearray(open(img_path, "rb").read())
+    # the L3CODE overlay (the 1-3 kit) is linked at BANK2's start; bank 2 is laid
+    # out below as [prefix][L3 blob @ TITLE0][header][level data] — load_level
+    # finds the header at TITLE0 + __L3CODE_SIZE__
+    mm = re.search(r"L3CODE\s+[0-9A-Fa-f]{6}\s+[0-9A-Fa-f]{6}\s+([0-9A-Fa-f]{6})",
+                   open(map_path).read())
+    l3 = bytes(img[2 * BANK:2 * BANK + int(mm.group(1), 16)]) if mm else b""
     # banks 1+ place their level region where bank 0 keeps the TITLE0 segment (the
     # title runs only with bank 0 mapped, so its range is free in every other bank)
     m = re.search(r"TITLE0\s+([0-9A-Fa-f]{6})", open(map_path).read())
@@ -38,6 +44,7 @@ def main():
     prefix = img[0:hdr_off]                 # bank 0's common prefix, byte-identical everywhere
 
     for level, bank in jobs:
+        lvl_hdr_addr = hdr_addr + (len(l3) if bank == 2 else 0)
         lv = f"build/levels/level_{level:02d}"
         blobs = {}
         for key, suffix in (("map", ".bin"), ("pipes", "_pipes.bin"),
@@ -54,7 +61,7 @@ def main():
         assert len(blobs["map"]) % 16 == 0
 
         # lay out: header, then map, rooms, pipes, blocks, spawns
-        addr = hdr_addr + 18
+        addr = lvl_hdr_addr + 18
         place = {}
         for key, data in [("map", blobs["map"]), ("room0", rooms[0]), ("room1", rooms[1]),
                           ("room2", rooms[2]), ("pipes", blobs["pipes"]),
@@ -75,7 +82,11 @@ def main():
 
         region = hdr + blobs["map"] + rooms[0] + rooms[1] + rooms[2] \
                      + blobs["pipes"] + blobs["blocks"] + blobs["spawns"]
+        if bank == 2:
+            region = l3 + region
         bank_img = prefix + region
+        assert len(bank_img) <= BANK, \
+            f"level {level}: bank {bank} overflows by {len(bank_img) - BANK} bytes"
         bank_img += b"\xFF" * (BANK - len(bank_img))
         img[bank * BANK:(bank + 1) * BANK] = bank_img
         print(f"pack_banks: level {level} -> bank {bank} "

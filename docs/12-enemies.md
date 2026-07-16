@@ -273,3 +273,48 @@ the fly's old stomp-time override (24f early) is gone. py65: chirp at the stomp,
 thump exactly 32f later.
 Also: the bee's ARROW drop is SILENT on the GB (hooked capture, 4 drops, zero
 triggers), and so is riding/falling with a goal stone.
+
+## PORT: the 1-3 kit — Suu, spiky ball, Gao, Batadon + the hidden-block secret [2026-07-16]
+
+All five GB-capture-verified (PyBoy slot traces + the $3186 contact table at stride 5:
++0 stomp morph, +1 ball morph, +2 touch (0 harmless / $FF hurt), +3 star morph
+($FF = silent despawn), +4 block-bonk morph). Port code lives in the bank-2-only
+L3CODE overlay (copied to RAM $1500 by load_level; see docs/24).
+
+- **Suu $02 → OBJ_SUU 22** (8x16, tiles $92/$93, frame B $94/$95): bobs on a 200f
+  cycle — 62f hold low, 16f rise (1px/f, 16px), 105f hold high with the leg pose
+  toggling every ~15f, 16f descend. NOT stompable (+0=0 → top contact hurts);
+  star = silent despawn (+3=$FF) + 100; ball no effect. Port cycle verified: y
+  80..96, rise at tick 62, period 199f.
+- **Spiky ball $0C → OBJ_ROCK 23** (16x8, tiles $DD+$DE): hangs at its spawn
+  height ~174f, then falls 1px/f THROUGH terrain, despawns at the bottom (GB
+  y>=192). Any contact hurts; star/ball no effect (row 00 00 FF 00 00 — the
+  arrow's class). Port: fall at f174, despawn f325 (GB 175/327).
+- **Gao $3F → OBJ_GAO 24** (16x16, $A4/$A5/$B4/$B5; mouth open +2): static;
+  137f cycle, fires at tick 89: SFX dff8=$04 + fireball from the muzzle.
+  **Fireball $23 → OBJ_FIRE 25** (8x8 $E2): 1px/f horizontal toward Mario,
+  0.5px/f vertical toward Mario's side of the muzzle at spawn (both aims
+  capture-verified with Mario above AND below). Stomp → **OBJ_GSQ 29** (flat
+  pair $B9+$B8, 48f) → thump + **OBJ_GCORP 30** (the statue Y-flipped, 7f hop
+  then +2px/f fall, 1px/f drift) — the $40→$41→fall chain. Ball/star/bonk →
+  the corpse directly. Score class 2 = 800.
+- **Batadon $08 → OBJ_BAT 26** (32x16, 7 tiles/frame: CA CB CC BA / DA DB DC,
+  frame B AB C6 C7 AA / BB D6 D7): hovers at fixed x on a 162f cycle (hold ~80f
+  with a ~31f wing toggle, bob up 17px at 0.5px/f and back), launches a shot at
+  ticks 64 and 121 (SFX $04). **Shot $1B→$1E → OBJ_BULL 27** (16x8, $C4/$C5 alt
+  $D4/$D5 every 8f): 1px/f horizontal toward Mario at launch, from y-4. NOT
+  stompable, ball no effect; star → the explosion (OBJ_BOOM + dff8 $01, $4F
+  script) + class 3 = 5000. Port: shots at exactly ticks 64/121, bob 79..96.
+- **Hidden-block secret $07→$13→$14 → OBJ_GIFT 28** (8x8 tile $E6): block
+  content $07 (cols 2 + 150 in 1-3) emerges 4px on top of the block and sits.
+  Walk-through, star does NOT clear it. STOMP (or a block bonk under it) → it
+  floats up 0.5px/f to the top row, holds ~229f, pops with the kill thump —
+  NO score (GB-verified: score stays 0). Port: despawn 356f after the stomp,
+  min y 8 (GB: 395f from bonk, holds at y=32 GB coords).
+- **Hidden multi-coin (1-3 col 193 row 8)**: a $5F cell with content $C0 — the
+  mc draws-as-brick rule now accepts $5F raw tiles too (read_map_tile).
+- **Water shimmer** (GB $d014 / VBlank_AnimateTiles): BG tile $5D's high
+  bitplane swaps every 8 frames between the ROM pattern at $3fc4 (per world)
+  and the original. Port: l3_water re-blits visible $5D cells (rows 4-6, max 3
+  on screen) with a build-time alt tile (water_alt.svt) on the same 8f cadence;
+  cells under a drawn sprite skip a tick (sprite-erase safety).

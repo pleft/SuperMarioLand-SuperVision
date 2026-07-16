@@ -16,12 +16,39 @@ Newest entries at the top. Every entry should be traceable to ROM bytes/code.
 - [x] Multi-level foundation: 64K banked cart + level headers; WORLD 1-2 COMPLETE
       (Bunbun/arrow/falling stones, hidden blocks, block-bounce kill, table-driven
       platforms, 10 object slots, render budget) — user-verified on hardware
-- [ ] 1-3 (types $02/$08/$0C/$3F, water tile anim, track $03), then W2+; top-score
-      on title, hard-mode toggle, over-HUD row-split
+- [x] 1-3 PLAYABLE (Suu/spiky ball/Gao+fireball/Batadon+shots, hidden secret,
+      water shimmer, track $03; L3CODE bank-2 RAM overlay) — boss arena pending
+- [ ] King Totomesu + switch + rescue scene (dedicated GB machinery); then W2+
+      (128K cart step), top-score on title, hard-mode toggle, over-HUD row-split
 
 (2026-06-29 → 2026-07-09 work is logged in docs/ + git history rather than here:
 rendering/perf rounds, blocks/powerups, enemies, goal+bonus game, death/title,
 audio phase. See docs/22 + docs/23 and the memory index.)
+
+## 2026-07-16 — WORLD 1-3 SHIPPED (minus the boss arena — next chunk)
+The full 1-3 kit, all GB-capture-verified then port-verified (docs/12 "1-3 kit"):
+Suu the spider $02 (200f bob cycle), the spiky ball $0C (~174f hang, 1px/f fall
+through terrain), Gao $3F (137f fire cycle; aimed fireball $23: 1px/f x, 0.5px/f
+y by Mario's side of the muzzle; stomp->flat 48f->thump corpse), Batadon $08
+(32x16, 7-tile frames, bob 17px, shots $1E at ticks 64/121; star->explosion,
+5000), and the hidden-block secret $07->$13->$14 (content $07 spawns object $13;
+stomp -> floats to the top row + pops with the thump, NO score). Hidden multi-
+coin: $5F cells brick-ify once live. Water shimmer: tile $5D's high plane swaps
+every 8f (build-time alt tile; overlapped cells skip a tick). Music track $03
+extracted + MODEL-VERIFIED in 1-3 (690/690 APU writes); SFX dff8=$04 extracted.
+ARCHITECTURE: the kit lives in L3CODE — a bank-2-only blob linked to run at RAM
+$1500, copied by load_level; every hook is a type>=OBJ_SUU range check. Freed
+the space by moving the 1-2-only bunbun/arrow code to a bank-0-only L12 segment
+(-470B in every other bank; banks now: b0 full, b1 2.0K, b2 83B, FIXED ~10B).
+Verified: suu/rock/gao/bat/gift timings vs GB traces; walk to cam_max 2240 with
+strip captures clean; 1-1 stomp/music/glide + 1-2 full walk + boot pixel-exact
+all green. NOT YET: King Totomesu + the switch + rescue scene — the boss is NOT
+a $D100 pool object (dedicated GB machinery, like the bonus game) = its own RE
+phase, and the MAP HAS NO EXIT (the arena dead-ends at the wall + rope $EC;
+GB-verified: a grounded Mario sticks at x=138 with no state change). STOPGAP
+(l3_goal_chk, L3-resident, clearly marked): reaching the arena wall at max
+camera runs the standard clear sequence -> wraps to 1-1, so the level is
+completable on hardware until the boss ships.
 
 ## 2026-07-15 (late night) — round 10: stream-hit narrowing (the residual hiccups)
 User: much better, hiccups remain at the platform/bee stretches. Profiling the

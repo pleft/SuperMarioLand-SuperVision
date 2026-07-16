@@ -103,3 +103,38 @@ is the binding space constraint; 1-1 lives in bank 1 (written by the packer,
   garbage in that view, but Start works and load_level(0) reads 1-1's header).
 - Rebuild `build/dbg.txt` after ANY code move: a stale `main_loop` symbol makes
   the frame loop wait on a dead address (looks like a hang).
+
+## World 1-3 (2026-07-16): the L3CODE overlay + per-bank code layout
+
+1-3 shipped with a new code-layout trick forced by the ROM budget: the 1-3 kit
+(~1.9K: seven object types + the water shimmer) does NOT fit the every-bank
+LEVELS prefix (bank 0 had ~430B free) nor FIXED (~17B free).
+
+- **L3CODE** = a bank-2-only segment (`load BANK2 run L3RAM` in the cfg): ld65
+  links it to RUN at RAM $1500 and emits the bytes at BANK2's start in the
+  image. pack_banks lays bank 2 out as `[prefix][L3 blob @ TITLE0][header]
+  [level data]`; load_level (cur_level==2) copies 8 pages from __TITLE0_LOAD__
+  to $1500 and reads the header at __TITLE0_LOAD__ + __L3CODE_SIZE__.
+  Dispatch: every engine hook is a range check (`o_type >= OBJ_SUU` -> jsr/jmp
+  into $15xx) — those types only exist while 1-3 is loaded, so other levels
+  never execute the RAM window.
+- **L12** = a bank-0-only segment (like TITLE0) for the 1-2-only entities
+  (bunbun + arrow: spawn/update/draw/corpse draw). They run only with bank 0
+  mapped (1-2 is bank 0's resident level), so moving them out of the prefix
+  freed ~470B in EVERY bank — that's what made room for 1-3's level data +
+  overlay in bank 2 (83 bytes to spare). Stones/Nokobon stay in the prefix
+  (1-3 uses both).
+- Music track $03 extracted (TRACKS += 0x03) and model-verified in 1-3:
+  690/690 APU writes identical. Per-level tune via lvl_track_tab (GB $07CE);
+  the star-expiry restore path reads it too.
+- SFX dff8=$04 (the Gao/Batadon shot) extracted; NUM_LEVELS = 3; the wrap is
+  now 1-1 → 1-2 → 1-3 → 1-1.
+- Segment budget after: bank0 ~0 free (L12 fills the tail), bank1 ~2.0K free,
+  bank2 ~75B free, FIXED ~10B. The NEXT level (2-1) needs the 64K→128K cart
+  step or another resident swap.
+- **1-3's ending is NOT the door pattern**: the map dead-ends at the boss
+  arena (bridge over spikes, wall + rope $EC at cols 297-298; no exit tiles).
+  King Totomesu + the switch + the rescue scene are dedicated GB machinery
+  (no spawn-list entry, never in $D100 — like the superball/bonus game) = the
+  next RE phase. Until then l3_goal_chk (in the overlay) runs the standard
+  clear sequence at the arena wall so the level completes and wraps.

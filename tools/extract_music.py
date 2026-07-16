@@ -45,7 +45,7 @@ u16 = lambda o: d[o] | (d[o+1] << 8)
 # Bonus stage (harness, forced $ffb3=$12 with A presses): entry $09 (ladder stage),
 # the walk-to-prize $0A (state $17), the award celebration $0D (state $1A), and the
 # 1UP chirp $dfe0=$08 at each joy hop.
-TRACKS = [0x07, 0x04, 0x0C, 0x01, 0x09, 0x0A, 0x0D]
+TRACKS = [0x07, 0x04, 0x0C, 0x01, 0x09, 0x0A, 0x0D, 0x03]
 NAMES  = ["MUS_LEVEL", "MUS_UNDER", "MUS_STAR", "MUS_GOAL", "MUS_BONUS", "MUS_BWALK", "MUS_BAWARD"]
 
 def gb_noise_to_sv(nr43):

@@ -120,6 +120,17 @@ def main():
             ovl2 = u16(OVL2_TBL + i)
             dump(f"w{world}_ovl_8A00", bank, ovl1, OVL1_N)
             dump(f"w{world}_ovl_9310", bank, ovl2, OVL2_N)
+    # 1-3 water shimmer: BG tile $5D with its HIGH bitplane replaced by the
+    # world-1 pattern at $3fc4 (VBlank_AnimateTiles swaps tile $5D's high plane
+    # between this and the original every 8 frames; the port swaps the whole
+    # 16-byte SV tile source instead).
+    base = bank_file(WORLD_BANK[1], BG_SRC) + 0x5D * 16
+    tile = []
+    for row in range(8):
+        lo = d[base + row * 2]; hi = d[0x3fc4 + row]
+        tile.append([((lo >> (7 - x)) & 1) | (((hi >> (7 - x)) & 1) << 1) for x in range(8)])
+    with open(os.path.join(out, "water_alt.svt"), "wb") as f:
+        f.write(sv_pack([tile]))
     print(f"Extracted tile sheets -> {out}/ (gitignored)")
 
 if __name__ == "__main__":
