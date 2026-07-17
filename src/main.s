@@ -4539,10 +4539,10 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     lda spr_y
     sec
     sbc tmpL
-    sbc #6                       ; +6px slop: stepping off a SINKING stone onto its
-    cmp tmpH                     ; neighbour still catches (the collapsing bridge:
-    bcc :+                       ; Mario leaves each stone a few px below the next
-    bne @next                    ; one's top -- user-caught: he fell through the row)
+    sbc #3                       ; +3px slop: stepping off a SINKING stone onto its
+    cmp tmpH                     ; neighbour still catches -- tuned so RUNNING
+    bcc :+                       ; crosses the collapsing bridge but WALKING falls,
+    bne @next                    ; like the GB (user-calibrated thresholds)
 :   jsr plat_xover               ; x-overlap?
     bcs @next
     ldx oi2
