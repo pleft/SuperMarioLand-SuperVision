@@ -25,6 +25,14 @@ Newest entries at the top. Every entry should be traceable to ROM bytes/code.
 rendering/perf rounds, blocks/powerups, enemies, goal+bonus game, death/title,
 audio phase. See docs/22 + docs/23 and the memory index.)
 
+## 2026-07-17 — 1-3 fix: the hidden-block secret is a rideable LIFT
+User-caught on hardware: "the elevator ascends alone" — the $13/$14 object is a
+LIFT (the stone's ride-morph pattern: contact +0 = landed-on morph), not a
+stompable. Landing on it now arms the rise and it CARRIES Mario ~64px to the
+secret upper corridor, holds ~4s, pops (thump), rider falls. OBJ_GIFT
+renumbered next to OBJ_STONE so the ride procs take the 8px-rideable pair as
+one class. 1-2 stones/platforms regression green; port-verified lockstep ride.
+
 ## 2026-07-16 — WORLD 1-3 SHIPPED (minus the boss arena — next chunk)
 The full 1-3 kit, all GB-capture-verified then port-verified (docs/12 "1-3 kit"):
 Suu the spider $02 (200f bob cycle), the spiky ball $0C (~174f hang, 1px/f fall

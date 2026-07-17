@@ -305,12 +305,18 @@ L3CODE overlay (copied to RAM $1500 by load_level; see docs/24).
   $D4/$D5 every 8f): 1px/f horizontal toward Mario at launch, from y-4. NOT
   stompable, ball no effect; star → the explosion (OBJ_BOOM + dff8 $01, $4F
   script) + class 3 = 5000. Port: shots at exactly ticks 64/121, bob 79..96.
-- **Hidden-block secret $07→$13→$14 → OBJ_GIFT 28** (8x8 tile $E6): block
+- **Hidden-block LIFT $07→$13→$14 → OBJ_GIFT 22** (8x8 tile $E6): block
   content $07 (cols 2 + 150 in 1-3) emerges 4px on top of the block and sits.
-  Walk-through, star does NOT clear it. STOMP (or a block bonk under it) → it
-  floats up 0.5px/f to the top row, holds ~229f, pops with the kill thump —
-  NO score (GB-verified: score stays 0). Port: despawn 356f after the stomp,
-  min y 8 (GB: 395f from bonk, holds at y=32 GB coords).
+  It is a RIDEABLE — the same ride-morph pattern as the stone ($36's contact
+  +0 = $37 = "landed-on morph"; $13's +0 = $14): LANDING on it arms the rise,
+  and it carries Mario up 0.5px/f ~64px to the level's top row (the secret
+  upper corridors at both columns), holds ~229f, then pops with the kill
+  thump — the rider falls, NO score. Walk-through from the side; the star
+  does not clear it; a block-bonk under it launches it riderless.
+  [First shipped as a stomp-bounce — user-caught: "the elevator ascends
+  alone". OBJ_GIFT renumbered to 22, adjacent to OBJ_STONE 21, so
+  plat_land/plat_xover/ride_support accept the 8px-rideable pair as one
+  class. Port-verified: lockstep carry 64px, ~220f hold, pop at f358.]
 - **Hidden multi-coin (1-3 col 193 row 8)**: a $5F cell with content $C0 — the
   mc draws-as-brick rule now accepts $5F raw tiles too (read_map_tile).
 - **Water shimmer** (GB $d014 / VBlank_AnimateTiles): BG tile $5D's high

@@ -4500,14 +4500,16 @@ BOMB_FUSE  = 63                  ; trace-exact: stomp f694 -> explosion f757 (~1
 BOOM_LIFE  = 44                  ; trace: >=43 frames live (capture ended mid-cloud)
 OBJ_FLY    = 17                  ; the Fly (SML type $0E): sits, then hops toward Mario
 OBJ_CORPSE = 18                  ; ball/star kill: the enemy Y-FLIPPED, hops and falls off
-; --- the 1-3 kit (types >= OBJ_SUU dispatch into the bank-2 RAM overlay, L3CODE) ---
-OBJ_SUU    = 22                  ; $02: bobbing spider (8x16, rises 16px, anim at the top)
-OBJ_ROCK   = 23                  ; $0C: spiky ball (16x8): hangs ~174f, falls thru terrain
-OBJ_GAO    = 24                  ; $3F: sphinx statue (16x16): fires every 137f
-OBJ_FIRE   = 25                  ; $23: Gao's fireball (8x8 $E2): 1px/f x, 0.5px/f aimed y
-OBJ_BAT    = 26                  ; $08: moai flyer (32x16): bobs, launches 2 shots/cycle
-OBJ_BULL   = 27                  ; $1E: the flyer's shot (16x8): 1px/f horizontal
-OBJ_GIFT   = 28                  ; $13: hidden-block secret ($E6): stomp -> floats away
+; --- the 1-3 kit (types >= OBJ_GIFT dispatch into the bank-2 RAM overlay, L3CODE).
+; OBJ_GIFT sits NEXT TO OBJ_STONE: both are 8px RIDEABLES (plat_land/plat_xover/
+; ride_support accept the STONE..GIFT pair as one class). ---
+OBJ_GIFT   = 22                  ; $13->$14: the hidden-block LIFT ($E6): ride -> rises
+OBJ_SUU    = 23                  ; $02: bobbing spider (8x16, rises 16px, anim at the top)
+OBJ_ROCK   = 24                  ; $0C: spiky ball (16x8): hangs ~174f, falls thru terrain
+OBJ_GAO    = 25                  ; $3F: sphinx statue (16x16): fires every 137f
+OBJ_FIRE   = 26                  ; $23: Gao's fireball (8x8 $E2): 1px/f x, 0.5px/f aimed y
+OBJ_BAT    = 27                  ; $08: moai flyer (32x16): bobs, launches 2 shots/cycle
+OBJ_BULL   = 28                  ; $1E: the flyer's shot (16x8): 1px/f horizontal
 OBJ_GSQ    = 29                  ; $40: stomped Gao (flat pair ~48f, then the corpse)
 OBJ_GCORP  = 30                  ; $41: Gao corpse: kill_flip-style hop + fall
                                  ; the screen (GB type $0D; slot capture: rise 7px, fall to
@@ -5145,6 +5147,8 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     beq @try
     cmp #OBJ_STONE
     beq @try
+    cmp #OBJ_GIFT                ; the 1-3 hidden-block lift rides like a stone
+    beq @try
 @next:
     inc oi2
     lda oi2
@@ -5196,10 +5200,12 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     sta tmpL2
     bcc :+
     inc tmpH2
-:   lda o_type,x                 ; platform centre = o_x + 12 (24px); stone = o_x + 4 (8px)
+:   lda o_type,x                 ; platform centre = o_x + 12 (24px); stone/lift = o_x + 4
     cmp #OBJ_STONE
-    bne :+
-    lda o_xl,x
+    beq :+
+    cmp #OBJ_GIFT
+    bne :++
+:   lda o_xl,x
     clc
     adc #4
     sta tmpL3
@@ -5233,11 +5239,13 @@ riding_this:                     ; Z=1 if Mario rides slot oi
 :   tya
 @pos:
     bne @no                      ; |diff| >= 256
-    ldy #16                      ; overlap window: platform +/-16, stone +/-12
+    ldy #16                      ; overlap window: platform +/-16, stone/lift +/-12
     lda o_type,x
     cmp #OBJ_STONE
-    bne :+
-    ldy #12
+    beq :+
+    cmp #OBJ_GIFT
+    bne :++
+:   ldy #12
 :   sty tmpH3
     lda tmpL3
     cmp tmpH3
@@ -5262,6 +5270,8 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     cmp #OBJ_PLATH
     beq :+
     cmp #OBJ_STONE
+    beq :+
+    cmp #OBJ_GIFT
     bne @off
 :   jsr plat_xover
     bcs @off
@@ -5576,7 +5586,7 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     beq @cand
     cmp #OBJ_BUNBUN
     beq @cand
-    cmp #OBJ_SUU                 ; 1-3 kit: victim handling via the overlay
+    cmp #OBJ_GIFT                 ; 1-3 kit: victim handling via the overlay
     bcs @cand
 @next:
     inc oi2
@@ -5634,7 +5644,7 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     cmp #10
     bcs @next
     lda o_type,x
-    cmp #OBJ_SUU
+    cmp #OBJ_GIFT
     bcc :+
     jsr l3_bonk                  ; 1-3 kit: per-type bonk outcome
     jmp @next
@@ -6703,7 +6713,7 @@ title_tiles:                     ; the used tiles, SV-packed
 .segment "LEVELS"                ; (moved from FIXED for the 1-3 hooks' code space)
 .proc anim_token
     lda o_type,x
-    cmp #OBJ_SUU
+    cmp #OBJ_GIFT
     bcc :+
     jmp l3_token                 ; per-type tokens for the 1-3 kit
 :   cmp #OBJ_ARROW
@@ -7215,7 +7225,7 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     lda o_type,x
     bne :+
     jmp @next
-:   cmp #OBJ_SUU
+:   cmp #OBJ_GIFT
     bcc :+
     jsr l3_update                ; the 1-3 kit (bank-2 RAM overlay, types 22+)
     jmp @next
@@ -7830,7 +7840,7 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     sta o_pvy,x
     lda #2                       ; drawn width: 2 cols; 3 popup/explosion; 4 platform;
     ldy o_type,x                 ; bit7 = TALL (16px: the Nokobon)
-    cpy #OBJ_SUU
+    cpy #OBJ_GIFT
     bcc :+
     jsr l3_width                 ; erase widths for the 1-3 kit
     bra @wset
@@ -8023,7 +8033,7 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     sta spr_col
     ldx oi
     lda o_type,x
-    cmp #OBJ_SUU
+    cmp #OBJ_GIFT
     bcc :+
     jmp l3_draw                  ; the 1-3 kit draws (RAM overlay)
 :   cmp #OBJ_COIN
@@ -9692,7 +9702,7 @@ GIFT_T  = $E6                    ; (bat tiles: see bat_row_a/b below)
 .proc l3_update
     lda o_type,x
     sec
-    sbc #OBJ_SUU
+    sbc #OBJ_GIFT
     asl
     tay
     lda l3_updtab+1,y
@@ -9702,8 +9712,8 @@ GIFT_T  = $E6                    ; (bat tiles: see bat_row_a/b below)
     rts                          ; rts-dispatch into the handler
 .endproc
 l3_updtab:
-    .word upd_suu-1, upd_rock-1, upd_gao-1, upd_fire-1, upd_bat-1
-    .word upd_bull-1, upd_gift-1, upd_gsq-1, upd_gcorp-1
+    .word upd_gift-1, upd_suu-1, upd_rock-1, upd_gao-1, upd_fire-1
+    .word upd_bat-1, upd_bull-1, upd_gsq-1, upd_gcorp-1
 
 ; cull once the camera passes 20px beyond (the walker rule)
 .proc l3_cull                    ; C=1 -> culled (slot freed)
@@ -10131,64 +10141,54 @@ l3_updtab:
 
 ; --- GIFT $13: sits on its block; stomp -> floats away 0.5px/f to the top row,
 ; holds ~230f, pops with the kill thump (capture f395). No score, no hurt ---
-.proc upd_gift
-    lda o_st,x
+.proc upd_gift                   ; the hidden-block LIFT ($13->$14, the stone's
+    lda o_st,x                   ; ride-morph pattern: LANDING arms the rise)
     beq @sit
     cmp #1
-    beq @float
-    inc o_tmr,x                  ; holding at the top
+    beq @rise
+    inc o_tmr,x                  ; holding at the top row (~229f), then pops
     lda o_tmr,x
     cmp #229
     bcc @done
-    lda #SFX_DFF8_03
-    jsr sfx_play
+    lda #SFX_DFF8_03             ; the thump ($14's script tail); the rider falls
+    jsr sfx_play                 ; (ride_support clears when the slot dies)
     ldx oi
     stz o_type,x
 @done:
     rts
-@float:
-    txa                          ; 0.5px/f rise
-    eor frame_count
+@rise:
+    txa                          ; 0.5px/f up, CARRYING the rider (GB: it hauls
+    eor frame_count              ; Mario 68px to the upper corridor)
     lsr
-    bcs @sit0
+    bcs @done
     dec o_y,x
+    jsr carry_y_up
+    ldx oi
     lda o_y,x
     cmp #9
     bcs @done
-    lda #2                       ; reached the top row: hold
+    lda #2                       ; the top row: hold
     sta o_st,x
     stz o_tmr,x
     rts
 @sit:
     lda o_tmr,x                  ; emerge: 4px rise over 8f
     cmp #8
-    bcs @sit0
+    bcs @armed
     inc o_tmr,x
     lsr
-    bcs @sit0
+    bcs @done
     dec o_y,x
-@sit0:
-    ldx oi
-    ; stomp only (walk-through otherwise; the star does NOT clear it)
-    jsr l3_box
-    bcs :+
     rts
-:   jsr l3_above
-    bcs @stomp
-    rts
-@stomp:
-    lda o_st,x
-    bne @done2                   ; already flying
+@armed:
+    lda ride                     ; ridden -> start rising (the $13->$14 morph fires
+    beq @done                    ; on the LANDING, like the stone's $36->$37)
+    dea
+    cmp oi
+    bne @done
     lda #1
     sta o_st,x
     stz o_tmr,x
-    lda #1                       ; Mario bounces (GB stomp path), NO score (capture)
-    sta jump_state
-    lda #14
-    sta arc_idx
-    stz fall_v
-    stz ride
-@done2:
     rts
 .endproc
 
@@ -10295,7 +10295,7 @@ l3_updtab:
 ; --- draw dispatch (spr_col/dy conventions of draw_obj_sprite) ---
 .proc l3_draw
     sec
-    sbc #OBJ_SUU
+    sbc #OBJ_GIFT
     asl
     tay
     lda l3_drwtab+1,y
@@ -10305,8 +10305,8 @@ l3_updtab:
     rts
 .endproc
 l3_drwtab:
-    .word draw_suu-1, draw_rock-1, draw_gao-1, draw_fire-1, draw_bat13-1
-    .word draw_bull-1, draw_gift-1, draw_gsq-1, draw_gcorp-1
+    .word draw_gift-1, draw_suu-1, draw_rock-1, draw_gao-1, draw_fire-1
+    .word draw_bat13-1, draw_bull-1, draw_gsq-1, draw_gcorp-1
 
 .proc suu_frame                  ; X = slot -> A = 0/2 (tile offset)
     lda o_tmr,x
