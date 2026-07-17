@@ -281,11 +281,18 @@ All five GB-capture-verified (PyBoy slot traces + the $3186 contact table at str
 ($FF = silent despawn), +4 block-bonk morph). Port code lives in the bank-2-only
 L3CODE overlay (copied to RAM $1500 by load_level; see docs/24).
 
-- **Suu $02 → OBJ_SUU 22** (8x16, tiles $92/$93, frame B $94/$95): bobs on a 200f
-  cycle — 62f hold low, 16f rise (1px/f, 16px), 105f hold high with the leg pose
-  toggling every ~15f, 16f descend. NOT stompable (+0=0 → top contact hurts);
-  star = silent despawn (+3=$FF) + 100; ball no effect. Port cycle verified: y
-  80..96, rise at tick 62, period 199f.
+- **Pipe/column FLOWER $02 → OBJ_SUU 23** (8x16, tiles $92/$93, frame B $94/$95):
+  sits ON pipes and rock columns; 200f cycle — 62f retracted (hidden INSIDE the
+  column: GB OAM behind-BG priority; port clips its quads at the rim, base in
+  o_vy), 16f rise, 105f up with the pose toggling ~15f, 16f descend. CLASSIC
+  PLANT RULE (captured: held at 12px, emerges at 14): stays down while Mario is
+  flush with the column (centre dx < 10). Contact: side/below hurts; the STOMP
+  side is a NO-EFFECT exit on the GB (+0 = 0) — Mario passes through the head
+  zone and lands on the solid column (l3_hurt; also covers rock/fireball/shot/
+  moai). Star = silent despawn (+3=$FF) + 100; ball no effect. Port verified:
+  cycle 80..96 far, held at 96 flush, harmless from above.
+  [Shipped first as "Suu the spider, any contact hurts" — user-caught: visible
+  inside the column + dying on stomp attempts.]
 - **Spiky ball $0C → OBJ_ROCK 23** (16x8, tiles $DD+$DE): hangs at its spawn
   height ~174f, then falls 1px/f THROUGH terrain, despawns at the bottom (GB
   y>=192). Any contact hurts; star/ball no effect (row 00 00 FF 00 00 — the

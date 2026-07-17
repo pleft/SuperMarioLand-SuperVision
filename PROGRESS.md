@@ -25,6 +25,16 @@ Newest entries at the top. Every entry should be traceable to ROM bytes/code.
 rendering/perf rounds, blocks/powerups, enemies, goal+bonus game, death/title,
 audio phase. See docs/22 + docs/23 and the memory index.)
 
+## 2026-07-17 (later) — 1-3 flower fixes: retract-clip, hold, side-only hurt
+Type $02 is the pipe/column FLOWER (not "Suu the spider"): user-caught visible-
+inside-the-column + death-on-stomp. GB truth: retracted body hidden via OAM
+behind-BG priority (port: rim-clip, base in o_vy); stays down while Mario is
+flush (held at 12px, emerges at 14 -> centre dx < 10); stomp-side contact is a
+NO-EFFECT exit in the GB contact code (+0=0) so only side contact hurts —
+applied via shared l3_hurt to flower/spiky ball/projectiles/moai. Lift polish:
+bonk plays the emerge chime (dfe0 $07+$0B captured); stops one row lower so the
+rider stays half-visible under the HUD (no over-HUD renderer yet). (63b2eed)
+
 ## 2026-07-17 — 1-3 fix: the hidden-block secret is a rideable LIFT
 User-caught on hardware: "the elevator ascends alone" — the $13/$14 object is a
 LIFT (the stone's ride-morph pattern: contact +0 = landed-on morph), not a
