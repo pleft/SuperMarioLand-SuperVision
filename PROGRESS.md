@@ -25,6 +25,19 @@ Newest entries at the top. Every entry should be traceable to ROM bytes/code.
 rendering/perf rounds, blocks/powerups, enemies, goal+bonus game, death/title,
 audio phase. See docs/22 + docs/23 and the memory index.)
 
+## 2026-07-17 (later still) — the collapsing bridge is crossable (user-caught)
+My earlier "verification" only rode the stones down — it never tested RUNNING
+ACROSS, which was broken (user: falls after the first stone, can't mount the
+far pillar). Mechanism: each stone Mario leaves has already sunk 1-4px, so he
+steps off BELOW the neighbour's top, and plat_land only caught tops crossed
+from above -> he fell through the row. Fix: a 6px catch slop in plat_land's
+crossing test (descent-only, jump-through from below unaffected). Verified by
+actually sprinting across: bridge run at stone-top height end to end, lands
+past the shaft. (The "4 stones" the user counts = 5 objects with the two end
+stones overlapping the pillar tops — GB pool + ROM list both say five.)
+FIXED-byte golf: pass-3 erase height selector rewritten (ldy dedupe + shift
+trick) to fit the slop bytes.
+
 ## 2026-07-17 (late night) — Totomesu refinements (four user-caught on hardware)
 (1) The hop SHADOW: his 24px body needs more erase than the 16px tall rule —
 o_pw bit6 = EXTRA-TALL (+1 erase row) in pass 3, mask $3F for the width. (2)

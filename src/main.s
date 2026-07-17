@@ -5175,9 +5175,10 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     lda spr_y
     sec
     sbc tmpL
-    cmp tmpH
-    bcc :+
-    bne @next                    ; was already below the top -> no landing
+    sbc #6                       ; +6px slop: stepping off a SINKING stone onto its
+    cmp tmpH                     ; neighbour still catches (the collapsing bridge:
+    bcc :+                       ; Mario leaves each stone a few px below the next
+    bne @next                    ; one's top -- user-caught: he fell through the row)
 :   jsr plat_xover               ; x-overlap?
     bcs @next
     ldx oi2
@@ -7785,13 +7786,14 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     sta rb_vx                    ; already folded into o_pvx by pass 0)
     lda o_pvy,x
     sta rb_y
+    ldy #1
     lda o_pw,x
     bpl @short
-    ldy #2                       ; TALL (16px): erase from 8px above, one extra row
+    iny                          ; TALL (16px): erase from 8px above, one extra row
     asl                          ; bit6 = EXTRA-TALL (24px: Totomesu) -> one more
     bpl :+
     iny
-:   lda o_pw,x
+:   lsr                          ; A = (o_pw<<1)>>1 = o_pw & $7F
     and #$3F
     sta rb_cols
     lda o_pvy,x
@@ -7801,7 +7803,6 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     bra @rows
 @short:
     sta rb_cols
-    ldy #1
 @rows:
     lda o_pvy,x
     and #7
