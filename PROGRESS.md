@@ -25,6 +25,20 @@ Newest entries at the top. Every entry should be traceable to ROM bytes/code.
 rendering/perf rounds, blocks/powerups, enemies, goal+bonus game, death/title,
 audio phase. See docs/22 + docs/23 and the memory index.)
 
+## 2026-07-17 (late night) — Totomesu refinements (four user-caught on hardware)
+(1) The hop SHADOW: his 24px body needs more erase than the 16px tall rule —
+o_pw bit6 = EXTRA-TALL (+1 erase row) in pass 3, mask $3F for the width. (2)
+Sinking into the bridge: the bob's parity stepping could drift — every cycle
+wrap now SNAPS o_y back to the base line (o_vy holds the spawn base). (3)
+Backwards fire: the breath was aimed at Mario (even behind him) — now always
+his facing (left). (4) Collision: only the FRONT half (head/forelegs, left
+16px) hurts — Mario passes over the back/tail like the GB. Byte offsets: the
+ball-kill corpse drift now follows mario_facing; the water veto's Mario check
+is y-proximity only. Verified: bob 71..88 with exact snaps, all shots left,
+zero pixels below the base after cycles. OPEN: the arch stepping-stones
+("falling barrels") accuracy — the five single-tile stones bridge the shaft
+at cols 235-239; awaiting a specific GB-vs-port difference description.
+
 ## 2026-07-17 (night) — KING TOTOMESU: identity, full sprite, 5-hit superball HP
 The user's GB screenshot unmasked type $08: it IS King Totomesu (my "moai
 flyer/Batadon" label and the "boss = dedicated machinery" theory were wrong —

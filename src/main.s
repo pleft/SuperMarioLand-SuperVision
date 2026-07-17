@@ -7041,14 +7041,11 @@ title_tiles:                     ; the used tiles, SV-packed
     jmp l3_boss_hit              ; X = the boss slot; the ball = oi
 :   cmp #OBJ_GAO
     bne :+
-    ldy oi                       ; drift along the ball's flight
-    lda o_vx,y
-    bmi @gleft
-    lda #1
-    bra @gball
-@gleft:
+    lda #1                       ; corpse thrown along Mario's facing
+    ldy mario_facing
+    beq @gk
     lda #$FF
-@gball:
+@gk:
     jsr l3_gao_kill              ; thump + flipped corpse
     lda #$08                     ; class 2 = 800
     jsr award_kill
@@ -7790,13 +7787,17 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     sta rb_y
     lda o_pw,x
     bpl @short
-    and #$7F                     ; TALL (16px) sprite: erase from 8px above, one extra row
+    ldy #2                       ; TALL (16px): erase from 8px above, one extra row
+    asl                          ; bit6 = EXTRA-TALL (24px: Totomesu) -> one more
+    bpl :+
+    iny
+:   lda o_pw,x
+    and #$3F
     sta rb_cols
     lda o_pvy,x
     sec
     sbc #8
     sta rb_y
-    ldy #2
     bra @rows
 @short:
     sta rb_cols
@@ -10096,13 +10097,17 @@ l3_updtab:
     cmp #162
     bcc :+
     stz o_tmr,x
+    lda o_vy,x                   ; cycle wrap: SNAP to the base line (heals any
+    sec                          ; parity drift -- he was sinking into the bridge)
+    sbc #8
+    sta o_y,x
 :   ; contact box: 32px wide -> test vs the sprite centre (o_x+16): widen |dx|<18
     jsr mario_dx
     lda tmpH3
     bne @no
     lda tmpL3
-    cmp #26                      ; centres: mario vs LEFT edge +8; accept < 26
-    bcs @no
+    cmp #14                      ; only the FRONT (head/forelegs, left 16px) hurts:
+    bcs @no                      ; Mario can pass over the back/tail (GB tolerance)
     lda o_y,x
     clc
     adc #8                       ; body centre row (o_y = the head row)
@@ -10157,7 +10162,7 @@ l3_updtab:
     sta o_y,x
     lda #OBJ_BULL
     sta o_type,x
-    jsr l3_aim_vx                ; direction: toward Mario
+    lda #$FF                     ; the breath goes his FACING (left) -- never backwards
     sta o_vx,x
     stz o_tmr,x
     stz o_st,x
@@ -10609,7 +10614,7 @@ bat_dx:    .byte 0,2,0,2,4,6,0,2,4
     beq @w83
     cpy #OBJ_BAT
     bne :+
-    lda #$85                     ; 32 wide + tall
+    lda #$C5                     ; 32 wide + tall + EXTRA-tall (24px, bit6)
     rts
 :   cpy #OBJ_FIRE
     beq @w2
@@ -10753,17 +10758,9 @@ water_alt: .incbin "build/gfx/water_alt.svt"   ; tile $5D, high plane = ROM $3fc
 @vn:
     dex
     bpl @veto
-    lda prev_vx                  ; Mario too
-    sec
-    sbc tmpL2
-    bpl :+
-    eor #$FF
-    ina
-:   cmp #24
-    bcs @clear
-    lda prev_y
-    sec
-    sbc tmpH2
+    lda prev_y                   ; Mario veto: any shore cell near his ROW skips a
+    sec                          ; tick (cheaper than the full box; he rarely
+    sbc tmpH2                    ; overlaps rows 4-6 anyway)
     bpl :+
     eor #$FF
     ina
