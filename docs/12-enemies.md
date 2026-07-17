@@ -305,13 +305,19 @@ L3CODE overlay (copied to RAM $1500 by load_level; see docs/24).
   pair $B9+$B8, 48f) → thump + **OBJ_GCORP 30** (the statue Y-flipped, 7f hop
   then +2px/f fall, 1px/f drift) — the $40→$41→fall chain. Ball/star/bonk →
   the corpse directly. Score class 2 = 800.
-- **Batadon $08 → OBJ_BAT 26** (32x16, 7 tiles/frame: CA CB CC BA / DA DB DC,
-  frame B AB C6 C7 AA / BB D6 D7): hovers at fixed x on a 162f cycle (hold ~80f
-  with a ~31f wing toggle, bob up 17px at 0.5px/f and back), launches a shot at
-  ticks 64 and 121 (SFX $04). **Shot $1B→$1E → OBJ_BULL 27** (16x8, $C4/$C5 alt
-  $D4/$D5 every 8f): 1px/f horizontal toward Mario at launch, from y-4. NOT
-  stompable, ball no effect; star → the explosion (OBJ_BOOM + dff8 $01, $4F
-  script) + class 3 = 5000. Port: shots at exactly ticks 64/121, bob 79..96.
+- **KING TOTOMESU $08 → OBJ_BAT 27** — the Birabuto BOSS (user-identified from
+  his 800-per... no: from gameplay; first shipped mislabeled "the moai flyer").
+  32x24 in THREE rows, 9 tiles/frame (full-window OAM capture): head $CD $CE
+  (shared), face CA CB CC BA / AB C6 C7 AA, base DA DB DC / BB D6 D7. Port
+  anchors o_y at the HEAD row (spawn oy-8) so the tall erase (o_pvy-8, 2-3
+  rows) covers all 24px. Hops at fixed x on a 162f cycle (hold ~80f with a
+  ~31f frame toggle, 17px up at 0.5px/f and back), breathes fire at ticks 64
+  and 121 (SFX $04). **Fire $1B→$1E → OBJ_BULL 28** (16x8, $C4/$C5 alt $D4/$D5
+  every 8f): 1px/f horizontal toward Mario at launch. NOT stompable (head zone
+  passes through); star → explosion + 5000; SUPERBALL: 5-hit HP (user-verified
+  ~5; o_hp + l3_boss_hit): hits 1-4 chirp + the ball expires, hit 5 = the
+  burst (OBJ_BOOM + dff8 $01) + 2000 (GB capture: 800 gao + 2000 = 2800).
+  Port-verified: hp 1..4 absorbed, 5th = boom + 002000; hop/shot ticks exact.
 - **Hidden-block LIFT $07→$13→$14 → OBJ_GIFT 22** (8x8 tile $E6): block
   content $07 (cols 2 + 150 in 1-3) emerges 4px on top of the block and sits.
   It is a RIDEABLE — the same ride-morph pattern as the stone ($36's contact

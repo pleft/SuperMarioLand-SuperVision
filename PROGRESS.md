@@ -25,6 +25,18 @@ Newest entries at the top. Every entry should be traceable to ROM bytes/code.
 rendering/perf rounds, blocks/powerups, enemies, goal+bonus game, death/title,
 audio phase. See docs/22 + docs/23 and the memory index.)
 
+## 2026-07-17 (night) — KING TOTOMESU: identity, full sprite, 5-hit superball HP
+The user's GB screenshot unmasked type $08: it IS King Totomesu (my "moai
+flyer/Batadon" label and the "boss = dedicated machinery" theory were wrong —
+he was in the pool at spawn col 2144 all along; his "bob" is the hop, his
+"shots" the fire breath). Fixes: the half-missing head = his sprite is 32x24
+in THREE rows (9 tiles; head $CD/$CE shared by both frames — my earlier OAM
+windows clipped it); o_y now anchors at the head row so the tall erase covers
+him; superball HP via o_hp (5 hits: 4 chirps, then burst + 2000 — GB capture
+2800 = 800 arena-gao + 2000 boss; user-verified "5 or more"); draw_gao and
+draw_gcorp merged into one flip-flagged loop to fit bank 2 (now 0 bytes free).
+Still pending for the true ending: the switch + bridge collapse + rescue.
+
 ## 2026-07-17 (evening 2) — Gao corpse chain: the sfx_play X-clobber
 User: "its corpse animation is missing" + "fireballs don't kill Gao" — ONE bug:
 l3_gao_kill used X after sfx_play clobbered it, so the corpse-morph writes hit a

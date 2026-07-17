@@ -6996,7 +6996,9 @@ title_tiles:                     ; the used tiles, SV-packed
     beq :+
     cmp #OBJ_BUNBUN
     beq :+
-    cmp #OBJ_GAO                 ; the only 1-3 type a superball kills ($3186 +1 col)
+    cmp #OBJ_GAO                 ; superball-killable 1-3 types
+    beq :+
+    cmp #OBJ_BAT                 ; Totomesu: 5-hit HP (user-verified on GB)
     beq :+
     jmp @next
 :   ldy oi                       ; dx = |ball - enemy| (16-bit)
@@ -7015,7 +7017,8 @@ title_tiles:                     ; the used tiles, SV-packed
     eor #$FF
     ina
     sta tmpL3
-    beq @next
+    bne @dxok
+    jmp @next
 @dxok:
     lda tmpL3
     cmp #10
@@ -7033,7 +7036,10 @@ title_tiles:                     ; the used tiles, SV-packed
     lda #$01                     ; value code: walkers 100
     sta tmpH2
     lda o_type,x
-    cmp #OBJ_GAO
+    cmp #OBJ_BAT
+    bne :+
+    jmp l3_boss_hit              ; X = the boss slot; the ball = oi
+:   cmp #OBJ_GAO
     bne :+
     ldy oi                       ; drift along the ball's flight
     lda o_vx,y
@@ -7077,8 +7083,6 @@ title_tiles:                     ; the used tiles, SV-packed
     ldx oi
     stz o_type,x
     rts
-@bnext:
-    jmp @next
 @next:
     inc oi2
     lda oi2
@@ -9688,17 +9692,15 @@ GIFT_T  = $E6                    ; (bat tiles: see bat_row_a/b below)
 @common:
     sta o_type,x
     jsr spawn_tabx               ; exact rule: world x = fire + 192 + x_off*4
-    lda o_type,x
-    cmp #OBJ_BAT                 ; the 32px flyer anchors at its LEFT edge
-    bne :+
-    lda o_xl,x
-    sec
-    sbc #8
-    sta o_xl,x
-    bcs :+
-    dec o_xh,x
-:   lda spawn_tab+2,y
+    lda spawn_tab+2,y
     sta o_y,x
+    ldy o_type,x
+    cpy #OBJ_BAT                 ; Totomesu is 32x24 (3 tile rows): anchor o_y at
+    bne :+                       ; the HEAD row so the tall erase (o_pvy-8, 2-3
+    sec                          ; rows) covers his whole body
+    sbc #8
+    sta o_y,x
+:
     stz o_vx,x
     sta o_vy,x                   ; base y = the pipe/column rim (draw clip + hold)
     stz o_tmr,x
@@ -9941,6 +9943,30 @@ l3_updtab:
     rts
 .endproc
 
+.proc l3_boss_hit                ; a superball hit on Totomesu (X = boss slot)
+    inc o_hp,x
+    lda o_hp,x
+    cmp #5                       ; 5 hits (user-verified; GB: 800 gao + 2000 boss = 2800)
+    bcs @die
+    lda #SFX_DFE0_03             ; the hit chirp
+    jsr sfx_play
+    bra @ball
+@die:
+    lda #SFX_DFF8_01             ; the burst (the $4F chain's F9 01)
+    jsr sfx_play
+    ldx oi2
+    lda #OBJ_BOOM
+    sta o_type,x
+    lda #BOOM_LIFE
+    sta o_tmr,x
+    lda #$20                     ; 2000
+    jsr award_kill
+@ball:
+    ldx oi
+    stz o_type,x                 ; the ball expires against him
+    rts
+.endproc
+
 .proc l3_hurt                    ; the $3186 touch column ($FF) hurts, but the GB
     jsr l3_above                 ; stomp-side path (+0 = 0) exits with NO effect:
     bcc @no                      ; "stomping" passes harmlessly through the head
@@ -10077,9 +10103,13 @@ l3_updtab:
     lda tmpL3
     cmp #26                      ; centres: mario vs LEFT edge +8; accept < 26
     bcs @no
+    lda o_y,x
+    clc
+    adc #8                       ; body centre row (o_y = the head row)
+    sta tmpL2
     lda spr_y
     sec
-    sbc o_y,x
+    sbc tmpL2
     bpl :+
     eor #$FF
     ina
@@ -10122,8 +10152,8 @@ l3_updtab:
     adc #0
     sta o_xh,x
     lda o_y,y
-    sec
-    sbc #4
+    clc
+    adc #4                       ; fire line (o_y = head row; breath from the mouth)
     sta o_y,x
     lda #OBJ_BULL
     sta o_type,x
@@ -10429,20 +10459,28 @@ l3_drwtab:
     jmp draw_quad
 .endproc
 
+.proc draw_gcorp                 ; the statue y-flipped (rows swapped, tiles flipped)
+    lda #1
+    sta w_i
+    bra gao_draw
+.endproc
 .proc draw_gao
+    stz w_i
+.endproc                          ; fall through
+.proc gao_draw
     ldx oi
     lda #0
+    ldy w_i
+    bne :+                       ; the corpse never opens its mouth
     ldy o_tmr,x
     cpy #89
     bcc :+
-    lda #2                       ; mouth open ($A6/$A7/$B6/$B7)
+    lda #2
 :   sta tmpL3
-    ldy #0                       ; quad index 0..3: (dx,dy) = (0,0)(8,0)(0,8)(8,8)
+    ldy #0
 @q:
     phy
     ldx oi
-    lda o_y,x
-    sta dy
     tya
     and #2
     beq :+
@@ -10455,26 +10493,33 @@ l3_drwtab:
     tya
     and #1
     beq :+
-    lda spr_col
-    ina
-    ina
-    sta dcol
-:   tya                          ; tile: A4+off (+1 right, +$10 bottom row)
+    inc dcol
+    inc dcol
+:   tya
     and #1
     sta tmpH3
     tya
-    and #2
+    and #2                       ; row bit: bottom pair ($B4/B5) on quads 2,3 --
+    ldy w_i                      ; INVERTED when y-flipped (bottom row drawn on top)
     beq :+
-    lda #$10
-    ora tmpH3
+    eor #2
+:   cmp #2
+    bne :+
+    lda tmpH3
+    ora #$10
     sta tmpH3
 :   lda #GAO_TL
     clc
-    adc tmpH3
-    clc
+    adc tmpH3                    ; <= $B5: never carries
     adc tmpL3
     tax
+    lda w_i
+    bne @flip
     jsr draw_quad
+    bra @nx
+@flip:
+    jsr draw_tile_yflip
+@nx:
     ply
     iny
     cpy #4
@@ -10487,33 +10532,27 @@ l3_drwtab:
     jmp l3_one
 .endproc
 
-bat_row_a: .byte $CA,$CB,$CC,$BA,$DA,$DB,$DC   ; frame A: top 4, bottom 3
-bat_row_b: .byte $AB,$C6,$C7,$AA,$BB,$D6,$D7   ; frame B
+; Totomesu, 32x24 in 3 rows (GB OAM capture): head $CD $CE (both frames),
+; face CA CB CC BA / AB C6 C7 AA, base DA DB DC / BB D6 D7
+bat_row_a: .byte $CD,$CE,$CA,$CB,$CC,$BA,$DA,$DB,$DC
+bat_row_b: .byte $CD,$CE,$AB,$C6,$C7,$AA,$BB,$D6,$D7
+bat_dy:    .byte 0,0,8,8,8,8,16,16,16
+bat_dx:    .byte 0,2,0,2,4,6,0,2,4
 
 .proc draw_bat13
     ldy #0
 @q:
     phy
     ldx oi
-    lda o_y,x                    ; rows: quads 0-3 top, 4-6 bottom
-    sta dy
-    cpy #4
-    bcc :+
     lda o_y,x
     clc
-    adc #8
+    adc bat_dy,y
     sta dy
-:   tya                          ; column: (i&3 for top, i-4 for bottom) * 2
-    cpy #4
-    bcc :+
-    sec
-    sbc #4
-:   asl
+    lda spr_col
     clc
-    adc spr_col
+    adc bat_dx,y
     sta dcol
-    ldx oi
-    lda o_tmr,x                  ; frame B while animating/bobbing (tick >= 31)
+    lda o_tmr,x                  ; frame B while hopping (tick >= 31)
     cmp #31
     bcs @fb
     lda bat_row_a,y
@@ -10525,7 +10564,7 @@ bat_row_b: .byte $AB,$C6,$C7,$AA,$BB,$D6,$D7   ; frame B
     jsr draw_quad
     ply
     iny
-    cpy #7
+    cpy #9
     bne @q
     rts
 .endproc
@@ -10556,50 +10595,7 @@ bat_row_b: .byte $AB,$C6,$C7,$AA,$BB,$D6,$D7   ; frame B
     jmp l3_pair
 .endproc
 
-.proc draw_gcorp                 ; the Gao Y-FLIPPED: bottom row on top, all flipped
-    ldy #0
-@q:
-    phy
-    ldx oi
-    lda o_y,x
-    sta dy
-    cpy #2
-    bcs :+
-    bra @row                     ; quads 0,1: the (flipped) BOTTOM row drawn on top
-:   lda o_y,x
-    clc
-    adc #8
-    sta dy
-@row:
-    lda spr_col
-    sta dcol
-    tya
-    and #1
-    beq :+
-    lda spr_col
-    ina
-    ina
-    sta dcol
-:   tya                          ; tiles: B4/B5 (flipped) on top, A4/A5 below
-    and #1
-    sta tmpH3
-    cpy #2
-    bcs @bot
-    lda #$10
-    ora tmpH3
-    sta tmpH3
-@bot:
-    lda #GAO_TL
-    clc
-    adc tmpH3
-    tax
-    jsr draw_tile_yflip
-    ply
-    iny
-    cpy #4
-    bne @q
-    rts
-.endproc
+; (draw_gcorp merged into gao_draw above)
 
 ; --- pass-4 erase widths ---
 .proc l3_width                   ; Y = type -> A = o_pw
