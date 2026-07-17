@@ -316,8 +316,31 @@ L3CODE overlay (copied to RAM $1500 by load_level; see docs/24).
   every 8f): 1px/f horizontal toward Mario at launch. NOT stompable (head zone
   passes through); star → explosion + 5000; SUPERBALL: 5-hit HP (user-verified
   ~5; o_hp + l3_boss_hit): hits 1-4 chirp + the ball expires, hit 5 = the
-  burst (OBJ_BOOM + dff8 $01) + 2000 (GB capture: 800 gao + 2000 = 2800).
-  Port-verified: hp 1..4 absorbed, 5th = boom + 002000; hop/shot ticks exact.
+  burst (OBJ_BOOM + dff8 $01) + 5000 (user-verified on GB; an earlier 2000 was
+  a wrong decomposition of a capture). Port-verified: hp 1-4 absorbed, 5th =
+  boom + 005000; hop/shot ticks exact.
+  REFINEMENTS (all user-caught on hardware, a59fced + d7359f9): his 24px body
+  needs o_pw bit6 = EXTRA-TALL (+1 erase row; width mask $3F) or rising leaves
+  a base-row shadow; the hop-cycle wrap SNAPS o_y to the o_vy base (the bob's
+  parity stepping drifted — and note o_vy already stores the ADJUSTED head-row
+  base, no extra -8: that bug made him rise 8px/cycle); the breath always goes
+  his FACING (left), never aimed behind; only his FRONT half hurts (mario_dx <
+  14) — Mario passes over the back/tail like the GB.
+
+## PORT: the 1-3 collapsing bridge (stones $36 over the shaft) [2026-07-17]
+
+Five spawn entries, but the GB shows FOUR: the first rests on the left pillar
+top and its sprite's behind-BG priority hides it in the bricks — the port
+drops that entry (SKIP_SPAWNS in extract_levels.py; it adds no usable support).
+Crossing physics: each stone Mario leaves has begun sinking, so he steps off
+below the neighbour's top; plat_land's crossing test carries a **3px slop**
+(descent-only) — calibrated three times against the user's GB observations:
+RUNNING crosses the bridge, WALKING falls mid-shaft, exactly like the GB.
+(6px let walkers cross once the two-point foot probes shifted the handoff
+timing.) The two-point probes themselves (grounded + landing test BOTH feet,
++4/+12, after the centre) are the GB's own leniency: Mario stands when his
+body is mostly over a ledge — single-centre probing dropped him off pillar
+edges his body still covered.
 - **Hidden-block LIFT $07→$13→$14 → OBJ_GIFT 22** (8x8 tile $E6): block
   content $07 (cols 2 + 150 in 1-3) emerges 4px on top of the block and sits.
   It is a RIDEABLE — the same ride-morph pattern as the stone ($36's contact

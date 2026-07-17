@@ -25,6 +25,12 @@ Newest entries at the top. Every entry should be traceable to ROM bytes/code.
 rendering/perf rounds, blocks/powerups, enemies, goal+bonus game, death/title,
 audio phase. See docs/22 + docs/23 and the memory index.)
 
+## 2026-07-17 (closing) — bridge slop retuned 6 -> 3 (walking falls again)
+The two-point foot probes shifted the stone-handoff timing; the 6px slop then
+let WALKING cross the collapsing bridge (GB: running only — user-caught).
+At 3px both gaits verified: run CROSSES (lands past the shaft), walk FALLS
+mid-bridge at world x 1911. Third and final calibration point. (3cdc321)
+
 ## 2026-07-17 (night 2) — the L11 bonus overlay + ground probes + Totomesu snap/award
 SPACE UNLOCK: the bonus game (~1.2K) moved from FIXED to L11CODE — a bank-1-only
 blob (packer: [prefix][L11 @ TITLE0][header][level]), copied to the SHARED

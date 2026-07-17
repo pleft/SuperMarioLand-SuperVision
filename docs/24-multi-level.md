@@ -132,6 +132,25 @@ LEVELS prefix (bank 0 had ~430B free) nor FIXED (~17B free).
 - Segment budget after: bank0 ~0 free (L12 fills the tail), bank1 ~2.0K free,
   bank2 ~75B free, FIXED ~10B. The NEXT level (2-1) needs the 64K→128K cart
   step or another resident swap.
+## The bank-overlay pattern, generalized (2026-07-17)
+
+Three flavors now exist, all exploiting "this code only runs while bank N is
+mapped (or is copied out of it first)":
+- **TITLE0** (bank 0, in place): title code/data — runs only from the title.
+- **L12** (bank 0, in place): the 1-2-only entities (bunbun/arrow) — 1-2 is
+  bank 0's resident level.
+- **L3CODE** (bank 2 -> RAM $1500): the 1-3 kit; copied by load_level.
+- **L11CODE** (bank 1 -> RAM $1500): the BONUS GAME (~1.2K, freed FIXED from
+  1 byte to ~1.1K); bonus_enter_copy maps bank 1 and copies the blob at the
+  top-door goal path. The two RAM overlays SHARE the $1500 window — a bonus
+  can never run mid-1-3-gameplay, and the next load_level restores whichever
+  blob the next level needs.
+Packer layout for banks 1 and 2: [prefix][blob @ TITLE0 addr][header][level];
+load_level reads the header at __TITLE0_LOAD__ + __L11CODE_SIZE__/__L3CODE_SIZE__
+by cur_level. Collision leniency shipped with the freed space: grounded support
+and landings probe BOTH feet (+4/+12) after the centre, per the GB's dual-probe
+floor test.
+
 - **1-3's ending is NOT the door pattern**: the map dead-ends at the boss
   arena (bridge over spikes, wall + rope $EC at cols 297-298; no exit tiles).
   King Totomesu + the switch + the rescue scene are dedicated GB machinery
