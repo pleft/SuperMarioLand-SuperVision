@@ -5136,6 +5136,14 @@ riding_this:                     ; Z=1 if Mario rides slot oi
 
 ; plat_land: called while FALLING (tmpL = this frame's fall delta). If Mario's feet crossed
 ; a platform's top this frame and he x-overlaps it, land + ride. Returns A=1 if landed.
+.proc l3_above                   ; bcc = Mario is on the stomp side (4+px above)
+    lda spr_y
+    clc
+    adc #4
+    cmp o_y,x
+    rts
+.endproc
+
 .proc plat_land
     stz oi2
 @loop:
@@ -9690,7 +9698,7 @@ GIFT_T  = $E6                    ; (bat tiles: see bat_row_a/b below)
 :   lda spawn_tab+2,y
     sta o_y,x
     stz o_vx,x
-    stz o_vy,x
+    sta o_vy,x                   ; base y = the pipe/column rim (draw clip + hold)
     stz o_tmr,x
     stz o_st,x
     clc
@@ -9761,14 +9769,6 @@ l3_updtab:
     rts
 .endproc
 
-.proc l3_above                   ; C=1 -> Mario is the stomp side (4+px above)
-    lda spr_y
-    clc
-    adc #4
-    cmp o_y,x
-    rts                          ; bcc = above
-.endproc
-
 ; --- SUU $02: 200f cycle -- 62f hold low, 16f rise, 105f hold high (anim
 ; toggles every ~16f), 16f descend (trace: y 120<->104 GB) ---
 .proc upd_suu
@@ -9777,8 +9777,17 @@ l3_updtab:
     rts
 :   lda o_tmr,x
     cmp #62
-    bcc @tick                    ; bottom hold
-    cmp #78
+    bcs :+
+    jsr mario_dx                 ; classic pipe-plant rule (GB capture): while
+    lda tmpH3                    ; Mario is flush with the column it stays down
+    bne @tick
+    lda tmpL3
+    cmp #10
+    bcs @tick
+    ldx oi
+    stz o_tmr,x
+    bra @tick
+:   cmp #78
     bcs :+
     dec o_y,x                    ; rising 1px/f
     bra @tick
@@ -9801,7 +9810,7 @@ l3_updtab:
     lda #$01
     jmp award_kill
 @hurt:
-    jmp hurt_mario               ; not stompable (+0 = 0): top contact hurts too
+    jmp l3_hurt                  ; hurt from the side only (see l3_hurt)
 .endproc
 
 ; --- ROCK $0C: hangs 174f, then falls 1px/f THROUGH terrain; gone at y>=168.
@@ -9825,7 +9834,7 @@ l3_updtab:
     rts
 :   lda mario_starT              ; the star does NOT clear it -- but it must not
     bne @no                      ; hurt starred Mario either
-    jmp hurt_mario
+    jmp l3_hurt    
 @no:
     rts
 .endproc
@@ -9930,6 +9939,14 @@ l3_updtab:
     rts
 .endproc
 
+.proc l3_hurt                    ; the $3186 touch column ($FF) hurts, but the GB
+    jsr l3_above                 ; stomp-side path (+0 = 0) exits with NO effect:
+    bcc @no                      ; "stomping" passes harmlessly through the head
+    jmp hurt_mario               ; zone -- Mario lands on whatever is beneath
+@no:
+    rts
+.endproc
+
 .proc l3_gao_kill                ; A = corpse drift dir; X = the Gao slot
     pha
     lda #SFX_DFF8_03             ; the kill thump ($41 script: F9 03)
@@ -9982,7 +9999,7 @@ l3_updtab:
     rts
 :   lda mario_starT
     bne @done
-    jmp hurt_mario
+    jmp l3_hurt    
 @gone:
     stz o_type,x
     rts
@@ -10082,7 +10099,7 @@ l3_updtab:
 :   lda #$50                     ; class 3 = 5000
     jmp award_kill
 @hurt:
-    jmp hurt_mario               ; not stompable (stone)
+    jmp l3_hurt                  ; side only; the head zone passes through
 @no:
     rts
 .endproc
@@ -10136,7 +10153,7 @@ l3_updtab:
     rts
 :   lda mario_starT
     bne @done
-    jmp hurt_mario
+    jmp l3_hurt    
 .endproc
 
 ; --- GIFT $13: sits on its block; stomp -> floats away 0.5px/f to the top row,
@@ -10165,10 +10182,10 @@ l3_updtab:
     jsr carry_y_up
     ldx oi
     lda o_y,x
-    cmp #9
-    bcs @done
-    lda #2                       ; the top row: hold
-    sta o_st,x
+    cmp #17                      ; stop one row LOWER than the GB (o_y 16 vs 8):
+    bcs @done                    ; the port clips sprites under the HUD (no over-HUD
+    lda #2                       ; renderer yet), so this keeps the rider's lower
+    sta o_st,x                   ; half visible at the top; GB-exact once that ships
     stz o_tmr,x
     rts
 @sit:
@@ -10193,6 +10210,8 @@ l3_updtab:
 .endproc
 
 .proc l3_gift                    ; hit_qblock content $07: emerge on top of the block
+    jsr spawn_item_snd           ; GB bonk capture: dfe0=$07 thud then $0B emerge --
+                                 ; the emerge chime is the surviving/distinctive one
     jsr find_free_obj
     bcs @full
     lda #OBJ_GIFT
@@ -10331,6 +10350,9 @@ l3_drwtab:
 
 .proc draw_suu
     ldx oi
+    lda o_y,x
+    cmp o_vy,x                   ; fully retracted into the pipe: invisible
+    bcs @done
     jsr suu_frame
     sta tmpL3
     ldx oi
@@ -10344,9 +10366,11 @@ l3_drwtab:
     tax
     jsr draw_quad
     ldx oi
-    lda o_y,x                    ; bottom tile
+    lda o_y,x                    ; bottom tile -- only once clear of the rim
     clc
     adc #8
+    cmp o_vy,x
+    bcs @done
     sta dy
     lda spr_col
     sta dcol
@@ -10355,6 +10379,7 @@ l3_drwtab:
     adc tmpL3
     tax
     jsr draw_quad
+@done:
     rts
 .endproc
 
