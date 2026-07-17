@@ -25,6 +25,22 @@ Newest entries at the top. Every entry should be traceable to ROM bytes/code.
 rendering/perf rounds, blocks/powerups, enemies, goal+bonus game, death/title,
 audio phase. See docs/22 + docs/23 and the memory index.)
 
+## 2026-07-17 (night 2) — the L11 bonus overlay + ground probes + Totomesu snap/award
+SPACE UNLOCK: the bonus game (~1.2K) moved from FIXED to L11CODE — a bank-1-only
+blob (packer: [prefix][L11 @ TITLE0][header][level]), copied to the SHARED
+overlay RAM $1500 at bonus entry (bank-switch + 8-page copy; the 1-3 kit uses
+the same window — they never coexist, load_level restores the right one).
+FIXED went from 1 byte free to ~1.1K. Spent on: TWO-POINT FOOT PROBES (GB
+parity): grounded support and landing now probe both feet (+4/+12) — Mario
+stands when his body is mostly over a ledge (user-caught at the pillar; edge
+tests: centre 11px off = stands, 20px = falls). Totomesu: the cycle snap
+double-subtracted 8 (o_vy already stores the adjusted base) — he rose 8px per
+hop cycle ("stays midair", user-caught; my earlier test planted o_vy manually
+and masked it); ball-kill award corrected to 5000 (user-verified on GB).
+Bonus smoke: enters on bank 1, draws, runs, exits to next_level. OPEN: the
+boss-battle music switch (no dff0/dfe9 hook fired on approach — a different
+write path; RE with the ending phase).
+
 ## 2026-07-17 (final) — the fifth bridge stone: hidden on GB, dropped in the port
 User side-by-side: the GB shows FOUR stones — the fifth (col 117/pos $8D, world
 1880) sits ON the left pillar top and its sprite carries the OAM behind-BG

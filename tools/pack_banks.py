@@ -31,9 +31,12 @@ def main():
     # the L3CODE overlay (the 1-3 kit) is linked at BANK2's start; bank 2 is laid
     # out below as [prefix][L3 blob @ TITLE0][header][level data] — load_level
     # finds the header at TITLE0 + __L3CODE_SIZE__
-    mm = re.search(r"L3CODE\s+[0-9A-Fa-f]{6}\s+[0-9A-Fa-f]{6}\s+([0-9A-Fa-f]{6})",
-                   open(map_path).read())
+    mapf = open(map_path).read()
+    mm = re.search(r"L3CODE\s+[0-9A-Fa-f]{6}\s+[0-9A-Fa-f]{6}\s+([0-9A-Fa-f]{6})", mapf)
     l3 = bytes(img[2 * BANK:2 * BANK + int(mm.group(1), 16)]) if mm else b""
+    # same scheme for bank 1: the L11CODE blob (the bonus game) precedes the header
+    mm = re.search(r"L11CODE\s+[0-9A-Fa-f]{6}\s+[0-9A-Fa-f]{6}\s+([0-9A-Fa-f]{6})", mapf)
+    l11 = bytes(img[1 * BANK:1 * BANK + int(mm.group(1), 16)]) if mm else b""
     # banks 1+ place their level region where bank 0 keeps the TITLE0 segment (the
     # title runs only with bank 0 mapped, so its range is free in every other bank)
     m = re.search(r"TITLE0\s+([0-9A-Fa-f]{6})", open(map_path).read())
@@ -44,7 +47,7 @@ def main():
     prefix = img[0:hdr_off]                 # bank 0's common prefix, byte-identical everywhere
 
     for level, bank in jobs:
-        lvl_hdr_addr = hdr_addr + (len(l3) if bank == 2 else 0)
+        lvl_hdr_addr = hdr_addr + (len(l3) if bank == 2 else len(l11) if bank == 1 else 0)
         lv = f"build/levels/level_{level:02d}"
         blobs = {}
         for key, suffix in (("map", ".bin"), ("pipes", "_pipes.bin"),
@@ -84,6 +87,8 @@ def main():
                      + blobs["pipes"] + blobs["blocks"] + blobs["spawns"]
         if bank == 2:
             region = l3 + region
+        elif bank == 1:
+            region = l11 + region
         bank_img = prefix + region
         assert len(bank_img) <= BANK, \
             f"level {level}: bank {bank} overflows by {len(bank_img) - BANK} bytes"

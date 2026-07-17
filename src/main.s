@@ -996,8 +996,17 @@ main_loop:
     lsr
     lsr
     sta mrow
+    jsr read_solid                ; centre probe (feet_col set at entry, +8)
+    bne @sup
+    lda #4                        ; GB probes TWO foot points: the left foot...
+    jsr calc_feet_col
     jsr read_solid
-    beq @unsup                    ; A==0 -> not supported -> fall
+    bne @sup
+    lda #12                       ; ...and the right (body mostly over a ledge
+    jsr calc_feet_col             ; = supported; user-caught at the pillar edge)
+    jsr read_solid
+    beq @unsup                    ; nothing under either foot -> fall
+@sup:
     jmp @done                     ; supported -> stay grounded
 @unsup:
     lda #2                        ; walked off a ledge -> free-fall
@@ -1139,8 +1148,17 @@ main_loop:
     lsr
     lsr
     sta mrow
+    jsr read_solid                ; centre...
+    bne @snap
+    lda #4                        ; ...then both feet (edge landings, GB-lenient)
+    jsr calc_feet_col
+    jsr read_solid
+    bne @snap
+    lda #12
+    jsr calc_feet_col
     jsr read_solid
     beq @done                     ; no ground -> keep falling
+@snap:
     lda mrow                      ; land: snap feet to the tile top (spr_y = mrow*8)
     asl
     asl
@@ -1380,6 +1398,7 @@ main_loop:
     iny
     cpy #4
     bne :-
+    jsr bonus_enter_copy         ; map bank 1 + pull the bonus blob into RAM
     jsr bonus_start
     lda #2
     sta bonus_phase
@@ -1443,690 +1462,35 @@ main_loop:
 ; (Port simplification: Mario takes his own floor's prize — the traced run also went
 ; walk->award with no climb. Climb states $18/$19 not modeled.)
 
-; bput: blit tile A at (b_row, b_col) of the bonus screen (full-screen coords).
-.proc bput
-    pha
-    lda b_col
-    asl
-    sta dcol
-    lda b_row
-    asl
-    asl
-    asl
-    sta dy
-    jsr set_dst
-    pla
-    jsr get_tile_src
-    jsr blit_tile
-    rts
-.endproc
+; (the bonus game lives in L11CODE: a bank-1-only blob, copied to RAM $1500 at
+; bonus entry -- see the segment near the end of this file)
 
-.proc bput_run                   ; A = tile, X = count: blit a horizontal run from b_col
-    sta tmpL2
-    stx tmpH2
-:   lda tmpL2
-    jsr bput
-    inc b_col
-    dec tmpH2
+
+; bonus_enter_copy: map bank 1 and copy the L11CODE blob (at the TITLE0 address,
+; placed there by the packer) into the shared overlay RAM at $1500. The next
+; load_level restores whichever overlay the next level needs.
+.proc bonus_enter_copy
+    lda #(1 << 5) | (SYSCTRL_NMI_EN | SYSCTRL_TIMER_IRQ)
+    sta SYS_CTRL
+    lda #<__TITLE0_LOAD__
+    sta lvl_ptr
+    lda #>__TITLE0_LOAD__
+    sta lvl_ptr+1
+    lda #$15
+    sta tmpH2
+    stz tmpL2
+    ldx #8
+@pg:
+    ldy #0
+:   lda (lvl_ptr),y
+    sta (tmpL2),y
+    iny
     bne :-
-    rts
-.endproc
-
-; b_sety: spr_y = 40 + 24*b_floor (floor tops at dy 56/80/104/128; Mario is 16 above).
-.proc b_sety
-    lda b_floor
-    asl
-    asl
-    asl
-    sta tmpL2                    ; floor*8
-    asl
-    clc
-    adc tmpL2                    ; floor*24
-    clc
-    adc #40
-    sta spr_y
-    rts
-.endproc
-
-; b_erase: blank the 3x3 tile area at Mario's current (spr_x, spr_y).
-.proc b_erase
-    lda spr_y
-    lsr
-    lsr
-    lsr
-    sta tmpL3                    ; top tile row
-    stz tmpH3                    ; row counter
-@row:
-    lda spr_x
-    lsr
-    lsr
-    lsr
-    sta tmpL2                    ; left tile col
-    stz tmpH2
-@col:
-    lda tmpL2
-    asl
-    sta dcol
-    lda tmpL3
-    asl
-    asl
-    asl
-    sta dy
-    jsr set_dst
-    jsr blit_blank
-    inc tmpL2
+    inc lvl_ptr+1
     inc tmpH2
-    lda tmpH2
-    cmp #3
-    bne @col
-    inc tmpL3
-    inc tmpH3
-    lda tmpH3
-    cmp #3
-    bne @row
+    dex
+    bne @pg
     rts
-.endproc
-
-; b_ladder_cell: draw (A=0) or erase (A=1) the ladder at gap Y (0..2). The ladder is a
-; 1-col 4-row strip at BG col 10, rows (7+3*gap)..(+3) — tiles $2E,$2F,$2F,$30, erased
-; back to $2D (floor) at top+bottom and $2C between (RE: bank2 $5B27).
-.proc b_ladder_cell
-    sta tmpH3                    ; 0 draw / 1 erase
-    tya
-    asl
-    sta tmpL3                    ; gap*2
-    tya
-    clc
-    adc tmpL3
-    clc
-    adc #7
-    sta b_row                    ; row = 7 + 3*gap
-    lda #10
-    sta b_col
-    stz b_i
-@loop:
-    ldx b_i
-    ldy tmpH3
-    beq :+
-    lda b_erasetab,x
-    bra @put
-:   lda b_ladtab,x
-@put:
-    jsr bput
-    inc b_row
-    inc b_i
-    lda b_i
-    cmp #4
-    bne @loop
-    rts
-b_ladtab:   .byte $2E,$2F,$2F,$30
-b_erasetab: .byte $2D,$2C,$2C,$2D
-.endproc
-
-; bonus_start: draw the whole bonus screen + place Mario. (RE: State_12/$13/$14.)
-.proc bonus_start
-    lda #MUS_BONUS               ; the bonus tune replaces the goal fanfare ($0F84
-    jsr mus_start                ; writes $dfe8=$12 in the bonus-entry setup)
-    stz scroll_s                 ; the level end leaves XSCROLL=32 (sub-shift): the bonus
-    stz prev_scroll_s            ; draws at fb cols 0-19, so the window must start at 0
-    stz scroll_vis
-    stz XSCROLL
-    jsr clear_vram               ; blank the full framebuffer (incl. the HUD rows)
-    stz b_row                    ; --- border: top row ---
-    stz b_col
-    lda #$F5
-    jsr bput
-    inc b_col
-    lda #$9F
-    ldx #18
-    jsr bput_run
-    lda #$FC
-    jsr bput
-    lda #17                      ; --- bottom border (row 17) ---
-    sta b_row
-    stz b_col
-    lda #$FF
-    jsr bput
-    inc b_col
-    lda #$9F
-    ldx #18
-    jsr bput_run
-    lda #$E9
-    jsr bput
-    lda #1                       ; --- side walls rows 1..16 ---
-    sta b_row
-@sides:
-    stz b_col
-    lda #$F8
-    jsr bput
-    lda #19
-    sta b_col
-    lda #$F8
-    jsr bput
-    inc b_row
-    lda b_row
-    cmp #17
-    bne @sides
-    lda #2                       ; --- "BONUS GAME" at row 2 col 5 ---
-    sta b_row
-    lda #5
-    sta b_col
-    stz b_i
-:   ldx b_i
-    lda @txt,x
-    jsr bput
-    inc b_col
-    inc b_i
-    lda b_i
-    cmp #10
-    bne :-
-    lda #4                       ; --- lives: head icon + x + count at row 4 (original
-    sta b_row                    ; tilemap row: E4 2C 2B 00 02 at cols 7-11) ---
-    lda #7
-    sta b_col
-    lda #$E4
-    jsr bput
-    lda #9
-    sta b_col
-    lda #$2B                     ; the "x" -- was missing at init (only b_fixhud drew it)
-    jsr bput
-    lda #10
-    sta b_col
-    lda lives                    ; BCD tens/ones as font tiles
-    lsr
-    lsr
-    lsr
-    lsr
-    jsr bput
-    inc b_col
-    lda lives
-    and #$0F
-    jsr bput
-    stz b_i                      ; --- 4 floors (rows 7/10/13/16, cols 1..18) + pedestals ---
-@floors:
-    lda b_i
-    asl
-    sta tmpL3
-    lda b_i
-    clc
-    adc tmpL3
-    clc
-    adc #7
-    sta b_row                    ; floor row = 7+3n
-    lda #1
-    sta b_col
-    lda #$2D
-    ldx #18
-    jsr bput_run
-    dec b_row                    ; pedestal row = floor row - 1
-    lda #17
-    sta b_col
-    lda #$2B
-    jsr bput
-    inc b_col
-    ldx b_i
-    lda b_prz,x
-    jsr bput
-    inc b_i
-    lda b_i
-    cmp #4
-    bne @floors
-    lda frame_count              ; Mario's random start floor
-    lsr
-    lsr
-    and #3
-    sta b_floor
-    lda #16
-    sta spr_x
-    sta mario_vx
-    jsr b_sety
-    stz mario_frame
-    stz mario_facing
-    jsr draw_player
-    stz b_tick
-    lda #1
-    sta b_ladder
-    ldy #0                       ; first ladder visible at gap 0
-    lda #0
-    jsr b_ladder_cell
-    rts
-@txt: .byte $0B,$18,$17,$1E,$1C,$2C,$10,$0A,$16,$0E   ; "BONUS GAME" (font; $2C = space)
-.endproc
-
-; b_fixfloor: repaint the 3 cells of Mario's floor row (and any pedestal cells on the
-; row above) that b_erase just blanked.
-.proc b_fixfloor
-    lda spr_y                    ; floor row = (spr_y + 16) >> 3
-    clc
-    adc #16
-    lsr
-    lsr
-    lsr
-    sta b_row
-    sec                          ; only repaint REAL floor rows (7/10/13/16) -- mid-gap rows
-    sbc #7                       ; during a climb must stay blank
-    bmi @skip
-    cmp #10
-    bcs @skip
-:   cmp #3
-    bcc :+
-    sbc #3
-    bra :-
-:   cmp #0
-    beq @okrow
-@skip:
-    rts
-@okrow:
-    lda spr_x
-    lsr
-    lsr
-    lsr
-    sta b_col
-    stz b_i
-@f:
-    lda b_col
-    cmp #19                      ; inside the walls only
-    bcs @next
-    lda #$2D
-    jsr bput
-    dec b_row                    ; pedestal row: restore the "x" and the prize if touched
-    lda b_col
-    cmp #17
-    bne @nored
-    lda #$2B
-    jsr bput
-    bra @nored2
-@nored:
-    cmp #18
-    bne @nored2
-    ldx b_floor
-    lda b_prz,x
-    jsr bput
-@nored2:
-    inc b_row
-@next:
-    inc b_col
-    inc b_i
-    lda b_i
-    cmp #3
-    bne @f
-    rts
-.endproc
-
-; b_fixgap: while climbing, the erase clips BOTH end floors of the gap at the ladder
-; columns (10..12) -- repaint them each frame (the ladder redraw then overlays col 10).
-.proc b_fixgap
-    lda b_gap                    ; top floor row = 7 + 3*gap
-    asl
-    clc
-    adc b_gap
-    clc
-    adc #7
-    sta tmpH3
-    lda #2
-    sta tmpL3                    ; two rows: top floor, then +3 = bottom floor
-@rows:
-    lda tmpH3
-    sta b_row
-    lda #10
-    sta b_col
-    stz b_i
-@cols:
-    lda #$2D
-    jsr bput
-    inc b_col
-    inc b_i
-    lda b_i
-    cmp #3
-    bne @cols
-    lda tmpH3
-    clc
-    adc #3
-    sta tmpH3
-    dec tmpL3
-    bne @rows
-    rts
-.endproc
-
-; b_fixhud: repaint the bonus lives counter (row 4: head $E4 @7, x $2B @9, digits @10-11)
-; -- the hop's erase box reaches row 4; repainting keeps it intact AND live as lives tick.
-.proc b_fixhud
-    lda #4
-    sta b_row
-    lda #7
-    sta b_col
-    lda #$E4
-    jsr bput
-    lda #9
-    sta b_col
-    lda #$2B
-    jsr bput
-    lda #10
-    sta b_col
-    lda lives
-    lsr
-    lsr
-    lsr
-    lsr
-    jsr bput
-    inc b_col
-    lda lives
-    and #$0F
-    jmp bput
-.endproc
-
-; bonus_frame: one frame of the bonus game (called instead of the normal play loop).
-.proc bonus_frame
-    lda bonus_phase
-    cmp #2
-    bne :+
-    jmp @play
-:   cmp #3
-    bne :+
-    jmp @walk
-:   cmp #4
-    beq @climbup
-    cmp #6
-    beq @climbdn
-    jmp @award
-@climbup:
-    jsr b_erase
-    jsr b_fixgap
-    dec spr_y                    ; up the ladder 1px/frame
-    jsr @clstep
-    lda b_gap                    ; reached the top floor?
-    jsr @floory
-    cmp spr_y
-    bne @cdone
-    lda b_gap
-    sta b_floor
-    lda #MUS_BWALK               ; the walk-to-prize tune (GB state $17 -> $dfe8=$0A)
-    jsr mus_start
-    lda #3
-    sta bonus_phase
-@cdone:
-    rts
-@climbdn:
-    jsr b_erase
-    jsr b_fixgap
-    inc spr_y
-    jsr @clstep
-    lda b_gap
-    ina
-    jsr @floory
-    cmp spr_y
-    bne @cdone
-    lda b_gap
-    ina
-    sta b_floor
-    lda #MUS_BWALK               ; the walk-to-prize tune (GB state $17 -> $dfe8=$0A)
-    jsr mus_start
-    lda #3
-    sta bonus_phase
-    rts
-@clstep:                         ; ladder redrawn under him + climb-ish pose
-    lda #0
-    ldy b_gap
-    jsr b_ladder_cell
-    lda spr_y
-    lsr
-    lsr
-    lsr
-    and #1
-    sta mario_frame
-    jmp draw_player
-@floory:                         ; A = floor n -> A = its spr_y (40 + 24n = 8n + 16n + 40)
-    asl
-    asl
-    asl
-    sta tmpH3                    ; 8n
-    asl                          ; 16n
-    clc
-    adc tmpH3
-    clc
-    adc #40
-    rts
-@play:
-    lda b_ladder                 ; A while a ladder is visible (odd counter) -> lock it in
-    and #1
-    beq @tick
-    lda pad_pressed
-    and #GB_A
-    beq @tick
-    lda b_ladder                 ; locked: remember the gap, walk to the pedestal
-    dea
-    lsr
-    sta b_gap
-    lda #3
-    sta bonus_phase
-    rts
-@tick:
-    inc b_tick
-    lda b_tick
-    cmp #4                       ; harness-measured vs the original: ~4 frames visible +
-    beq :+                       ; ~4 blank per gap slot, 24-frame full cycle (was 3/18)
-    rts
-:   stz b_tick
-    lda b_ladder                 ; erase the currently shown ladder (odd) / advance
-    and #1
-    beq @showit
-    lda b_ladder                 ; visible now -> erase it at its gap
-    dea
-    lsr
-    tay
-    lda #1
-    jsr b_ladder_cell
-    bra @cycle
-@showit:
-    lda b_ladder                 ; hidden -> the NEXT odd shows at gap ((n)/2 mod 3)
-@cycle:
-    inc b_ladder
-    lda b_ladder
-    cmp #7
-    bcc :+
-    lda #1
-    sta b_ladder
-:   and #1
-    beq @mario
-    lda b_ladder                 ; became visible: draw at its gap
-    dea
-    lsr
-    tay
-    cpy #3
-    bcs @mario
-    lda #0
-    jsr b_ladder_cell
-@mario:
-    jsr b_erase                  ; Mario cycles DOWN a floor per tick (wraps to the top)
-    jsr b_fixfloor               ; (the erase blanks floor cells under him -- repaint)
-    lda b_floor
-    ina
-    and #3
-    sta b_floor
-    jsr b_sety
-    jsr draw_player
-    rts
-@walk:
-    jsr b_erase                  ; walk right 1px/frame to the pedestal (x=128)
-    jsr b_fixfloor               ; repaint the floor bricks he just passed over
-    lda #0                       ; and keep the locked ladder intact (its end cells sit ON
-    ldy b_gap                    ; floor rows, so the erase/repair above clips them)
-    jsr b_ladder_cell
-    inc spr_x
-    lda spr_x
-    sta mario_vx
-    lsr
-    lsr
-    lsr
-    and #1                       ; simple 2-frame walk cycle
-    ina
-    sta mario_frame
-    jsr draw_player
-    lda spr_x
-    cmp #80                      ; at the ladder column?
-    bne @notlad
-    lda b_floor                  ; ladder top at his floor -> climb DOWN; bottom -> UP
-    cmp b_gap
-    bne :+
-    lda #6                       ; climb down to floor gap+1
-    sta bonus_phase
-    rts
-:   lda b_gap
-    ina
-    cmp b_floor
-    bne @notlad
-    lda #4                       ; climb up to floor gap
-    sta bonus_phase
-    rts
-@notlad:
-    lda spr_x
-    cmp #128
-    bcc @wdone
-    lda #5                       ; reached the prize -> stand there ~68 frames, then the
-    sta bonus_phase              ; original does a hard CUT to the top-centre and hops
-    lda #68                      ; (harness capture: (128,128) f116-183 -> (88,56) f184)
-    sta b_awt
-    lda #MUS_BAWARD              ; the award celebration (GB state $1A -> $dfe8=$0D)
-    jsr mus_start
-    ldx b_floor
-    lda b_prz,x
-    cmp #$E5                     ; flower?
-    beq @flower
-    and #$0F                     ; tile $01/$02/$03 = that many lives
-    sta b_awn
-@wdone:
-    rts
-@flower:
-    lda #MUS_BAWARD              ; the award celebration (same GB award state $1A)
-    jsr mus_start
-    lda #10                      ; flower: awarded IN PLACE at the pedestal
-    sta bonus_phase
-    lda #1
-    sta mario_superball          ; the superball power always
-    lda mario_big
-    bne :+
-    lda #$50                     ; small -> the grow flash plays at the pedestal
-    sta mario_grow
-    lda #SFX_DFE0_04             ; the powerup-pickup sound (user-ID'd)
-    jsr sfx_play
-:   stz b_awn
-    lda #120
-    sta b_awt
-    rts
-@award:
-    lda bonus_phase
-    cmp #5
-    bne :+
-    jmp @wback
-:   cmp #10
-    bne :+
-    jmp @flowert
-:   cmp #11
-    bne :+
-    dec b_awt                    ; the celebration's tail pause
-    bne @adone
-    jmp @exit
-:
-    ; ---- phase 8: the JOY HOP at the top-centre (1px/4f, life at the APEX) ----
-    dec b_awt
-    bne @adone
-    lda #4
-    sta b_awt
-    lda b_awn
-    ora b_gap
-    beq @exit0
-    lda b_gap
-    cmp #5
-    bcc @rise
-    beq @apex
-    cmp #11
-    bcc @fall
-    stz mario_frame              ; step 11: standing beat between hops
-    jsr b_erase
-    jsr b_fixfloor
-    jsr b_fixhud
-    jsr draw_player
-    stz b_gap
-    rts
-@rise:
-    lda #3
-    sta mario_frame
-    jsr b_erase
-    jsr b_fixfloor
-    jsr b_fixhud
-    dec spr_y
-    jsr draw_player
-    inc b_gap
-    rts
-@apex:
-    lda b_awn
-    beq :+
-    jsr add_life_snd             ; the 1UP chirp at every hop apex ($dfe0=$08 x lives,
-    dec b_awn                    ; 44f apart -- harness-captured; was silent)
-:   inc b_gap
-    rts
-@fall:
-    lda #3
-    sta mario_frame
-    jsr b_erase
-    jsr b_fixfloor
-    jsr b_fixhud
-    inc spr_y
-    jsr draw_player
-    inc b_gap
-    rts
-@exit0:
-    lda #11                      ; ~70-frame tail pause in its own phase, then leave
-    sta bonus_phase
-    lda #70
-    sta b_awt
-@adone:
-    rts
-    ; ---- phase 5: stand at the pedestal ~68 frames, then the CUT to the top-centre ----
-@wback:
-    dec b_awt
-    beq @cut
-    rts
-@cut:
-    stz mario_frame              ; erase him at the pedestal, repaint the floor there,
-    jsr b_erase                  ; and reappear at the top-centre in one frame -- exactly
-    jsr b_fixfloor               ; the original's hard cut (no walk, no climb)
-    lda #80
-    sta spr_x
-    sta mario_vx
-    lda #40
-    sta spr_y
-    stz b_floor
-    stz mario_facing
-    jsr b_fixfloor               ; (top floor cells under the new spot)
-    jsr draw_player
-    lda #8
-    sta bonus_phase
-    stz b_gap
-    lda #4
-    sta b_awt
-    rts
-    ; ---- phase 10: the flower -- Mario STAYS at the pedestal (user-observed); if he
-    ; was small, the GROW FLASH plays right there, then the pause and out ----
-@flowert:
-    lda mario_grow
-    beq @ftimer
-    dec mario_grow               ; the 80-frame big<->small flash (draw_player renders it)
-    bne :+
-    inc mario_big                ; flash done -> big (superball was granted at the trigger)
-:   jsr b_erase
-    jsr b_fixfloor
-    jsr draw_player
-    rts
-@ftimer:
-    dec b_awt
-    bne @adone2
-    jmp @exit
-@adone2:
-    rts
-@exit:
-    stz bonus_phase
-    jmp next_level
 .endproc
 
 ; --- SFX player: replays build-time captured register streams of the ORIGINAL's
@@ -6719,7 +6083,7 @@ title_tiles:                     ; the used tiles, SV-packed
 ; anim_token: A = the animation token for slot X — the dirty test redraws on a
 ; token change. Bees flap on a SLOT-STAGGERED 8-frame phase (so two bees never
 ; force a same-frame redraw wave); arrows/stones have no animation at all.
-.segment "LEVELS"                ; (moved from FIXED for the 1-3 hooks' code space)
+.segment "CODE"                  ; (back in FIXED: the bonus-game move freed it)
 .proc anim_token
     lda o_type,x
     cmp #OBJ_GIFT
@@ -8578,10 +7942,17 @@ lvl_bank_tab: .byte 1, 0, 2     ; level id -> ROM bank (1-2 shares bank 0 with t
     ldy #>__TITLE0_LOAD__
     sty lvl_ptr+1
     cmp #2                       ; bank 2: the L3 overlay blob precedes the header
-    bne @hcopy
+    bne :+
     ldy #<(__TITLE0_LOAD__+__L3CODE_SIZE__)
     sty lvl_ptr
     ldy #>(__TITLE0_LOAD__+__L3CODE_SIZE__)
+    sty lvl_ptr+1
+    bra @hcopy
+:   cmp #0                       ; bank 1: the BONUS blob (L11CODE) precedes the header
+    bne @hcopy
+    ldy #<(__TITLE0_LOAD__+__L11CODE_SIZE__)
+    sty lvl_ptr
+    ldy #>(__TITLE0_LOAD__+__L11CODE_SIZE__)
     sty lvl_ptr+1
 @hcopy:
     ldy #17                      ; header -> RAM (18 bytes)
@@ -8700,7 +8071,9 @@ lvl_bank_tab: .byte 1, 0, 2     ; level id -> ROM bank (1-2 shares bank 0 with t
 .endproc
 
 .import __L3CODE_LOAD__, __L3CODE_RUN__, __L3CODE_SIZE__
+.import __L11CODE_SIZE__
 .assert __L3CODE_SIZE__ <= $7C0, error, "L3CODE overlay exceeds the RAM window"
+.assert __L11CODE_SIZE__ <= $7C0, error, "L11CODE overlay exceeds the RAM window"
 
 
 .segment "LEVELS"                ; 1-2 entity draw bodies (FIXED is full; the banked
@@ -9961,7 +9334,7 @@ l3_updtab:
     sta o_type,x
     lda #BOOM_LIFE
     sta o_tmr,x
-    lda #$20                     ; 2000
+    lda #$50                     ; 5000 (user-verified on GB)
     jsr award_kill
 @ball:
     ldx oi
@@ -10098,10 +9471,8 @@ l3_updtab:
     cmp #162
     bcc :+
     stz o_tmr,x
-    lda o_vy,x                   ; cycle wrap: SNAP to the base line (heals any
-    sec                          ; parity drift -- he was sinking into the bridge)
-    sbc #8
-    sta o_y,x
+    lda o_vy,x                   ; cycle wrap: SNAP to the base line (o_vy stores
+    sta o_y,x                    ; the ADJUSTED head-row base -- no extra -8!)
 :   ; contact box: 32px wide -> test vs the sprite centre (o_x+16): widen |dx|<18
     jsr mario_dx
     lda tmpH3
@@ -10800,6 +10171,702 @@ water_alt: .incbin "build/gfx/water_alt.svt"   ; tile $5D, high plane = ROM $3fc
     jmp @col
 :   rts
 .endproc
+
+
+; ---------------------------------------------------------------------------
+; THE BONUS GAME (L11CODE): bank-1-only blob, linked to run at RAM $1500 (the
+; same window as the 1-3 kit -- they never coexist; load_level restores the
+; needed overlay on every level load). Copied by bonus_enter_copy at the top-
+; door goal path; runs entirely from RAM with bank 1 mapped or not (all its
+; callees live in FIXED or the common prefix).
+; ---------------------------------------------------------------------------
+.segment "L11CODE"
+; bput: blit tile A at (b_row, b_col) of the bonus screen (full-screen coords).
+.proc bput
+    pha
+    lda b_col
+    asl
+    sta dcol
+    lda b_row
+    asl
+    asl
+    asl
+    sta dy
+    jsr set_dst
+    pla
+    jsr get_tile_src
+    jsr blit_tile
+    rts
+.endproc
+
+.proc bput_run                   ; A = tile, X = count: blit a horizontal run from b_col
+    sta tmpL2
+    stx tmpH2
+:   lda tmpL2
+    jsr bput
+    inc b_col
+    dec tmpH2
+    bne :-
+    rts
+.endproc
+
+; b_sety: spr_y = 40 + 24*b_floor (floor tops at dy 56/80/104/128; Mario is 16 above).
+.proc b_sety
+    lda b_floor
+    asl
+    asl
+    asl
+    sta tmpL2                    ; floor*8
+    asl
+    clc
+    adc tmpL2                    ; floor*24
+    clc
+    adc #40
+    sta spr_y
+    rts
+.endproc
+
+; b_erase: blank the 3x3 tile area at Mario's current (spr_x, spr_y).
+.proc b_erase
+    lda spr_y
+    lsr
+    lsr
+    lsr
+    sta tmpL3                    ; top tile row
+    stz tmpH3                    ; row counter
+@row:
+    lda spr_x
+    lsr
+    lsr
+    lsr
+    sta tmpL2                    ; left tile col
+    stz tmpH2
+@col:
+    lda tmpL2
+    asl
+    sta dcol
+    lda tmpL3
+    asl
+    asl
+    asl
+    sta dy
+    jsr set_dst
+    jsr blit_blank
+    inc tmpL2
+    inc tmpH2
+    lda tmpH2
+    cmp #3
+    bne @col
+    inc tmpL3
+    inc tmpH3
+    lda tmpH3
+    cmp #3
+    bne @row
+    rts
+.endproc
+
+; b_ladder_cell: draw (A=0) or erase (A=1) the ladder at gap Y (0..2). The ladder is a
+; 1-col 4-row strip at BG col 10, rows (7+3*gap)..(+3) — tiles $2E,$2F,$2F,$30, erased
+; back to $2D (floor) at top+bottom and $2C between (RE: bank2 $5B27).
+.proc b_ladder_cell
+    sta tmpH3                    ; 0 draw / 1 erase
+    tya
+    asl
+    sta tmpL3                    ; gap*2
+    tya
+    clc
+    adc tmpL3
+    clc
+    adc #7
+    sta b_row                    ; row = 7 + 3*gap
+    lda #10
+    sta b_col
+    stz b_i
+@loop:
+    ldx b_i
+    ldy tmpH3
+    beq :+
+    lda b_erasetab,x
+    bra @put
+:   lda b_ladtab,x
+@put:
+    jsr bput
+    inc b_row
+    inc b_i
+    lda b_i
+    cmp #4
+    bne @loop
+    rts
+b_ladtab:   .byte $2E,$2F,$2F,$30
+b_erasetab: .byte $2D,$2C,$2C,$2D
+.endproc
+
+; bonus_start: draw the whole bonus screen + place Mario. (RE: State_12/$13/$14.)
+.proc bonus_start
+    lda #MUS_BONUS               ; the bonus tune replaces the goal fanfare ($0F84
+    jsr mus_start                ; writes $dfe8=$12 in the bonus-entry setup)
+    stz scroll_s                 ; the level end leaves XSCROLL=32 (sub-shift): the bonus
+    stz prev_scroll_s            ; draws at fb cols 0-19, so the window must start at 0
+    stz scroll_vis
+    stz XSCROLL
+    jsr clear_vram               ; blank the full framebuffer (incl. the HUD rows)
+    stz b_row                    ; --- border: top row ---
+    stz b_col
+    lda #$F5
+    jsr bput
+    inc b_col
+    lda #$9F
+    ldx #18
+    jsr bput_run
+    lda #$FC
+    jsr bput
+    lda #17                      ; --- bottom border (row 17) ---
+    sta b_row
+    stz b_col
+    lda #$FF
+    jsr bput
+    inc b_col
+    lda #$9F
+    ldx #18
+    jsr bput_run
+    lda #$E9
+    jsr bput
+    lda #1                       ; --- side walls rows 1..16 ---
+    sta b_row
+@sides:
+    stz b_col
+    lda #$F8
+    jsr bput
+    lda #19
+    sta b_col
+    lda #$F8
+    jsr bput
+    inc b_row
+    lda b_row
+    cmp #17
+    bne @sides
+    lda #2                       ; --- "BONUS GAME" at row 2 col 5 ---
+    sta b_row
+    lda #5
+    sta b_col
+    stz b_i
+:   ldx b_i
+    lda @txt,x
+    jsr bput
+    inc b_col
+    inc b_i
+    lda b_i
+    cmp #10
+    bne :-
+    lda #4                       ; --- lives: head icon + x + count at row 4 (original
+    sta b_row                    ; tilemap row: E4 2C 2B 00 02 at cols 7-11) ---
+    lda #7
+    sta b_col
+    lda #$E4
+    jsr bput
+    lda #9
+    sta b_col
+    lda #$2B                     ; the "x" -- was missing at init (only b_fixhud drew it)
+    jsr bput
+    lda #10
+    sta b_col
+    lda lives                    ; BCD tens/ones as font tiles
+    lsr
+    lsr
+    lsr
+    lsr
+    jsr bput
+    inc b_col
+    lda lives
+    and #$0F
+    jsr bput
+    stz b_i                      ; --- 4 floors (rows 7/10/13/16, cols 1..18) + pedestals ---
+@floors:
+    lda b_i
+    asl
+    sta tmpL3
+    lda b_i
+    clc
+    adc tmpL3
+    clc
+    adc #7
+    sta b_row                    ; floor row = 7+3n
+    lda #1
+    sta b_col
+    lda #$2D
+    ldx #18
+    jsr bput_run
+    dec b_row                    ; pedestal row = floor row - 1
+    lda #17
+    sta b_col
+    lda #$2B
+    jsr bput
+    inc b_col
+    ldx b_i
+    lda b_prz,x
+    jsr bput
+    inc b_i
+    lda b_i
+    cmp #4
+    bne @floors
+    lda frame_count              ; Mario's random start floor
+    lsr
+    lsr
+    and #3
+    sta b_floor
+    lda #16
+    sta spr_x
+    sta mario_vx
+    jsr b_sety
+    stz mario_frame
+    stz mario_facing
+    jsr draw_player
+    stz b_tick
+    lda #1
+    sta b_ladder
+    ldy #0                       ; first ladder visible at gap 0
+    lda #0
+    jsr b_ladder_cell
+    rts
+@txt: .byte $0B,$18,$17,$1E,$1C,$2C,$10,$0A,$16,$0E   ; "BONUS GAME" (font; $2C = space)
+.endproc
+
+; b_fixfloor: repaint the 3 cells of Mario's floor row (and any pedestal cells on the
+; row above) that b_erase just blanked.
+.proc b_fixfloor
+    lda spr_y                    ; floor row = (spr_y + 16) >> 3
+    clc
+    adc #16
+    lsr
+    lsr
+    lsr
+    sta b_row
+    sec                          ; only repaint REAL floor rows (7/10/13/16) -- mid-gap rows
+    sbc #7                       ; during a climb must stay blank
+    bmi @skip
+    cmp #10
+    bcs @skip
+:   cmp #3
+    bcc :+
+    sbc #3
+    bra :-
+:   cmp #0
+    beq @okrow
+@skip:
+    rts
+@okrow:
+    lda spr_x
+    lsr
+    lsr
+    lsr
+    sta b_col
+    stz b_i
+@f:
+    lda b_col
+    cmp #19                      ; inside the walls only
+    bcs @next
+    lda #$2D
+    jsr bput
+    dec b_row                    ; pedestal row: restore the "x" and the prize if touched
+    lda b_col
+    cmp #17
+    bne @nored
+    lda #$2B
+    jsr bput
+    bra @nored2
+@nored:
+    cmp #18
+    bne @nored2
+    ldx b_floor
+    lda b_prz,x
+    jsr bput
+@nored2:
+    inc b_row
+@next:
+    inc b_col
+    inc b_i
+    lda b_i
+    cmp #3
+    bne @f
+    rts
+.endproc
+
+; b_fixgap: while climbing, the erase clips BOTH end floors of the gap at the ladder
+; columns (10..12) -- repaint them each frame (the ladder redraw then overlays col 10).
+.proc b_fixgap
+    lda b_gap                    ; top floor row = 7 + 3*gap
+    asl
+    clc
+    adc b_gap
+    clc
+    adc #7
+    sta tmpH3
+    lda #2
+    sta tmpL3                    ; two rows: top floor, then +3 = bottom floor
+@rows:
+    lda tmpH3
+    sta b_row
+    lda #10
+    sta b_col
+    stz b_i
+@cols:
+    lda #$2D
+    jsr bput
+    inc b_col
+    inc b_i
+    lda b_i
+    cmp #3
+    bne @cols
+    lda tmpH3
+    clc
+    adc #3
+    sta tmpH3
+    dec tmpL3
+    bne @rows
+    rts
+.endproc
+
+; b_fixhud: repaint the bonus lives counter (row 4: head $E4 @7, x $2B @9, digits @10-11)
+; -- the hop's erase box reaches row 4; repainting keeps it intact AND live as lives tick.
+.proc b_fixhud
+    lda #4
+    sta b_row
+    lda #7
+    sta b_col
+    lda #$E4
+    jsr bput
+    lda #9
+    sta b_col
+    lda #$2B
+    jsr bput
+    lda #10
+    sta b_col
+    lda lives
+    lsr
+    lsr
+    lsr
+    lsr
+    jsr bput
+    inc b_col
+    lda lives
+    and #$0F
+    jmp bput
+.endproc
+
+; bonus_frame: one frame of the bonus game (called instead of the normal play loop).
+.proc bonus_frame
+    lda bonus_phase
+    cmp #2
+    bne :+
+    jmp @play
+:   cmp #3
+    bne :+
+    jmp @walk
+:   cmp #4
+    beq @climbup
+    cmp #6
+    beq @climbdn
+    jmp @award
+@climbup:
+    jsr b_erase
+    jsr b_fixgap
+    dec spr_y                    ; up the ladder 1px/frame
+    jsr @clstep
+    lda b_gap                    ; reached the top floor?
+    jsr @floory
+    cmp spr_y
+    bne @cdone
+    lda b_gap
+    sta b_floor
+    lda #MUS_BWALK               ; the walk-to-prize tune (GB state $17 -> $dfe8=$0A)
+    jsr mus_start
+    lda #3
+    sta bonus_phase
+@cdone:
+    rts
+@climbdn:
+    jsr b_erase
+    jsr b_fixgap
+    inc spr_y
+    jsr @clstep
+    lda b_gap
+    ina
+    jsr @floory
+    cmp spr_y
+    bne @cdone
+    lda b_gap
+    ina
+    sta b_floor
+    lda #MUS_BWALK               ; the walk-to-prize tune (GB state $17 -> $dfe8=$0A)
+    jsr mus_start
+    lda #3
+    sta bonus_phase
+    rts
+@clstep:                         ; ladder redrawn under him + climb-ish pose
+    lda #0
+    ldy b_gap
+    jsr b_ladder_cell
+    lda spr_y
+    lsr
+    lsr
+    lsr
+    and #1
+    sta mario_frame
+    jmp draw_player
+@floory:                         ; A = floor n -> A = its spr_y (40 + 24n = 8n + 16n + 40)
+    asl
+    asl
+    asl
+    sta tmpH3                    ; 8n
+    asl                          ; 16n
+    clc
+    adc tmpH3
+    clc
+    adc #40
+    rts
+@play:
+    lda b_ladder                 ; A while a ladder is visible (odd counter) -> lock it in
+    and #1
+    beq @tick
+    lda pad_pressed
+    and #GB_A
+    beq @tick
+    lda b_ladder                 ; locked: remember the gap, walk to the pedestal
+    dea
+    lsr
+    sta b_gap
+    lda #3
+    sta bonus_phase
+    rts
+@tick:
+    inc b_tick
+    lda b_tick
+    cmp #4                       ; harness-measured vs the original: ~4 frames visible +
+    beq :+                       ; ~4 blank per gap slot, 24-frame full cycle (was 3/18)
+    rts
+:   stz b_tick
+    lda b_ladder                 ; erase the currently shown ladder (odd) / advance
+    and #1
+    beq @showit
+    lda b_ladder                 ; visible now -> erase it at its gap
+    dea
+    lsr
+    tay
+    lda #1
+    jsr b_ladder_cell
+    bra @cycle
+@showit:
+    lda b_ladder                 ; hidden -> the NEXT odd shows at gap ((n)/2 mod 3)
+@cycle:
+    inc b_ladder
+    lda b_ladder
+    cmp #7
+    bcc :+
+    lda #1
+    sta b_ladder
+:   and #1
+    beq @mario
+    lda b_ladder                 ; became visible: draw at its gap
+    dea
+    lsr
+    tay
+    cpy #3
+    bcs @mario
+    lda #0
+    jsr b_ladder_cell
+@mario:
+    jsr b_erase                  ; Mario cycles DOWN a floor per tick (wraps to the top)
+    jsr b_fixfloor               ; (the erase blanks floor cells under him -- repaint)
+    lda b_floor
+    ina
+    and #3
+    sta b_floor
+    jsr b_sety
+    jsr draw_player
+    rts
+@walk:
+    jsr b_erase                  ; walk right 1px/frame to the pedestal (x=128)
+    jsr b_fixfloor               ; repaint the floor bricks he just passed over
+    lda #0                       ; and keep the locked ladder intact (its end cells sit ON
+    ldy b_gap                    ; floor rows, so the erase/repair above clips them)
+    jsr b_ladder_cell
+    inc spr_x
+    lda spr_x
+    sta mario_vx
+    lsr
+    lsr
+    lsr
+    and #1                       ; simple 2-frame walk cycle
+    ina
+    sta mario_frame
+    jsr draw_player
+    lda spr_x
+    cmp #80                      ; at the ladder column?
+    bne @notlad
+    lda b_floor                  ; ladder top at his floor -> climb DOWN; bottom -> UP
+    cmp b_gap
+    bne :+
+    lda #6                       ; climb down to floor gap+1
+    sta bonus_phase
+    rts
+:   lda b_gap
+    ina
+    cmp b_floor
+    bne @notlad
+    lda #4                       ; climb up to floor gap
+    sta bonus_phase
+    rts
+@notlad:
+    lda spr_x
+    cmp #128
+    bcc @wdone
+    lda #5                       ; reached the prize -> stand there ~68 frames, then the
+    sta bonus_phase              ; original does a hard CUT to the top-centre and hops
+    lda #68                      ; (harness capture: (128,128) f116-183 -> (88,56) f184)
+    sta b_awt
+    lda #MUS_BAWARD              ; the award celebration (GB state $1A -> $dfe8=$0D)
+    jsr mus_start
+    ldx b_floor
+    lda b_prz,x
+    cmp #$E5                     ; flower?
+    beq @flower
+    and #$0F                     ; tile $01/$02/$03 = that many lives
+    sta b_awn
+@wdone:
+    rts
+@flower:
+    lda #MUS_BAWARD              ; the award celebration (same GB award state $1A)
+    jsr mus_start
+    lda #10                      ; flower: awarded IN PLACE at the pedestal
+    sta bonus_phase
+    lda #1
+    sta mario_superball          ; the superball power always
+    lda mario_big
+    bne :+
+    lda #$50                     ; small -> the grow flash plays at the pedestal
+    sta mario_grow
+    lda #SFX_DFE0_04             ; the powerup-pickup sound (user-ID'd)
+    jsr sfx_play
+:   stz b_awn
+    lda #120
+    sta b_awt
+    rts
+@award:
+    lda bonus_phase
+    cmp #5
+    bne :+
+    jmp @wback
+:   cmp #10
+    bne :+
+    jmp @flowert
+:   cmp #11
+    bne :+
+    dec b_awt                    ; the celebration's tail pause
+    bne @adone
+    jmp @exit
+:
+    ; ---- phase 8: the JOY HOP at the top-centre (1px/4f, life at the APEX) ----
+    dec b_awt
+    bne @adone
+    lda #4
+    sta b_awt
+    lda b_awn
+    ora b_gap
+    beq @exit0
+    lda b_gap
+    cmp #5
+    bcc @rise
+    beq @apex
+    cmp #11
+    bcc @fall
+    stz mario_frame              ; step 11: standing beat between hops
+    jsr b_erase
+    jsr b_fixfloor
+    jsr b_fixhud
+    jsr draw_player
+    stz b_gap
+    rts
+@rise:
+    lda #3
+    sta mario_frame
+    jsr b_erase
+    jsr b_fixfloor
+    jsr b_fixhud
+    dec spr_y
+    jsr draw_player
+    inc b_gap
+    rts
+@apex:
+    lda b_awn
+    beq :+
+    jsr add_life_snd             ; the 1UP chirp at every hop apex ($dfe0=$08 x lives,
+    dec b_awn                    ; 44f apart -- harness-captured; was silent)
+:   inc b_gap
+    rts
+@fall:
+    lda #3
+    sta mario_frame
+    jsr b_erase
+    jsr b_fixfloor
+    jsr b_fixhud
+    inc spr_y
+    jsr draw_player
+    inc b_gap
+    rts
+@exit0:
+    lda #11                      ; ~70-frame tail pause in its own phase, then leave
+    sta bonus_phase
+    lda #70
+    sta b_awt
+@adone:
+    rts
+    ; ---- phase 5: stand at the pedestal ~68 frames, then the CUT to the top-centre ----
+@wback:
+    dec b_awt
+    beq @cut
+    rts
+@cut:
+    stz mario_frame              ; erase him at the pedestal, repaint the floor there,
+    jsr b_erase                  ; and reappear at the top-centre in one frame -- exactly
+    jsr b_fixfloor               ; the original's hard cut (no walk, no climb)
+    lda #80
+    sta spr_x
+    sta mario_vx
+    lda #40
+    sta spr_y
+    stz b_floor
+    stz mario_facing
+    jsr b_fixfloor               ; (top floor cells under the new spot)
+    jsr draw_player
+    lda #8
+    sta bonus_phase
+    stz b_gap
+    lda #4
+    sta b_awt
+    rts
+    ; ---- phase 10: the flower -- Mario STAYS at the pedestal (user-observed); if he
+    ; was small, the GROW FLASH plays right there, then the pause and out ----
+@flowert:
+    lda mario_grow
+    beq @ftimer
+    dec mario_grow               ; the 80-frame big<->small flash (draw_player renders it)
+    bne :+
+    inc mario_big                ; flash done -> big (superball was granted at the trigger)
+:   jsr b_erase
+    jsr b_fixfloor
+    jsr draw_player
+    rts
+@ftimer:
+    dec b_awt
+    bne @adone2
+    jmp @exit
+@adone2:
+    rts
+@exit:
+    stz bonus_phase
+    jmp next_level
+.endproc
+.segment "CODE"
 
 ; ---------------------------------------------------------------------------
 .segment "VECTORS"
