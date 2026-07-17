@@ -9870,7 +9870,7 @@ l3_updtab:
     lda #$08
     jmp award_kill
 :   jsr l3_above
-    bcc @hurt
+    bcs @hurt                    ; carry set = side/below -> hurt; CLEAR = above
     lda #OBJ_GSQ                 ; stomp: the flat pair ~48f, then the corpse
     sta o_type,x
     lda #48

@@ -25,6 +25,13 @@ Newest entries at the top. Every entry should be traceable to ROM bytes/code.
 rendering/perf rounds, blocks/powerups, enemies, goal+bonus game, death/title,
 audio phase. See docs/22 + docs/23 and the memory index.)
 
+## 2026-07-17 (evening) — Gao stomp: the inverted branch (user-caught with GB proof)
+The column enemy in the user's screenshots was GAO, not the flower — and their
+"800" score popup nailed it (Gao = class 2 = 800). upd_gao's stomp test used
+bcc @hurt: carry CLEAR from l3_above means Mario IS above, so stomps routed to
+the hurt path (death) and side hits to the squash. One-opcode fix (bcs @hurt);
+lift top also reverted to the GB-exact o_y=8 per user preference (a33334a).
+
 ## 2026-07-17 (later) — 1-3 flower fixes: retract-clip, hold, side-only hurt
 Type $02 is the pipe/column FLOWER (not "Suu the spider"): user-caught visible-
 inside-the-column + death-on-stomp. GB truth: retracted body hidden via OAM
