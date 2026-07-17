@@ -10182,10 +10182,10 @@ l3_updtab:
     jsr carry_y_up
     ldx oi
     lda o_y,x
-    cmp #17                      ; stop one row LOWER than the GB (o_y 16 vs 8):
-    bcs @done                    ; the port clips sprites under the HUD (no over-HUD
-    lda #2                       ; renderer yet), so this keeps the rider's lower
-    sta o_st,x                   ; half visible at the top; GB-exact once that ships
+    cmp #9                       ; GB-exact top (GB holds at y=32 = o_y 8). The rider
+    bcs @done                    ; is hidden under the HUD up there until the over-HUD
+    lda #2                       ; sprite renderer ships (parked) — user-accepted
+    sta o_st,x
     stz o_tmr,x
     rts
 @sit:
