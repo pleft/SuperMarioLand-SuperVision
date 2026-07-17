@@ -7043,7 +7043,9 @@ title_tiles:                     ; the used tiles, SV-packed
 @gleft:
     lda #$FF
 @gball:
-    jsr l3_gao_kill              ; thump + flipped corpse + 800
+    jsr l3_gao_kill              ; thump + flipped corpse
+    lda #$08                     ; class 2 = 800
+    jsr award_kill
     ldx oi
     stz o_type,x                 ; the ball expires against it
     rts
@@ -9949,8 +9951,10 @@ l3_updtab:
 
 .proc l3_gao_kill                ; A = corpse drift dir; X = the Gao slot
     pha
-    lda #SFX_DFF8_03             ; the kill thump ($41 script: F9 03)
-    jsr sfx_play
+    phx                          ; sfx_play CLOBBERS X — the corpse writes went
+    lda #SFX_DFF8_03             ; to a garbage slot (stuck flat squash + the
+    jsr sfx_play                 ; ball-killed Gao surviving; user-caught both)
+    plx
     pla
     sta o_vx,x
     lda #OBJ_GCORP

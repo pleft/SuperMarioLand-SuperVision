@@ -25,6 +25,16 @@ Newest entries at the top. Every entry should be traceable to ROM bytes/code.
 rendering/perf rounds, blocks/powerups, enemies, goal+bonus game, death/title,
 audio phase. See docs/22 + docs/23 and the memory index.)
 
+## 2026-07-17 (evening 2) — Gao corpse chain: the sfx_play X-clobber
+User: "its corpse animation is missing" + "fireballs don't kill Gao" — ONE bug:
+l3_gao_kill used X after sfx_play clobbered it, so the corpse-morph writes hit a
+garbage slot (the flat squash stuck forever; the ball-killed Gao survived while
+the ball expired). phx/plx around the thump fixes both; the ball branch also
+lacked its 800 award. Verified: stomp = squash 47f -> falling corpse 47f ->
+gone; superball = corpse chain + ball expires + score 000800.
+HARNESS LESSON: any L3 proc touching slot fields after jsr sfx_play must reload
+or save X (all other call sites already reloaded via ldx oi / find_free_obj).
+
 ## 2026-07-17 (evening) — Gao stomp: the inverted branch (user-caught with GB proof)
 The column enemy in the user's screenshots was GAO, not the flower — and their
 "800" score popup nailed it (Gao = class 2 = 800). upd_gao's stomp test used
