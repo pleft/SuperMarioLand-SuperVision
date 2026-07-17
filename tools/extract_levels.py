@@ -156,7 +156,13 @@ def decode_blocks(d, level, seg_flat, cols):
         out.append({"col": fc, "row": row, "value": val})
     return out
 
-def decode_spawns(d, bank, gb):
+# Entries whose sprite the GB never shows (OAM behind-BG priority puts them
+# inside solid map tiles) AND that add no support Mario can use (they sit ON
+# solid ground): dropped so the port matches the GB pixel-for-pixel without a
+# per-draw map probe. 1-3's first bridge stone rests on the left pillar top.
+SKIP_SPAWNS = {2: [(117, 0x8D, 0x36)]}     # level: [(col, pos, type)]
+
+def decode_spawns(d, bank, gb, lvl=None):
     """3-byte entries [col, position, type], ascending by col, until col drops/ends.
     position: Y = (pos&0x1F)*8+0x10 ; X screen-offset = (pos>>6)&3."""
     o = bank_file(bank, gb); out = []; last = -1
@@ -164,6 +170,9 @@ def decode_spawns(d, bank, gb):
         c, pos, typ = d[o], d[o + 1], d[o + 2]
         if c < last:                    # columns are ascending; a drop = end
             break
+        if (c, pos, typ) in SKIP_SPAWNS.get(lvl, []):
+            last = c; o += 3
+            continue
         out.append({"col": c, "type": typ,
                     "y": (pos & 0x1F) * 8 + 0x10, "x_off": (pos >> 6) & 3})
         last = c; o += 3
@@ -196,7 +205,7 @@ def main():
         cols, rooms, seg_flat, seg_room = decode_level(d, bank, seg_tab, LEVEL_START_SEG.get(lvl, DEFAULT_START_SEG))
         pipes = decode_pipes(d, lvl, seg_flat, seg_room)
         blocks = decode_blocks(d, lvl, seg_flat, cols)
-        spawns = decode_spawns(d, bank, spawn_p)
+        spawns = decode_spawns(d, bank, spawn_p, lvl)
         lvldata = {
             "level": lvl, "world": world, "stage": lvl % 3 + 1, "bank": bank, "param": param,
             "seg_ptr_table": f"${seg_tab:04X}", "segment_ptrs": [f"${x:04X}" for x in segs],

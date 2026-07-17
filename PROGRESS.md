@@ -25,6 +25,17 @@ Newest entries at the top. Every entry should be traceable to ROM bytes/code.
 rendering/perf rounds, blocks/powerups, enemies, goal+bonus game, death/title,
 audio phase. See docs/22 + docs/23 and the memory index.)
 
+## 2026-07-17 (final) — the fifth bridge stone: hidden on GB, dropped in the port
+User side-by-side: the GB shows FOUR stones — the fifth (col 117/pos $8D, world
+1880) sits ON the left pillar top and its sprite carries the OAM behind-BG
+priority bit, so the bricks hide it completely. The port has no per-pixel
+sprite priority and FIXED has 1 byte free, so instead of a draw-time map probe
+the extractor now SKIPS that entry (SKIP_SPAWNS in extract_levels.py): it adds
+no support Mario can use (the pillar is solid) and the port now matches the GB
+pixel-for-pixel — the "stone inside the bricks" mangling is gone with it.
+Verified: 4 stones at worlds 1888-1912, the run-across still lands past the
+shaft, walking still falls (both GB thresholds hold).
+
 ## 2026-07-17 (later still) — the collapsing bridge is crossable (user-caught)
 My earlier "verification" only rode the stones down — it never tested RUNNING
 ACROSS, which was broken (user: falls after the first stone, can't mount the
