@@ -200,3 +200,9 @@ state by state, before shipping.
 - Mario kept pedestal altitude through the transition scroll: he now falls
   2px/f to the room floor as the scroll begins (the GB shows him stepping
   off as the pedestal rolls away).
+
+## Polish round 5 (2026-07-19)
+
+The transition drop was unconditional, sinking Mario into the arena wall he
+still stood on. Gated on his front foot's world x >= 2400 (the map edge):
+he walks the wall top as it scrolls out, then steps down to the room floor.

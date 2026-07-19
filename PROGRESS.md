@@ -25,6 +25,12 @@ Newest entries at the top. Every entry should be traceable to ROM bytes/code.
 rendering/perf rounds, blocks/powerups, enemies, goal+bonus game, death/title,
 audio phase. See docs/22 + docs/23 and the memory index.)
 
+## 2026-07-19 (night 5) — ending polish 5: the wall-top walk
+User-caught: the transition drop fired at the scroll's first frame, sinking
+Mario into the arena structure he was still standing on. The fall is now
+gated on his front foot's WORLD x passing the map edge (2400) — he walks the
+wall top as it rolls away, then steps down to the room floor, like the GB.
+
 ## 2026-07-19 (night 4) — ending polish 4: the cloud's erase envelope + the drop
 Two user-caught: the 16x16 cloud's bottom row was drawn BELOW the anchor while
 the pipeline's TALL erase covers the row ABOVE it (the Nokobon-shell

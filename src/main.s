@@ -1564,12 +1564,28 @@ MARIO_INX = 60                   ; Mario's walk-in stop (GB 61; he must not
     ; the engine streams the room template in (read_map_tile's past-edge branch)
     ; while Mario keeps walking, drifting to his mark. GB $22/$23 exactly. ---
     jsr l3e_walkanim
-    lda spr_y                    ; he steps off the pedestal as it rolls away:
-    cmp #CAPT_Y                  ; fall to the room floor (the air-walk fix)
-    bcs :+
+    lda spr_y                    ; he walks the wall TOP until the arena structure
+    cmp #CAPT_Y                  ; ends under him (world x 2400 = the map edge),
+    bcs @grounded                ; THEN steps down to the room floor
+    lda spr_x                    ; his front foot's world x
+    clc
+    adc #12
+    adc cam_x
+    sta tmpL2
+    lda cam_x+1
+    adc #0
+    sta tmpH2
+    cmp #>2400
+    bcc @grounded
+    bne @fall
+    lda tmpL2
+    cmp #<2400
+    bcc @grounded
+@fall:
     inc spr_y
     inc spr_y
-:   lda frame_count
+@grounded:
+    lda frame_count
     and #1
     bne :+
     lda spr_x                    ; drift left to his mark (GB: he ends at 61 with
