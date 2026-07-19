@@ -206,3 +206,14 @@ state by state, before shipping.
 The transition drop was unconditional, sinking Mario into the arena wall he
 still stood on. Gated on his front foot's world x >= 2400 (the map edge):
 he walks the wall top as it scrolls out, then steps down to the room floor.
+
+## Polish round 6 (2026-07-19)
+
+- The transition walk uses REAL collision now: a per-frame ground probe
+  (calc_feet_col + read_solid at the feet row) with 2px/f gravity -- the
+  virtual room floor arrives via read_map_tile, so the same probe handles
+  the pedestal, the wall top and the room floor with no scripted heights.
+- Boss-fight flicker: profiled p95=106% of the frame budget. The two shots
+  flew at 61Hz (1px/f); they now move 2px every other frame on slot parity
+  (the 1-2 arrow precedent). Median 73% -> 63%; the residual worst ~120%
+  spikes are boss+Mario overlap chains (the parked composite-draw lever).

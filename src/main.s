@@ -1564,24 +1564,19 @@ MARIO_INX = 60                   ; Mario's walk-in stop (GB 61; he must not
     ; the engine streams the room template in (read_map_tile's past-edge branch)
     ; while Mario keeps walking, drifting to his mark. GB $22/$23 exactly. ---
     jsr l3e_walkanim
-    lda spr_y                    ; he walks the wall TOP until the arena structure
-    cmp #CAPT_Y                  ; ends under him (world x 2400 = the map edge),
-    bcs @grounded                ; THEN steps down to the room floor
-    lda spr_x                    ; his front foot's world x
-    clc
-    adc #12
-    adc cam_x
-    sta tmpL2
-    lda cam_x+1
-    adc #0
-    sta tmpH2
-    cmp #>2400
-    bcc @grounded
-    bne @fall
-    lda tmpL2
-    cmp #<2400
-    bcc @grounded
-@fall:
+    lda #8                       ; REAL ground probe (user: respect gravity!):
+    jsr calc_feet_col            ; the template floor comes through read_map_tile,
+    lda spr_y                    ; so collision works across pedestal, wall and
+    clc                          ; room floor alike -- fall 2px/f when the tile
+    adc #16                      ; under his feet is not solid
+    lsr
+    lsr
+    lsr
+    sec
+    sbc #2                       ; screen row -> world row
+    sta mrow
+    jsr read_solid
+    bne @grounded
     inc spr_y
     inc spr_y
 @grounded:
@@ -10427,17 +10422,27 @@ l3_updtab:
 
 ; --- BULL $1E: 1px/f horizontal, anim pair every 8f; any contact hurts ---
 .proc upd_bull
-    lda o_vx,x
+    txa                          ; 30Hz staggered like the 1-2 arrows: 2px every
+    eor frame_count              ; other frame on slot parity -- same trajectory,
+    lsr                          ; half the redraws (two shots fly in the fight)
+    bcc :+
+    rts
+:   lda o_vx,x
     bmi @ml
-    inc o_xl,x
-    bne @xd
+    lda o_xl,x
+    clc
+    adc #2
+    sta o_xl,x
+    bcc @xd
     inc o_xh,x
     bra @xd
 @ml:
     lda o_xl,x
-    bne :+
+    sec
+    sbc #2
+    sta o_xl,x
+    bcs @xd
     dec o_xh,x
-:   dec o_xl,x
 @xd:
     jsr l3_xoff                  ; keep while on screen
     bcs @done

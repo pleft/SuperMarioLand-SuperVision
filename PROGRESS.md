@@ -25,6 +25,16 @@ Newest entries at the top. Every entry should be traceable to ROM bytes/code.
 rendering/perf rounds, blocks/powerups, enemies, goal+bonus game, death/title,
 audio phase. See docs/22 + docs/23 and the memory index.)
 
+## 2026-07-19 (night 6) — ending polish 6: real gravity + the fight flicker
+The scripted transition altitude is gone: Mario now GROUND-PROBES every scroll
+frame (calc_feet_col + read_solid — the room template comes through
+read_map_tile, so collision works across pedestal, wall and virtual floor
+alike) and falls 2px/f wherever nothing is under his feet. And the boss-fight
+flicker: profiled at p95=106% — Totomesu's shots moved 1px/f at 61Hz; they now
+fly 2px every other frame on slot parity (the 1-2 arrow treatment): fight
+median 48k -> 41k (73% -> 63%). The remaining spikes (worst ~120%) are the
+boss+Mario overlap chains — the parked composite-draw item.
+
 ## 2026-07-19 (night 5) — ending polish 5: the wall-top walk
 User-caught: the transition drop fired at the scroll's first frame, sinking
 Mario into the arena structure he was still standing on. The fall is now
