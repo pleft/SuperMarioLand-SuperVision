@@ -25,6 +25,22 @@ Newest entries at the top. Every entry should be traceable to ROM bytes/code.
 rendering/perf rounds, blocks/powerups, enemies, goal+bonus game, death/title,
 audio phase. See docs/22 + docs/23 and the memory index.)
 
+## 2026-07-19 (later) — THE TRUE 1-3 ENDING SHIPPED (RE + port, docs/25)
+The full x-3 rescue flow, every beat GB-captured then ported: sphere touch ->
+clear jingle + freeze (the boss keeps jumping) -> tally (live enemies burst
+into the $9D/$9E cloud + bang at its START -- no bridge collapse, no falling
+body: the SMB1-axe memory was wrong) -> the rope opens bottom-up (4 tiles/8f,
+SFX $0B each) -> Mario auto-walks out -> the arena wipes column-by-column
+(1 col/8f) into the rescue room as track $0F starts -> the captive waits ->
+Mario re-enters while "THANK YOU MARIO." / "OH! DAISY" type letter-by-letter
+-> reveal jingle $12 -> 3 thumps and the fake Daisy becomes the moth, which
+hops away off-screen (captured 56f arcs) -> the bonus game -> next level.
+Port architecture: arena phases + glue in FIXED (~350B); the room machine =
+the L13E overlay (806B, bank 1 after L11CODE, pulled into the shared RAM
+window once the kit retires); rope cells mod-marked (modded $EC reads blank).
+Harness end-to-end: sphere f2679 -> bonus f4791, all cadences GB-matched;
+music/stomp/boot green. OPEN: hardware re-test; W2 next.
+
 ## 2026-07-19 — 1-3 ending phase 1: the boss battle music (RE'd + ported)
 All four unknown track ids fell in one capture session (docs/25): $0B = BOSS
 BATTLE (GB trigger: ObjectSpawnCheck starts it when the spawning type's phys

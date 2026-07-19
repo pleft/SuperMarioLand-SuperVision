@@ -73,3 +73,41 @@ Rest ~56f → parabolic hop: 8f-sampled y walk 120,106,90,81,79,85,98,120
 (41px high, 56f) drifting right ~25px/hop, wings open in flight, sitting
 between hops (~40f rests), repeating until it exits the right edge. Mario
 stays put. $26 runs 533f total then the bonus game takes over.
+
+## PORT (2026-07-19): the ending machine
+
+Replaces the l3_goal_chk stopgap (same position trigger = the pedestal walk
+ends at the sphere; now also arms `ending13`). Structure:
+
+- goal_phase 1-4 = the standard clear (jingle 240f / hold 64 / tally / 43f):
+  at the TALLY START every live L3-kit slot becomes OBJ_BOOM (44f, the same
+  $9D/$9E cloud the GB shows) + the bang $dff8=$01; the boss's head anchor is
+  re-centered. Normal rendering runs through these phases.
+- goal_phase 5 = `l3e_seq` (FIXED): E_BEAT1 71f -> E_ROPE (4 tiles bottom-up,
+  8f apart, SFX $0B; cells blanked on screen AND mod-marked -- read_map_tile
+  maps a modded $EC to blank -- so map-driven redraws can't restore them) ->
+  E_BEAT2 47f -> E_WALKOUT (1px/f, the 3-pose walk cycle, blank-erased at the
+  right edge).
+- The room half lives in the **L13E overlay**: a bank-1 blob AFTER L11CODE
+  (packer appends both before bank 1's level header; load_level offsets by
+  __L11CODE_SIZE__+__L13E_SIZE__), copied to the shared RAM window at the
+  wipe -- the L3CODE kit is retired once the sphere is touched. FIXED keeps
+  ~350B (arena phases + the copy + enter_bonus); the room machine is 806B.
+- E_WIPE: `e_own=1` (the machine owns frames like the bonus does), MUS_RESCUE
+  ($0F) starts, 24 tile-columns left->right at 1 col/8f become the room
+  template (checker rows 2-3; blank 4-14; checker 15-19 -- the SV playfield
+  is 16px taller than the GB screen, so the floor band runs to the bottom).
+- E_SETTLE 60f (captive drawn: 2x2 OBJ $49/$4E/$51/$50, x-flipped, at x80) ->
+  E_WALKIN (Mario re-enters 8->68 at 1px/f; draw = 3x3 blank-box erase +
+  draw_player with mario_vx fed manually) + "THANK YOU MARIO." types at
+  1 char/16f (row 5) -> E_TEXT2 "OH! DAISY" (row 9) -> E_JINGLE: MUS_REVEAL
+  ($12) + 64f -> E_PUFF: 3x $dff8=$03 thumps 16f apart, then the sprite swap
+  to the moth ($A2/$A3/$B2/$B3 sitting, $A0/$A1/$B0/$B1 flying) -> E_FLY:
+  rest 56f, then 56f parabolic hops (per-8f-segment y deltas -2-2-1 0 +1+2+2,
+  +1px right every other frame, ~25px/hop, 40f rests) until off-screen ->
+  E_OUT 60f -> enter_bonus (the same prize-ring + L11 overlay path as the
+  top door; the jmp leaves the RAM window before the copy overwrites it).
+
+Verified end-to-end in the harness: sphere at f2679 -> all phases at the
+captured GB cadences -> bonus_phase=2 at f4791; screenshots per phase clean;
+level-select + 1-1 (bank-1 header shift) + stomp + music 1431/1431 green.

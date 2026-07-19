@@ -37,6 +37,9 @@ def main():
     # same scheme for bank 1: the L11CODE blob (the bonus game) precedes the header
     mm = re.search(r"L11CODE\s+[0-9A-Fa-f]{6}\s+[0-9A-Fa-f]{6}\s+([0-9A-Fa-f]{6})", mapf)
     l11 = bytes(img[1 * BANK:1 * BANK + int(mm.group(1), 16)]) if mm else b""
+    # the x-3 ending blob follows L11CODE in bank 1 (copied to the RAM window at the wipe)
+    mm = re.search(r"L13E\s+[0-9A-Fa-f]{6}\s+[0-9A-Fa-f]{6}\s+([0-9A-Fa-f]{6})", mapf)
+    l11 += bytes(img[1 * BANK + len(l11):1 * BANK + len(l11) + int(mm.group(1), 16)]) if mm else b""
     # banks 1+ place their level region where bank 0 keeps the TITLE0 segment (the
     # title runs only with bank 0 mapped, so its range is free in every other bank)
     m = re.search(r"TITLE0\s+([0-9A-Fa-f]{6})", open(map_path).read())

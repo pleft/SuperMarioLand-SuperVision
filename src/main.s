@@ -96,6 +96,16 @@ goal_tmr:    .res 1          ; frames left in the current goal phase
 goal_top:    .res 1          ; 1 = Mario exited through the TOP door (bonus game; TODO)
 ride:        .res 1          ; 0 = not riding; else (slot+1) of the platform under Mario
 bonus_phase: .res 1          ; bonus game: 0 off, 2 play, 3 walk, 5 award
+ending13:    .res 1           ; x-3 sphere touched: the rescue ending follows the tally
+e_phase:     .res 1           ; ending sub-phase (goal_phase == 5)
+e_own:       .res 1           ; 1 = the ending owns the frame (wipe + room scenes)
+e_tmr:       .res 1
+e_ix:        .res 1           ; sub-counter (rope tiles / wipe col / text index)
+e_mx:        .res 1           ; moth screen x (left edge)
+e_my:        .res 1           ; moth screen y (top)
+e_px:        .res 1           ; last drawn moth box (for the blank erase)
+e_py:        .res 1
+e_hop:       .res 1           ; hop-arc segment index / rest counter
 b_tick:      .res 1          ; 4-frame tick divider ($da22; harness-calibrated)
 b_ladder:    .res 1          ; ladder cycle counter 1..6 ($da27); odd = visible at gap (n-1)/2
 b_floor:     .res 1          ; Mario's floor 0..3 (top..bottom)
@@ -341,8 +351,9 @@ main_loop:
     ; Uses the state the LOGIC phase computed last frame. ====
     jsr sfx_tick                 ; sound streams run every frame, all modes
     jsr mus_tick                 ; the music sequencer too (self-gated while paused)
-    lda bonus_phase              ; the bonus game and pipe animations own their own drawing
-    ora pipe_phase
+    lda bonus_phase              ; the bonus game, the ending scenes and pipe
+    ora pipe_phase               ; animations own their own drawing
+    ora e_own
     beq :+
     lda scroll_s
     sta scroll_vis
@@ -527,7 +538,9 @@ main_loop:
 .proc read_map_tile
     lda mrow
     cmp #16
-    bcs @off
+    bcc :+
+    jmp @off
+:
     lda feet_col+1               ; past the level's right edge? open space -- the goal door
     cmp lvl_cols+1            ; leads off the map (the walk-through would otherwise read
     bcc :+                       ; garbage past the level data and block Mario)
@@ -594,6 +607,8 @@ main_loop:
     beq @broke                   ; broken brick -> blank
     cmp #$F4
     beq @broke                   ; collected coin -> blank
+    cmp #$EC
+    beq @broke                   ; opened rope (the x-3 ending) -> blank
     cmp #$5F                     ; bonked hidden block -> used block (now solid)
     beq @used
     cmp #$80                     ; only $80/$81 ?-blocks become the used block; anything else
@@ -1389,29 +1404,25 @@ main_loop:
     beq @hold
     cmp #3
     beq @tally
-    dec goal_tmr                 ; phase 4: end hold -> next level (or the bonus game)
+    cmp #5
+    bne :+
+    jmp l3e_seq                  ; goal_phase 5 = the x-3 rescue ending machine
+:   dec goal_tmr                 ; phase 4: end hold -> next level (or the bonus game)
     bne @done
-    lda goal_top                 ; top door -> the ladder bonus game first
-    beq @next
-    stz goal_phase
-    lda frame_count              ; prize ring rotated pseudo-randomly (original: DIV&3+1
-    and #3                       ;  into [00 01 02 E5 03 01 02 E5] @ $3E7B)
-    tax
-    ldy #0
-:   lda @ring+1,x
-    sta b_prz,y
-    inx
-    iny
-    cpy #4
-    bne :-
-    jsr bonus_enter_copy         ; map bank 1 + pull the bonus blob into RAM
-    jsr bonus_start
-    lda #2
-    sta bonus_phase
+    lda ending13                 ; sphere clear: the rope/wipe/rescue flow follows
+    beq :+
+    lda #5
+    sta goal_phase
+    lda #1                       ; E_BEAT1
+    sta e_phase
+    lda #71                      ; GB states $1C+$1D
+    sta e_tmr
     rts
+:   lda goal_top                 ; top door -> the ladder bonus game first
+    beq @next
+    jmp enter_bonus
 @next:
     jmp next_level
-@ring: .byte $00,$01,$02,$E5,$03,$01,$02,$E5
 @jingle:
     dec goal_tmr                 ; the "course clear" jingle pause
     bne @done
@@ -1426,6 +1437,10 @@ main_loop:
     bne @done
     lda #3
     sta goal_phase
+    lda ending13                 ; GB: at the TALLY start every live enemy (the boss,
+    beq @done                    ; in-flight fire) bursts into the $9D/$9E cloud with
+    jmp l3e_boom                 ; the bang ($dff8=$01) -- captured OAM, docs/25
+@done2:
     rts
 @tally:
     lda timer                    ; TIME == 000? tally over
@@ -1456,6 +1471,728 @@ main_loop:
     sta goal_phase
     lda #43
     sta goal_tmr
+    rts
+.endproc
+
+.proc enter_bonus                ; prize ring + L11 overlay pull + bonus screen
+    stz goal_phase
+    stz e_own
+    stz e_phase
+    lda frame_count              ; prize ring rotated pseudo-randomly (original: DIV&3+1
+    and #3                       ;  into [00 01 02 E5 03 01 02 E5] @ $3E7B)
+    tax
+    ldy #0
+:   lda @ring+1,x
+    sta b_prz,y
+    inx
+    iny
+    cpy #4
+    bne :-
+    jsr bonus_enter_copy         ; map bank 1 + pull the bonus blob into RAM
+    jsr bonus_start
+    lda #2
+    sta bonus_phase
+    rts
+@ring: .byte $00,$01,$02,$E5,$03,$01,$02,$E5
+.endproc
+
+; ===========================================================================
+; THE x-3 RESCUE ENDING (docs/25; every timing/tile GB-captured).
+; goal_phase 5; e_phase walks the sub-states. Phases 1-4 run over the live
+; arena (normal rendering). From the WIPE on, e_own=1: the machine owns the
+; frame like the bonus does, and the screen is REPLACED column-by-column with
+; the rescue room (checker bands rows 2-3 + 15-17, blank middle).
+; ===========================================================================
+E_BEAT1   = 1                    ; 71f  (GB $1C 7f + $1D 64f)
+E_ROPE    = 2                    ; 4 rope tiles bottom-up, one per 8f, SFX $0B
+E_BEAT2   = 3                    ; 47f  (GB $20)
+E_WALKOUT = 4                    ; Mario auto-walks right to the edge (GB $21)
+E_WIPE    = 5                    ; 24 cols x 8f; MUS_RESCUE (GB $22/$23, track $0F)
+E_SETTLE  = 6                    ; 60f; the captive appears
+E_WALKIN  = 7                    ; Mario re-enters 8->68 @1px/f; text types with him
+E_TEXT1   = 8                    ; "THANK YOU MARIO." 1 char/16f (GB $24)
+E_TEXT2   = 9                    ; "OH! DAISY" (GB $24 tail/$25)
+E_JINGLE  = 10                   ; MUS_REVEAL + 64f (GB $25, track $12)
+E_PUFF    = 11                   ; 3 thumps 16f apart, then the sprite swap
+E_FLY     = 12                   ; moth rest/hop arcs rightward until off-screen
+E_OUT     = 13                   ; short hold, then the bonus game
+
+CAPT_X    = 80                   ; the captive/moth home (screen px; film-measured)
+CAPT_Y    = 104
+MARIO_INX = 68                   ; Mario's walk-in stop
+
+.proc l3e_seq
+    lda e_phase
+    cmp #E_WIPE
+    bcs @own
+    cmp #E_BEAT1
+    beq @beat
+    cmp #E_ROPE
+    beq @rope
+    cmp #E_BEAT2
+    beq @beat
+    ; --- E_WALKOUT: 1px/f right with the walk anim; gone at the right edge ---
+    jsr l3e_walkanim
+    inc spr_x
+    lda spr_x
+    cmp #159
+    bcc @rts
+    jsr l3e_mario_blank          ; he leaves the arena (blank = the sky he stood in)
+    jsr l3e_room_copy            ; pull the room machine over the retired kit
+    lda #E_WIPE
+    sta e_phase
+    lda #1
+    sta e_own                    ; the machine owns the frames from here
+    stz e_ix
+    lda #8
+    sta e_tmr
+    jsr mus_stop
+    lda #MUS_RESCUE              ; GB track $0F starts with the wipe ($22)
+    jmp mus_start
+@beat:
+    dec e_tmr
+    bne @rts
+    lda e_phase
+    cmp #E_BEAT1
+    bne @towalk
+    lda #E_ROPE                  ; beat 1 done -> the rope opens
+    sta e_phase
+    stz e_ix
+    lda #1
+    sta e_tmr
+@rts:
+    rts
+@towalk:
+    lda #E_WALKOUT               ; beat 2 done -> Mario walks out
+    sta e_phase
+    rts
+@rope:
+    dec e_tmr
+    bne @rts
+    lda #8                       ; one tile per 8 frames (captured cadence)
+    sta e_tmr
+    ldx e_ix
+    cpx #4
+    bcs @ropedone
+    jsr l3e_rope_tile
+    inc e_ix
+    lda #SFX_DFE0_0B             ; the rope-step chime (GB: $dfe0=$0B per tile)
+    jmp sfx_play
+@ropedone:
+    lda #E_BEAT2
+    sta e_phase
+    lda #47
+    sta e_tmr
+    rts
+@own:
+    jmp l3e_room
+.endproc
+
+; --- the rope: world col 298, rows 11,10,9,8 bottom-up; the cell is BLANKED
+; on screen and MOD-marked so any later map-driven redraw keeps it blank ---
+.proc l3e_rope_tile
+    lda #<298
+    sec
+    sbc fb_col0
+    asl                          ; dcol = (298 - fb_col0) * 2
+    sta dcol
+    ldx e_ix
+    lda @rows,x
+    sta mrow                     ; mod_set is (feet_col, mrow)-keyed
+    asl
+    asl
+    asl
+    clc
+    adc #16                      ; dy = (row+2)*8
+    sta dy
+    lda #<298
+    sta feet_col
+    lda #>298
+    sta feet_col+1
+    jsr mod_set
+    jsr set_dst
+    jmp blit_blank
+@rows: .byte 11, 10, 9, 8
+.endproc
+
+.proc l3e_walkanim               ; the 3-pose walk cycle while scripted
+    lda frame_count
+    lsr
+    lsr
+    and #3
+    tax
+    lda @cyc,x
+    sta mario_frame
+    stz mario_facing             ; 0 = facing right
+    rts
+@cyc: .byte 1, 2, 5, 2
+.endproc
+
+.proc l3e_mario_blank            ; 3x3-cell blank box over Mario (sky区 only)
+    lda spr_col
+    and #$FE
+    sta dcol
+    lda spr_y
+    and #$F8
+    sta dy
+    ldx #3
+@row:
+    ldy #3
+@col:
+    phx
+    phy
+    jsr set_dst
+    jsr blit_blank
+    ply
+    plx
+    lda dcol
+    clc
+    adc #2
+    sta dcol
+    dey
+    bne @col
+    lda dcol
+    sec
+    sbc #6
+    sta dcol
+    lda dy
+    clc
+    adc #8
+    sta dy
+    dex
+    bne @row
+    rts
+.endproc
+
+; --- every live L3 enemy bursts into the explosion cloud at the tally start ---
+.proc l3e_boom
+    ldx #OBJ_MAX-1
+    stz tmpL3                    ; any found?
+@l: lda o_type,x
+    cmp #OBJ_SUU
+    bcc @next
+    cmp #OBJ_GCORP+1
+    bcs @next
+    cmp #OBJ_BAT
+    bne :+
+    lda o_y,x                    ; the boss is head-anchored: center the cloud
+    clc
+    adc #8
+    sta o_y,x
+:   lda #OBJ_BOOM
+    sta o_type,x
+    lda #44                      ; the standard 44f cloud
+    sta o_tmr,x
+    stz o_st,x
+    inc tmpL3
+@next:
+    dex
+    bpl @l
+    lda tmpL3
+    beq :+
+    lda #SFX_DFF8_01             ; the bang (same mailbox value as the GB)
+    jmp sfx_play
+:   rts
+.endproc
+
+; ---------------- the room scenes (e_own frames) ----------------
+; These live in the L13E overlay: a bank-1 blob after L11CODE, copied into the
+; shared RAM window ($1500) at the wipe -- the L3CODE kit is retired by then.
+.segment "L13E"
+.proc l3e_room
+    lda e_phase
+    cmp #E_WIPE
+    bne :+
+    jmp @wipe
+:   cmp #E_SETTLE
+    bne :+
+    jmp @settle
+:   cmp #E_WALKIN
+    bne :+
+    jmp @walkin
+:   cmp #E_TEXT1
+    bne :+
+    jmp @text1
+:   cmp #E_TEXT2
+    bne :+
+    jmp @text2
+:   cmp #E_JINGLE
+    bne :+
+    jmp @jingle
+:   cmp #E_PUFF
+    bne :+
+    jmp @puff
+:   cmp #E_FLY
+    bne :+
+    jmp l3e_fly
+:   ; --- E_OUT ---
+    dec e_tmr
+    bne @rts
+    stz ending13
+    jmp enter_bonus
+@rts:
+    rts
+@wipe:
+    dec e_tmr
+    bne @rts
+    lda #8
+    sta e_tmr
+    ldx e_ix
+    cpx #24                      ; 24 byte-col pairs = the visible 20 + the margin
+    bcs @wipedone
+    jsr l3e_wipe_col
+    inc e_ix
+    rts
+@wipedone:
+    lda #E_SETTLE
+    sta e_phase
+    lda #60
+    sta e_tmr
+    jsr l3e_captive              ; the captive stands waiting as the room settles
+    rts
+@settle:
+    dec e_tmr
+    bne @rts
+    lda #E_WALKIN
+    sta e_phase
+    lda #8                       ; Mario re-enters from the left edge
+    sta spr_x
+    lda #CAPT_Y                  ; same floor as the captive
+    sta spr_y
+    lda #2                       ; fresh erase anchor (the stale one points at
+    sta prev_col                 ; his arena exit spot)
+    lda #CAPT_Y
+    sta prev_y
+    stz e_ix                     ; text index
+    lda #16
+    sta e_tmr                    ; char cadence
+    rts
+@walkin:
+    jsr l3e_walkanim
+    inc spr_x
+    lda spr_x
+    cmp #MARIO_INX
+    bcc :+
+    stz mario_frame              ; arrived: stand
+:   jsr l3e_mario_draw
+    jsr l3e_type1                ; the text types while he walks (GB $24)
+    lda spr_x
+    cmp #MARIO_INX
+    bcc @rts
+    lda #E_TEXT1
+    sta e_phase
+    rts
+@text1:
+    jsr l3e_type1
+    lda e_ix
+    cmp #16
+    bcc @rts
+    lda #E_TEXT2
+    sta e_phase
+    stz e_ix
+    lda #16
+    sta e_tmr
+    rts
+@text2:
+    dec e_tmr
+    bne @rts
+    lda #16
+    sta e_tmr
+    ldx e_ix
+    cpx #9
+    bcs @t2done
+    lda l3e_txt2,x
+    ldy #9                       ; row 9 (dy 72), start col 4 (film-measured)
+    jsr l3e_char
+    inc e_ix
+    rts
+@t2done:
+    lda #E_JINGLE
+    sta e_phase
+    lda #64
+    sta e_tmr
+    jsr mus_stop
+    lda #MUS_REVEAL              ; GB $25: track $12
+    jmp mus_start
+@jingle:
+    dec e_tmr
+    bne @rts2
+    lda #E_PUFF
+    sta e_phase
+    stz e_ix
+    lda #1
+    sta e_tmr
+@rts2:
+    rts
+@puff:
+    dec e_tmr
+    bne @rts2
+    lda #16
+    sta e_tmr
+    ldx e_ix
+    cpx #3
+    bcs @pdone
+    lda #SFX_DFF8_03             ; three transform thumps, 16f apart (captured)
+    jsr sfx_play
+    inc e_ix
+    rts
+@pdone:
+    lda #CAPT_X                  ; the captive becomes the moth (sprite swap)
+    sta e_mx
+    sta e_px
+    lda #CAPT_Y
+    sta e_my
+    sta e_py
+    lda #E_FLY
+    sta e_phase
+    stz e_hop
+    lda #56                      ; first rest (captured)
+    sta e_tmr
+    jsr l3e_moth_draw
+    rts
+.endproc
+
+; --- E_FLY: rest 40f, then a 56f parabolic hop (+2px/2f right, y arc), repeat
+; until the moth leaves the right edge (captured arc; docs/25) ---
+.proc l3e_fly
+    lda e_hop
+    bne @hopping
+    dec e_tmr                    ; resting
+    bne @rts
+    lda #1
+    sta e_hop                    ; start a hop: 7 segments x 8f
+    lda #8
+    sta e_tmr
+    stz e_ix
+@rts:
+    rts
+@hopping:
+    ldx e_ix
+    lda l3e_arc,x                ; per-frame y delta for this 8f segment
+    clc
+    adc e_my
+    sta e_my
+    lda frame_count              ; +1px right every other frame (~25px/hop)
+    and #1
+    bne :+
+    inc e_mx
+:   jsr l3e_moth_draw
+    dec e_tmr
+    bne @rts
+    lda #8
+    sta e_tmr
+    inc e_ix
+    lda e_ix
+    cmp #7
+    bcc @rts
+    stz e_hop                    ; landed: rest again
+    lda #40
+    sta e_tmr
+    stz e_ix
+    lda #CAPT_Y                  ; snap the arc's rounding to the floor line
+    sta e_my
+    jsr l3e_moth_draw
+    lda e_mx
+    cmp #160                     ; off the right edge: hold, then the bonus game
+    bcc @rts
+    jsr l3e_moth_blank
+    lda #E_OUT
+    sta e_phase
+    lda #60
+    sta e_tmr
+    rts
+.endproc
+
+l3e_arc: .byte <-2, <-2, <-1, 0, 1, 2, 2   ; 8f-segment per-frame y deltas (sum 0)
+l3e_txt1: .byte $1D,$11,$0A,$17,$14,$2C,$22,$18,$1E,$2C,$16,$0A,$1B,$12,$18,$23
+l3e_txt2: .byte $18,$11,$28,$2C,$0D,$0A,$12,$1C,$22
+.proc l3e_type1
+    dec e_tmr
+    bne @rts
+    lda #16
+    sta e_tmr
+    ldx e_ix
+    cpx #16
+    bcs @rts
+    lda l3e_txt1,x
+    ldy #5                       ; row 5 (dy 40), start col 1
+    jsr l3e_char
+    inc e_ix
+@rts:
+    rts
+.endproc
+
+.proc l3e_char                   ; A = tile, Y = row, X = char index; col base per row
+    pha
+    tya
+    asl
+    asl
+    asl
+    sta dy
+    cpy #9
+    beq @r9
+    txa                          ; row 5: col 1 + i  -> dcol = 2 + i*2
+    asl
+    clc
+    adc #2
+    bra @setc
+@r9:
+    txa                          ; row 9: col 4 + i
+    asl
+    clc
+    adc #8
+@setc:
+    sta dcol
+    pla
+    jsr get_tile_src
+    jsr set_dst
+    jmp blit_tile
+.endproc
+
+; --- one wipe column: rows 2-17 become the room template ---
+.proc l3e_wipe_col
+    lda e_ix
+    asl
+    sta dcol
+    lda #2
+    sta tmpL3                    ; row
+@row:
+    lda tmpL3
+    asl
+    asl
+    asl
+    sta dy
+    lda tmpL3
+    cmp #4
+    bcc @checker_top
+    cmp #15
+    bcc @blank
+    ; bottom checker (rows 15-19): (row+col+1) parity
+    lda tmpL3
+    clc
+    adc e_ix
+    ina
+    bra @checker
+@checker_top:                    ; top checker: (row+col) parity
+    lda tmpL3
+    clc
+    adc e_ix
+@checker:
+    and #1
+    clc
+    adc #$8E
+    jsr get_tile_src
+    jsr set_dst
+    jsr blit_tile
+    bra @next
+@blank:
+    jsr set_dst
+    jsr blit_blank
+@next:
+    inc tmpL3
+    lda tmpL3
+    cmp #20                      ; rows 18-19: the SV playfield is 16px taller than
+    bcc @row                     ; the GB's -- the floor band runs to the bottom
+    rts
+.endproc
+
+; --- the captive: 2x2 OBJ tiles $49/$4E/$51/$50, each x-flipped (captured OAM) ---
+.proc l3e_captive
+    stz spr_subx
+    lda #1
+    sta do_flip
+    lda #CAPT_X/4
+    sta dcol
+    lda #CAPT_Y
+    sta dy
+    ldx #$49
+    jsr draw_quad
+    lda #CAPT_X/4+2
+    sta dcol
+    ldx #$4E
+    jsr draw_quad
+    lda #CAPT_X/4
+    sta dcol
+    lda #CAPT_Y+8
+    sta dy
+    ldx #$51
+    jsr draw_quad
+    lda #CAPT_X/4+2
+    sta dcol
+    ldx #$50
+    jsr draw_quad
+    stz do_flip
+    rts
+.endproc
+
+.proc l3e_moth_blank             ; blank the 3x3 cell box at the last drawn spot
+    lda e_px
+    lsr
+    lsr
+    and #$FE
+    sta dcol
+    lda e_py
+    and #$F8
+    sta dy
+    ldx #3
+@row:
+    ldy #3
+@col:
+    phx
+    phy
+    jsr set_dst
+    jsr blit_blank
+    ply
+    plx
+    lda dcol
+    clc
+    adc #2
+    sta dcol
+    dey
+    bne @col
+    lda dcol
+    sec
+    sbc #6
+    sta dcol
+    lda dy
+    clc
+    adc #8
+    sta dy
+    dex
+    bne @row
+    rts
+.endproc
+
+.proc l3e_moth_draw              ; erase old box, draw the 2x2 moth at (e_mx,e_my)
+    jsr l3e_moth_blank
+    lda e_mx
+    sta e_px
+    lda e_my
+    sta e_py
+    lda e_mx
+    and #3
+    sta spr_subx
+    lda #1
+    sta do_flip
+    lda e_hop                    ; wings open in flight, folded at rest
+    beq @sit
+    ldx #$A0
+    stx tmpL3
+    bra @go
+@sit:
+    ldx #$A2
+    stx tmpL3
+@go:
+    lda e_mx
+    lsr
+    lsr
+    sta dcol
+    lda e_my
+    sta dy
+    ldx tmpL3
+    jsr draw_quad
+    lda dcol
+    clc
+    adc #2
+    sta dcol
+    ldx tmpL3
+    inx
+    jsr draw_quad
+    lda dcol
+    sec
+    sbc #2
+    sta dcol
+    lda e_my
+    clc
+    adc #8
+    sta dy
+    ldx tmpL3
+    inx
+    inx
+    jsr draw_quad                ; $B0/$B2 rows are +16 from the top tiles
+    lda dcol
+    clc
+    adc #2
+    sta dcol
+    ldx tmpL3
+    inx
+    inx
+    inx
+    jsr draw_quad
+    stz do_flip
+    stz spr_subx
+    rts
+.endproc
+
+.proc l3e_mario_draw             ; blank-erase + draw at the current walk pos
+    lda prev_col
+    and #$FE
+    sta dcol
+    lda prev_y
+    and #$F8
+    sta dy
+    ldx #3
+@row:
+    ldy #3
+@col:
+    phx
+    phy
+    jsr set_dst
+    jsr blit_blank
+    ply
+    plx
+    lda dcol
+    clc
+    adc #2
+    sta dcol
+    dey
+    bne @col
+    lda dcol
+    sec
+    sbc #6
+    sta dcol
+    lda dy
+    clc
+    adc #8
+    sta dy
+    dex
+    bne @row
+    lda spr_x                    ; the render pass normally derives mario_vx; the
+    sta mario_vx                 ; room is screen-anchored (scroll_s = 0 here)
+    jsr draw_player
+    lda spr_col
+    sta prev_col
+    lda spr_y
+    sta prev_y
+    rts
+.endproc
+.segment "CODE"
+
+; the ending-room overlay pull: bank 1 mapped (and left mapped -- nothing after
+; the wipe reads level data; the bonus follows on the same bank anyway)
+.import __L13E_SIZE__
+.assert __L13E_SIZE__ <= $7C0, error, "L13E overlay exceeds the RAM window"
+.proc l3e_room_copy
+    lda #(1 << 5) | (SYSCTRL_NMI_EN | SYSCTRL_TIMER_IRQ)
+    sta SYS_CTRL
+    lda #<(__TITLE0_LOAD__+__L11CODE_SIZE__)
+    sta lvl_ptr
+    lda #>(__TITLE0_LOAD__+__L11CODE_SIZE__)
+    sta lvl_ptr+1
+    lda #$15
+    sta tmpH2
+    stz tmpL2
+    ldx #8
+@pg:
+    ldy #0
+:   lda (lvl_ptr),y
+    sta (tmpL2),y
+    iny
+    bne :-
+    inc lvl_ptr+1
+    inc tmpH2
+    dex
+    bne @pg
     rts
 .endproc
 
@@ -7931,6 +8668,9 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
 .segment "LEVELS"
 lvl_bank_tab: .byte 1, 0, 2     ; level id -> ROM bank (1-2 shares bank 0 with the title)
 .proc load_level
+    stz ending13                 ; a fresh level never inherits ending state
+    stz e_phase
+    stz e_own
     ldx cur_level                ; map the level's ROM bank at $8000 (bank 0 hosts 1-2
     lda lvl_bank_tab,x           ; beside the title — the smallest W1 level; 1-1 = bank 1).
     asl                          ; Safe mid-proc: load_level sits in the common prefix,
@@ -7960,9 +8700,9 @@ lvl_bank_tab: .byte 1, 0, 2     ; level id -> ROM bank (1-2 shares bank 0 with t
     bra @hcopy
 :   cmp #0                       ; bank 1: the BONUS blob (L11CODE) precedes the header
     bne @hcopy
-    ldy #<(__TITLE0_LOAD__+__L11CODE_SIZE__)
+    ldy #<(__TITLE0_LOAD__+__L11CODE_SIZE__+__L13E_SIZE__)
     sty lvl_ptr
-    ldy #>(__TITLE0_LOAD__+__L11CODE_SIZE__)
+    ldy #>(__TITLE0_LOAD__+__L11CODE_SIZE__+__L13E_SIZE__)
     sty lvl_ptr+1
 @hcopy:
     ldy #17                      ; header -> RAM (18 bytes)
@@ -10051,11 +10791,11 @@ bat_dx:    .byte 0,2,0,2,4,6,0,2,4
 ; with the phase source; cells under a drawn sprite are skipped this tick ---
 water_alt: .incbin "build/gfx/water_alt.svt"   ; tile $5D, high plane = ROM $3fc4
 
-; STOPGAP (until the boss phase): the real 1-3 ending is King Totomesu + the
-; switch + the rescue scene — dedicated GB machinery, NOT pool objects; the map
-; itself dead-ends at the arena wall (rope $EC, no exit tiles). Until that
-; ships, reaching the wall at max camera runs the standard clear sequence so
-; the level is completable. Runs from l3_water = every frame, 1-3 only.
+; The SPHERE ($E1 at col 297 row 9, on the pedestal): reaching it at max camera
+; runs the standard clear entry (GB $1B45: jingle + freeze + tally) and arms the
+; x-3 RESCUE ENDING (ending13 -> goal_phase 5 machine after the tally; docs/25).
+; The position gate is equivalent to the GB's tile touch: the pedestal walk ends
+; at the sphere. Runs from l3_water = every frame, 1-3 only.
 .proc l3_goal_chk
     lda goal_phase
     bne @done
@@ -10072,6 +10812,7 @@ water_alt: .incbin "build/gfx/water_alt.svt"   ; tile $5D, high plane = ROM $3fc
     bcc @done
     lda #1
     sta goal_phase
+    sta ending13                 ; the rescue ending follows the tally
     lda #240
     sta goal_tmr
     stz goal_top
