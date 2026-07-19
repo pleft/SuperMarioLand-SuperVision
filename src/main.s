@@ -6720,11 +6720,10 @@ death_curve:                     ; ROM $0C19 verbatim (signed y deltas + $7F end
     lda src_ptr+1
     adc #>title_tiles
     sta src_ptr+1
-    lda tmpH3                    ; dst: dcol = col*2, dy = (row+1)*8
-    asl
-    sta dcol
+    lda tmpH3                    ; dst: dcol = col*2, dy = row*8 -- flush to the
+    asl                          ; top like the GB (the free rows land at the
+    sta dcol                     ; BOTTOM, under the level-select indicator)
     lda tmpL3
-    ina
     asl
     asl
     asl
