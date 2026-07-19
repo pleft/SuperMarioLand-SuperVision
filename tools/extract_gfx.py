@@ -131,6 +131,17 @@ def main():
         tile.append([((lo >> (7 - x)) & 1) | (((hi >> (7 - x)) & 1) << 1) for x in range(8)])
     with open(os.path.join(out, "water_alt.svt"), "wb") as f:
         f.write(sv_pack([tile]))
+    # The x-3 rescue scene loads its OWN OBJ overlay at $8A00 (the per-world
+    # region): the MOTH the fake Daisy becomes = tiles $A0-$A3/$B0-$B3 of that
+    # overlay. Located by dumping VRAM at state $26 and matching ROM bytes:
+    # bank 2, file 0x8A32 + (tile-$A0)*16 (tops) / 0x8B32 + (tile-$B0)*16
+    # (bottoms). Emitted as an 8-tile sheet in port draw order
+    # [A0 A1 A2 A3 B0 B1 B2 B3] (flying pair first, sitting pair second row).
+    moth = []
+    for off in (0x8A32, 0x8A42, 0x8A52, 0x8A62, 0x8B32, 0x8B42, 0x8B52, 0x8B62):
+        moth += decode_tiles(d, off, 1)
+    with open(os.path.join(out, "moth.svt"), "wb") as f:
+        f.write(sv_pack(moth))
     print(f"Extracted tile sheets -> {out}/ (gitignored)")
 
 if __name__ == "__main__":

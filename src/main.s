@@ -1519,7 +1519,8 @@ E_OUT     = 13                   ; short hold, then the bonus game
 
 CAPT_X    = 80                   ; the captive/moth home (screen px; film-measured)
 CAPT_Y    = 104
-MARIO_INX = 68                   ; Mario's walk-in stop
+MARIO_INX = 60                   ; Mario's walk-in stop (GB 61; he must not
+                                 ; overlap the captive at 80 or his erase eats her)
 
 .proc l3e_seq
     lda e_phase
@@ -1612,7 +1613,7 @@ MARIO_INX = 68                   ; Mario's walk-in stop
     jsr mod_set
     jsr set_dst
     jmp blit_blank
-@rows: .byte 11, 10, 9, 8
+@rows: .byte 9, 8, 7, 6         ; WORLD rows (the captured BG rows were +2)
 .endproc
 
 .proc l3e_walkanim               ; the 3-pose walk cycle while scripted
@@ -1690,6 +1691,16 @@ MARIO_INX = 68                   ; Mario's walk-in stop
 :   sta tmpH3
     stz o_type,x                 ; free the slot: the render pipeline erases the
     inc tmpL3                    ; DEAD object's full drawn rect (tall included)
+    lda tmpL2                    ; screen x = o_x - cam: clouds only for slots ON
+    sec                          ; SCREEN -- an off-screen-left leftover drew a
+    sbc cam_x                    ; half cloud at the edge (user-caught)
+    sta tmpL2
+    lda tmpH2
+    sbc cam_x+1
+    bne @nofree0
+    lda tmpL2
+    cmp #160
+    bcs @nofree0
     phx
     jsr find_free_evict          ; the cloud gets its own slot
     bcs @nofree
@@ -1706,6 +1717,7 @@ MARIO_INX = 68                   ; Mario's walk-in stop
     stz o_st,x
 @nofree:
     plx
+@nofree0:
 @next:
     dex
     bpl @l
@@ -2147,12 +2159,11 @@ l3e_txt2: .byte $18,$11,$28,$2C,$0D,$0A,$12,$1C,$22
     sta do_flip
     lda e_hop                    ; wings open in flight, folded at rest
     beq @sit
-    ldx #$A0
-    stx tmpL3
+    stz tmpL3                    ; sheet cols 0-1 = flying
     bra @go
 @sit:
-    ldx #$A2
-    stx tmpL3
+    lda #2                       ; sheet cols 2-3 = sitting
+    sta tmpL3
 @go:
     lda scroll_s
     lsr
@@ -2172,11 +2183,11 @@ l3e_txt2: .byte $18,$11,$28,$2C,$0D,$0A,$12,$1C,$22
     clc
     adc @rofs,y
     sta dy
-    lda tmpL3                    ; bottom row = one SHEET row down (+$10)
-    clc
-    adc @tofs,y
+    lda tmpL3                    ; sheet: [fly TL TR sit TL TR fly BL BR sit BL BR]
+    clc                          ; order below composes the GB's PAIR-SWAPPED
+    adc @tofs,y                  ; mirrored metasprite (left = hi tile, flipped)
     tax
-    jsr l3e_quad_clip
+    jsr l3e_mothtile
     ply
     iny
     cpy #4
@@ -2186,7 +2197,7 @@ l3e_txt2: .byte $18,$11,$28,$2C,$0D,$0A,$12,$1C,$22
     rts
 @cofs: .byte 0, 2, 0, 2
 @rofs: .byte 0, 0, 8, 8
-@tofs: .byte 0, 1, $10, $11
+@tofs: .byte 1, 0, 5, 4
 .endproc
 
 .segment "CODE"
@@ -2196,6 +2207,30 @@ l3e_txt2: .byte $18,$11,$28,$2C,$0D,$0A,$12,$1C,$22
     bcc :+
     rts
 :   jmp draw_quad
+.endproc
+
+; the rescue scene's own OBJ overlay tiles (GB loads them at $8A00 during the
+; ending; the W1 sheet has different graphics at those indices): the MOTH.
+moth_tiles: .incbin "../build/gfx/moth.svt"
+.proc l3e_mothtile               ; X = moth sheet index (0-7), edge-clipped
+    lda dcol
+    cmp #46
+    bcc :+
+    rts
+:   txa
+    asl
+    asl
+    asl
+    asl
+    clc
+    adc #<moth_tiles
+    sta src_ptr
+    lda #>moth_tiles
+    adc #0
+    sta src_ptr+1
+    jsr set_dst
+    stz blit_opaque
+    jmp sprite_blit_subpx
 .endproc
 .segment "L13E"
 

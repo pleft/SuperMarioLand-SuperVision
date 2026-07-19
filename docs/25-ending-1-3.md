@@ -137,3 +137,25 @@ level-select + 1-1 (bank-1 header shift) + stomp + music 1431/1431 green.
 LESSON (structural): a framebuffer-origin screenshot is NOT the screen — sims
 must render scroll+split like the LCD does, or a constant 32px offset class
 of bug sails through every visual check.
+
+## Polish round 2 (2026-07-19, user-caught x4)
+
+1. **Rope rows off by the HUD offset**: the captured BG rows 8-11 are WORLD
+   rows 6-9 (+2 offset) — the port opened two rope rows and punched two holes
+   in the wall below the gate. @rows now 9,8,7,6.
+2. **The captive's left column vanished as Mario arrived**: MARIO_INX was 68,
+   overlapping her at 80 by 4px (GB stops at 61) — his blank-box erase ate
+   her edge. Stop at 60.
+3. **Half explosion + edge flicker**: l3e_boom burst EVERY kit slot including
+   off-screen-left leftovers, drawing partial clouds at the screen edge. The
+   burst is now gated to slots whose screen x is 0-159; off-screen slots just
+   free (silently, pipeline-erased if ever drawn).
+4. **THE MOTH**: tiles $A0-$B3 sit in the per-world OBJ overlay region
+   ($8A00+) and the rescue scene loads its OWN overlay there — the W1 sheet
+   has different graphics at those indices (that "moth" was assorted 1-3
+   sprites; +2 vs +$10 had also mixed in Gao). The real tiles were located
+   by dumping VRAM at state $26 and byte-matching ROM: bank 2, file 0x8A32+
+   (tops) / 0x8B32+ (bottoms); extract_gfx.py now emits build/gfx/moth.svt
+   (8 tiles) and the port draws the moth from that sheet via l3e_mothtile.
+   The composite is PAIR-SWAPPED mirrored (left = the higher tile index,
+   each x-flipped), per the captured OAM.

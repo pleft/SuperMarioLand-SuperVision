@@ -25,6 +25,17 @@ Newest entries at the top. Every entry should be traceable to ROM bytes/code.
 rendering/perf rounds, blocks/powerups, enemies, goal+bonus game, death/title,
 audio phase. See docs/22 + docs/23 and the memory index.)
 
+## 2026-07-19 (night 2) — ending polish 2: rope offset, captive, bursts, THE MOTH
+Four more user-caught: rope rows were BG-row values (world rows 6-9, +2 HUD
+offset) so the wall under the gate got holes; Mario's walk-in stop (68)
+overlapped the captive at 80 and his erase ate her edge (now 60, GB 61);
+the tally burst hit off-screen-left leftovers = partial clouds at the edge
+(now gated to on-screen x); and the moth: tiles $A0-$B3 live in the per-world
+OBJ overlay region — the RESCUE SCENE LOADS ITS OWN OVERLAY there, so the W1
+sheet showed random sprites. Real tiles found by VRAM-dump-at-$26 + ROM byte
+match (bank2 0x8A32+/0x8B32+), extracted to moth.svt, drawn pair-swapped
+mirrored per the captured OAM. All verified in the honest-view sim.
+
 ## 2026-07-19 (night) — ending hardware feedback: the scroll_s=32 blind spot
 Four user-caught bugs, one root: level ends ALWAYS sit at scroll_s=32 (the fb
 pins at fbmax_col) and the harness dumps ignored XSCROLL — every room draw
