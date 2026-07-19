@@ -79,18 +79,25 @@ class Harness:
         self.frame, self.steps = fs
         self.cur_bank = bank
 
-    def dump_screen(self, path):
-        """render the visible 160x160 4-shade framebuffer (48B stride) to a PGM"""
+    def dump_screen(self, path, scroll=None):
+        """render the VISIBLE 160x160 window: fb pixels scroll..scroll+159 per
+        line (the hardware applies XSCROLL; a fb-origin dump hid a 32px offset
+        at level ends, where scroll_s pins at 32)."""
+        if scroll is None:
+            try:
+                scroll = self.mem[self.sym('scroll_vis')]
+            except Exception:
+                scroll = 0
         vram = self.mem[0x4000:0x6000]
         shades = [255, 170, 85, 0]
         rows = []
         for y in range(160):
             row = []
             base = y * 48
-            for bx in range(40):
-                b = vram[base + bx]
-                for p in range(4):
-                    row.append(shades[(b >> (p * 2)) & 3])
+            s = 0 if y < 16 else scroll   # the line-16 raster split: HUD unscrolled
+            for px in range(s, s + 160):
+                b = vram[base + (px >> 2)]
+                row.append(shades[(b >> ((px & 3) * 2)) & 3])
             rows.append(row)
         with open(path, "wb") as f:
             f.write(b"P5\n160 160\n255\n")

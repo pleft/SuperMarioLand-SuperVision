@@ -1641,9 +1641,12 @@ MARIO_INX = 68                   ; Mario's walk-in stop
 @col:
     phx
     phy
+    lda dcol
+    cmp #47
+    bcs :+
     jsr set_dst
     jsr blit_blank
-    ply
+:   ply
     plx
     lda dcol
     clc
@@ -1674,17 +1677,35 @@ MARIO_INX = 68                   ; Mario's walk-in stop
     cmp #OBJ_GCORP+1
     bcs @next
     cmp #OBJ_BAT
+    php                          ; (Z = it's the tall boss)
+    lda o_xl,x                   ; remember the victim's spot
+    sta tmpL2
+    lda o_xh,x
+    sta tmpH2
+    lda o_y,x
+    plp
     bne :+
-    lda o_y,x                    ; the boss is head-anchored: center the cloud
-    clc
+    clc                          ; head-anchored 24px boss: center the cloud
     adc #8
-    sta o_y,x
-:   lda #OBJ_BOOM
+:   sta tmpH3
+    stz o_type,x                 ; free the slot: the render pipeline erases the
+    inc tmpL3                    ; DEAD object's full drawn rect (tall included)
+    phx
+    jsr find_free_evict          ; the cloud gets its own slot
+    bcs @nofree
+    lda #OBJ_BOOM
     sta o_type,x
+    lda tmpL2
+    sta o_xl,x
+    lda tmpH2
+    sta o_xh,x
+    lda tmpH3
+    sta o_y,x
     lda #44                      ; the standard 44f cloud
     sta o_tmr,x
     stz o_st,x
-    inc tmpL3
+@nofree:
+    plx
 @next:
     dex
     bpl @l
@@ -1701,31 +1722,20 @@ MARIO_INX = 68                   ; Mario's walk-in stop
 .segment "L13E"
 .proc l3e_room
     lda e_phase
-    cmp #E_WIPE
-    bne :+
-    jmp @wipe
-:   cmp #E_SETTLE
-    bne :+
-    jmp @settle
-:   cmp #E_WALKIN
-    bne :+
-    jmp @walkin
-:   cmp #E_TEXT1
-    bne :+
-    jmp @text1
-:   cmp #E_TEXT2
-    bne :+
-    jmp @text2
-:   cmp #E_JINGLE
-    bne :+
-    jmp @jingle
-:   cmp #E_PUFF
-    bne :+
-    jmp @puff
-:   cmp #E_FLY
-    bne :+
-    jmp l3e_fly
-:   ; --- E_OUT ---
+    sec
+    sbc #E_WIPE
+    asl
+    tax
+    lda @tab+1,x
+    pha
+    lda @tab,x
+    pha
+    rts                          ; rts-dispatch
+@tab:
+    .word @wipe-1, @settle-1, @walkin-1, @text1-1, @text2-1
+    .word @jingle-1, @puff-1, l3e_fly-1, @out-1
+@out:
+    ; --- E_OUT ---
     dec e_tmr
     bne @rts
     stz ending13
@@ -1903,6 +1913,23 @@ MARIO_INX = 68                   ; Mario's walk-in stop
     rts
 .endproc
 
+.proc l3e_text2_fix              ; repaint the full text2 line + Mario's image
+    ldx #0
+@c: phx
+    lda l3e_txt2,x
+    ldy #9
+    jsr l3e_char
+    plx
+    inx
+    cpx #9
+    bne @c
+    lda spr_x
+    clc
+    adc scroll_s
+    sta mario_vx
+    jmp draw_player
+.endproc
+
 l3e_arc: .byte <-2, <-2, <-1, 0, 1, 2, 2   ; 8f-segment per-frame y deltas (sum 0)
 l3e_txt1: .byte $1D,$11,$0A,$17,$14,$2C,$22,$18,$1E,$2C,$16,$0A,$1B,$12,$18,$23
 l3e_txt2: .byte $18,$11,$28,$2C,$0D,$0A,$12,$1C,$22
@@ -1924,6 +1951,10 @@ l3e_txt2: .byte $18,$11,$28,$2C,$0D,$0A,$12,$1C,$22
 
 .proc l3e_char                   ; A = tile, Y = row, X = char index; col base per row
     pha
+    lda scroll_s
+    lsr
+    lsr
+    sta tmpL2
     tya
     asl
     asl
@@ -1942,6 +1973,8 @@ l3e_txt2: .byte $18,$11,$28,$2C,$0D,$0A,$12,$1C,$22
     clc
     adc #8
 @setc:
+    clc
+    adc tmpL2                    ; screen-anchor (+scroll_s/4)
     sta dcol
     pla
     jsr get_tile_src
@@ -1949,11 +1982,22 @@ l3e_txt2: .byte $18,$11,$28,$2C,$0D,$0A,$12,$1C,$22
     jmp blit_tile
 .endproc
 
-; --- one wipe column: rows 2-17 become the room template ---
+; --- one wipe column: rows 2-19 become the room template. All room drawing is
+; SCREEN-anchored: fb x = screen x + scroll_s (the port's convention; the frozen
+; camera can leave the sub-scroll latched at 32 -- the pause-strip lesson) ---
 .proc l3e_wipe_col
+    lda scroll_s
+    lsr
+    lsr
+    sta tmpL2
     lda e_ix
     asl
-    sta dcol
+    clc
+    adc tmpL2
+    cmp #47                      ; past the fb stride: nothing to draw
+    bcc :+
+    rts
+:   sta dcol
     lda #2
     sta tmpL3                    ; row
 @row:
@@ -2001,48 +2045,45 @@ l3e_txt2: .byte $18,$11,$28,$2C,$0D,$0A,$12,$1C,$22
     stz spr_subx
     lda #1
     sta do_flip
-    lda #CAPT_X/4
+    lda scroll_s
+    lsr
+    lsr
+    sta tmpL2                    ; screen-anchor
+    ldy #0
+@q: phy
+    lda @cols,y
+    clc
+    adc tmpL2
     sta dcol
-    lda #CAPT_Y
+    lda @rows,y
     sta dy
-    ldx #$49
+    ldx @tiles,y
     jsr draw_quad
-    lda #CAPT_X/4+2
-    sta dcol
-    ldx #$4E
-    jsr draw_quad
-    lda #CAPT_X/4
-    sta dcol
-    lda #CAPT_Y+8
-    sta dy
-    ldx #$51
-    jsr draw_quad
-    lda #CAPT_X/4+2
-    sta dcol
-    ldx #$50
-    jsr draw_quad
+    ply
+    iny
+    cpy #4
+    bne @q
     stz do_flip
     rts
+@cols:  .byte CAPT_X/4, CAPT_X/4+2, CAPT_X/4, CAPT_X/4+2
+@rows:  .byte CAPT_Y, CAPT_Y, CAPT_Y+8, CAPT_Y+8
+@tiles: .byte $49, $4E, $51, $50
 .endproc
 
-.proc l3e_moth_blank             ; blank the 3x3 cell box at the last drawn spot
-    lda e_px
-    lsr
-    lsr
-    and #$FE
-    sta dcol
-    lda e_py
-    and #$F8
-    sta dy
-    ldx #3
-@row:
+.segment "CODE"                  ; generic helpers: FIXED has slack, the overlay
+                                 ; window is the tight one
+.proc l3e_box                    ; blank an X-row x 3-cell box at (dcol, dy),
+@row:                            ; clipped at the fb stride
     ldy #3
 @col:
     phx
     phy
+    lda dcol
+    cmp #47
+    bcs :+
     jsr set_dst
     jsr blit_blank
-    ply
+:   ply
     plx
     lda dcol
     clc
@@ -2062,9 +2103,39 @@ l3e_txt2: .byte $18,$11,$28,$2C,$0D,$0A,$12,$1C,$22
     bne @row
     rts
 .endproc
+.segment "L13E"
+
+.proc l3e_moth_blank             ; blank the cell box at the last drawn spot;
+    lda scroll_s
+    lsr
+    lsr
+    sta tmpL2
+    lda e_px                     ; NEVER row 15+ (the floor band lives there)
+    lsr
+    lsr
+    and #$FE
+    clc
+    adc tmpL2
+    sta dcol
+    lda e_py
+    and #$F8
+    sta dy
+    ldx #3
+    lda e_py
+    and #7
+    bne :+
+    dex                          ; aligned box: 16px = exactly 2 rows
+:   lda dy
+    cmp #104                     ; a 3-row box from y104 would hit the floor row
+    bcc :+
+    ldx #2
+:   jmp l3e_box
+.endproc
 
 .proc l3e_moth_draw              ; erase old box, draw the 2x2 moth at (e_mx,e_my)
     jsr l3e_moth_blank
+    jsr l3e_text2_fix            ; the blank box crosses the "OH! DAISY" row and
+                                 ; Mario's edge mid-hop -- repaint what it ate
     lda e_mx
     sta e_px
     lda e_my
@@ -2083,46 +2154,50 @@ l3e_txt2: .byte $18,$11,$28,$2C,$0D,$0A,$12,$1C,$22
     ldx #$A2
     stx tmpL3
 @go:
+    lda scroll_s
+    lsr
+    lsr
+    sta tmpL2
+    ldy #0
+@q: phy
     lda e_mx
     lsr
     lsr
-    sta dcol
-    lda e_my
-    sta dy
-    ldx tmpL3
-    jsr draw_quad
-    lda dcol
     clc
-    adc #2
-    sta dcol
-    ldx tmpL3
-    inx
-    jsr draw_quad
-    lda dcol
-    sec
-    sbc #2
+    adc tmpL2
+    clc
+    adc @cofs,y
     sta dcol
     lda e_my
     clc
-    adc #8
+    adc @rofs,y
     sta dy
-    ldx tmpL3
-    inx
-    inx
-    jsr draw_quad                ; $B0/$B2 rows are +16 from the top tiles
-    lda dcol
+    lda tmpL3                    ; bottom row = one SHEET row down (+$10)
     clc
-    adc #2
-    sta dcol
-    ldx tmpL3
-    inx
-    inx
-    inx
-    jsr draw_quad
+    adc @tofs,y
+    tax
+    jsr l3e_quad_clip
+    ply
+    iny
+    cpy #4
+    bne @q
     stz do_flip
     stz spr_subx
     rts
+@cofs: .byte 0, 2, 0, 2
+@rofs: .byte 0, 0, 8, 8
+@tofs: .byte 0, 1, $10, $11
 .endproc
+
+.segment "CODE"
+.proc l3e_quad_clip              ; draw_quad unless the 3-byte blit row would
+    lda dcol                     ; run past the fb stride (s=32 right edge)
+    cmp #46
+    bcc :+
+    rts
+:   jmp draw_quad
+.endproc
+.segment "L13E"
 
 .proc l3e_mario_draw             ; blank-erase + draw at the current walk pos
     lda prev_col
@@ -2131,34 +2206,12 @@ l3e_txt2: .byte $18,$11,$28,$2C,$0D,$0A,$12,$1C,$22
     lda prev_y
     and #$F8
     sta dy
-    ldx #3
-@row:
-    ldy #3
-@col:
-    phx
-    phy
-    jsr set_dst
-    jsr blit_blank
-    ply
-    plx
-    lda dcol
-    clc
-    adc #2
-    sta dcol
-    dey
-    bne @col
-    lda dcol
-    sec
-    sbc #6
-    sta dcol
-    lda dy
-    clc
-    adc #8
-    sta dy
-    dex
-    bne @row
-    lda spr_x                    ; the render pass normally derives mario_vx; the
-    sta mario_vx                 ; room is screen-anchored (scroll_s = 0 here)
+    ldx #2                       ; y is floor-aligned (104): 2 rows, floor untouched
+    jsr l3e_box
+    lda spr_x                    ; the render pass normally derives mario_vx --
+    clc                          ; feed it the standard screen-anchor formula
+    adc scroll_s
+    sta mario_vx
     jsr draw_player
     lda spr_col
     sta prev_col
@@ -6751,11 +6804,12 @@ death_curve:                     ; ROM $0C19 verbatim (signed y deltas + $7F end
     rts
 .endproc
 
-; title_lvl_show: draw the level-select pick ("1-1".."1-3") at the title's top right.
+; title_lvl_show: draw the level-select pick ("1-1".."1-3") at the title's
+; BOTTOM right (user request: keep the top clean).
 .proc title_lvl_show
     ldx cur_level
     lda draw_hud::world_tab,x
-    ldy #28                      ; cells at dcol 28/30/32 (cols 14-16), row 0
+    ldy #28                      ; cells at dcol 28/30/32 (cols 14-16), row 19
     jsr @put
     lda #$29                     ; the HUD font's '-'
     ldy #30
@@ -6766,7 +6820,8 @@ death_curve:                     ; ROM $0C19 verbatim (signed y deltas + $7F end
 @put:
     pha
     sty dcol
-    stz dy
+    lda #152                     ; bottom row (the title map is 18 rows; 152-159
+    sta dy                       ; is clear framebuffer below it)
     jsr set_dst
     pla
     jsr get_tile_src

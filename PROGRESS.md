@@ -25,6 +25,17 @@ Newest entries at the top. Every entry should be traceable to ROM bytes/code.
 rendering/perf rounds, blocks/powerups, enemies, goal+bonus game, death/title,
 audio phase. See docs/22 + docs/23 and the memory index.)
 
+## 2026-07-19 (night) — ending hardware feedback: the scroll_s=32 blind spot
+Four user-caught bugs, one root: level ends ALWAYS sit at scroll_s=32 (the fb
+pins at fbmax_col) and the harness dumps ignored XSCROLL — every room draw
+was 32px off on hardware while the sims looked perfect. The room machine now
+screen-anchors all drawing (+scroll_s, edge-clipped); the boss's cloud gets a
+fresh slot (his dead slot's tall rect pipeline-erased); blank boxes capped
+above the floor row and at the fb stride; the moth's bottom tiles were Gao's
+(+2 vs +$10) and its flight now repaints the text it crosses. dump_screen
+renders scroll+split like the LCD. Also: the title level-select indicator
+moved to the bottom row (user request).
+
 ## 2026-07-19 (later) — THE TRUE 1-3 ENDING SHIPPED (RE + port, docs/25)
 The full x-3 rescue flow, every beat GB-captured then ported: sphere touch ->
 clear jingle + freeze (the boss keeps jumping) -> tally (live enemies burst

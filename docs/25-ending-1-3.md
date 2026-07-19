@@ -111,3 +111,29 @@ ends at the sphere; now also arms `ending13`). Structure:
 Verified end-to-end in the harness: sphere at f2679 -> all phases at the
 captured GB cadences -> bonus_phase=2 at f4791; screenshots per phase clean;
 level-select + 1-1 (bank-1 header shift) + stomp + music 1431/1431 green.
+
+## Hardware feedback round (2026-07-19, user-caught x4)
+
+1. **The whole room was 32px left on hardware**: scroll_apply's @clampend pins
+   the framebuffer at fbmax_col and rides the last 32 camera px on scroll_s —
+   the arena ALWAYS sits at scroll_s = 32, and the harness dump ignored
+   XSCROLL, so every sim screenshot silently showed the wrong window (the
+   pause strip, drawn with the port's +scroll_s convention, was the tell:
+   correct on hardware while everything else shifted). Fix: the room machine
+   screen-anchors every draw (+scroll_s; s is always 0 or 32 here since
+   cam_max = 0 mod 32, so byte alignment holds) with right-edge clips at the
+   stride; dump_screen now applies scroll_vis with the line-16 split.
+2. **Boss dissolved partially**: morphing his slot to the 16px cloud left his
+   24px body — the cloud in a fresh slot now, and the dead slot's full tall
+   rect is erased by the pipeline's own dead-object path.
+3. **Walk/moth erases ate the floor + the gate stripes**: the 3-row blank
+   boxes reached the floor row (now capped above row 15) and Mario's walk-out
+   box ran past the fb stride at the gate (row-wrap stripes; now clipped).
+4. **"Not a moth"**: bottom tiles were +2 (the Gao statue!) instead of +$10
+   (one sheet row down). Also the moth's flight crosses the text row — the GB
+   uses OAM sprites and never erases; the port repaints the text2 line +
+   Mario after each moth blank.
+
+LESSON (structural): a framebuffer-origin screenshot is NOT the screen — sims
+must render scroll+split like the LCD does, or a constant 32px offset class
+of bug sails through every visual check.
