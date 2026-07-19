@@ -217,3 +217,5 @@ he walks the wall top as it scrolls out, then steps down to the room floor.
   flew at 61Hz (1px/f); they now move 2px every other frame on slot parity
   (the 1-2 arrow precedent). Median 73% -> 63%; the residual worst ~120%
   spikes are boss+Mario overlap chains (the parked composite-draw lever).
+
+## CLOSED 2026-07-19: user-verified on hardware — "perfect!" (thru bc4ad37)

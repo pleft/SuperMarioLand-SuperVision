@@ -16,14 +16,19 @@ Newest entries at the top. Every entry should be traceable to ROM bytes/code.
 - [x] Multi-level foundation: 64K banked cart + level headers; WORLD 1-2 COMPLETE
       (Bunbun/arrow/falling stones, hidden blocks, block-bounce kill, table-driven
       platforms, 10 object slots, render budget) — user-verified on hardware
-- [x] 1-3 PLAYABLE (Suu/spiky ball/Gao+fireball/Batadon+shots, hidden secret,
-      water shimmer, track $03; L3CODE bank-2 RAM overlay) — boss arena pending
-- [ ] King Totomesu + switch + rescue scene (dedicated GB machinery); then W2+
-      (128K cart step), top-score on title, hard-mode toggle, over-HUD row-split
+- [x] WORLD 1-3 COMPLETE: the full kit + King Totomesu (boss music $0B, 5-hit
+      superball HP, full-sphere burst) + the TRUE rescue ending (sphere, rope,
+      the transition scroll with real gravity, fake-Daisy swirl -> the moth,
+      bonus game) — user-verified on hardware ("perfect")
+- [ ] WORLD 2+ (128K cart step, per-world gfx swap; 2-3 = the submarine
+      autoscroller); top-score on title; hard-mode toggle; parked: over-HUD
+      row-split renderer + composite BG+sprite draw (the residual-spike lever)
 
 (2026-06-29 → 2026-07-09 work is logged in docs/ + git history rather than here:
 rendering/perf rounds, blocks/powerups, enemies, goal+bonus game, death/title,
 audio phase. See docs/22 + docs/23 and the memory index.)
+
+## 2026-07-19 — WORLD 1-3 CLOSED: user verdict "perfect!" (thru bc4ad37)
 
 ## 2026-07-19 (night 6) — ending polish 6: real gravity + the fight flicker
 The scripted transition altitude is gone: Mario now GROUND-PROBES every scroll
