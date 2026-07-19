@@ -190,3 +190,13 @@ scroll), and the port's existing boom renderer was trusted against a capture
 that showed four quadrants. The rule going forward: for any cutscene, film
 EVERY state at full rate AND diff the port's own film against the GB's,
 state by state, before shipping.
+
+## Polish round 4 (2026-07-19)
+
+- The 16x16 cloud drew its bottom row BELOW the anchor; the pipeline's TALL
+  erase covers one row ABOVE it (the Nokobon shell convention) -- the bottom
+  halves persisted. The cloud now spans o_y..o_y+16 = exactly the tall-erase
+  envelope (stored o_pvy = o_y+8, erase from o_pvy-8, two rows).
+- Mario kept pedestal altitude through the transition scroll: he now falls
+  2px/f to the room floor as the scroll begins (the GB shows him stepping
+  off as the pedestal rolls away).

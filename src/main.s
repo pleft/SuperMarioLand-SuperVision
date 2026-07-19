@@ -1556,14 +1556,20 @@ MARIO_INX = 60                   ; Mario's walk-in stop (GB 61; he must not
 :   cmp #E_BEAT1
     beq @beat
     cmp #E_ROPE
-    beq @rope
-    cmp #E_BEAT2
+    bne :+
+    jmp @rope
+:   cmp #E_BEAT2
     beq @beat
     ; --- E_SCROLL (id E_WALKOUT): the camera itself rolls 224px right at 1px/f;
     ; the engine streams the room template in (read_map_tile's past-edge branch)
     ; while Mario keeps walking, drifting to his mark. GB $22/$23 exactly. ---
     jsr l3e_walkanim
-    lda frame_count
+    lda spr_y                    ; he steps off the pedestal as it rolls away:
+    cmp #CAPT_Y                  ; fall to the room floor (the air-walk fix)
+    bcs :+
+    inc spr_y
+    inc spr_y
+:   lda frame_count
     and #1
     bne :+
     lda spr_x                    ; drift left to his mark (GB: he ends at 61 with
@@ -8501,12 +8507,10 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     lda spr_col
     sta dcol
     ldx oi
-    lda o_y,x
-    clc
-    adc #8
-    sta dy
-    lda o_tmr,x
-    and #4
+    lda o_y,x                    ; the 16x16 cloud occupies o_y..o_y+16: the TOP
+    sta dy                       ; row sits an 8px row ABOVE the anchor, exactly
+    lda o_tmr,x                  ; the envelope the TALL erase covers (the shell
+    and #4                       ; convention) -- a below-anchor row never erases
     php
     ldx #BOOM_TA
     plp
@@ -8525,9 +8529,9 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     phx
     jsr draw_quad
     ldx oi                       ; the GB cloud is FOUR mirrored quadrants (16x16,
-    lda o_y,x                    ; captured OAM attrs 0/$20/$40/$60) -- the port
-    clc                          ; drew only the top row ("half sphere", user x3)
-    adc #16
+    lda o_y,x                    ; captured OAM attrs 0/$20/$40/$60)
+    clc
+    adc #8
     cmp #152
     bcs @boomdone                ; bottom clip at the screen edge
     sta dy

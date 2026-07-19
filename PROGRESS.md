@@ -25,6 +25,14 @@ Newest entries at the top. Every entry should be traceable to ROM bytes/code.
 rendering/perf rounds, blocks/powerups, enemies, goal+bonus game, death/title,
 audio phase. See docs/22 + docs/23 and the memory index.)
 
+## 2026-07-19 (night 4) — ending polish 4: the cloud's erase envelope + the drop
+Two user-caught: the 16x16 cloud's bottom row was drawn BELOW the anchor while
+the pipeline's TALL erase covers the row ABOVE it (the Nokobon-shell
+convention) — the bottom halves stayed on screen until an overlap repainted
+them; the cloud now occupies o_y..o_y+16, exactly the tall-erase envelope.
+And Mario kept his pedestal altitude through the transition scroll ("walks in
+the air") — he now steps down to the room floor (2px/f) as the scroll starts.
+
 ## 2026-07-19 (night 3) — ending polish 3: the transition is a SCROLL
 The GB $22/$23 "wipe" is actually a 222px camera scroll (the film, not the
 BG diffs, shows it): the port now rides its own scroller — cam_max/fbmax
