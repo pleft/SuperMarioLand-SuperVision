@@ -25,6 +25,17 @@ Newest entries at the top. Every entry should be traceable to ROM bytes/code.
 rendering/perf rounds, blocks/powerups, enemies, goal+bonus game, death/title,
 audio phase. See docs/22 + docs/23 and the memory index.)
 
+## 2026-07-19 — 1-3 ending phase 1: the boss battle music (RE'd + ported)
+All four unknown track ids fell in one capture session (docs/25): $0B = BOSS
+BATTLE (GB trigger: ObjectSpawnCheck starts it when the spawning type's phys
+byte2 >= $C0 — score class 3, the bosses), $0F = the x-3 rescue walk, $12 =
+the "OH! DAISY" reveal, $11 = the 4-3 path (future). Port: music tables are
+now PER-TRACK BASED (mus_base latched in mus_start; offsets +512-biased vs
+the high-byte sentinels) so the ending tracks + the drum table live in FIXED
+(music2.bin, 309B+66B) instead of costing every bank; Totomesu's spawn starts
+MUS_BOSS (sim: fires at cam 2145 = GB 2144, track playing). verify_music
+1431/1431; stomp green; boot clean. Ending machinery itself = next.
+
 ## 2026-07-17 (closing) — bridge slop retuned 6 -> 3 (walking falls again)
 The two-point foot probes shifted the stone-handoff timing; the 6px slop then
 let WALKING cross the collapsing bridge (GB: running only — user-caught).

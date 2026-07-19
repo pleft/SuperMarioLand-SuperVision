@@ -242,9 +242,15 @@ o_nfl:       .res 10          ; bit0 = dirty, bit1 = visible (render_all flags)
 o_hp:        .res 10          ; extra hits to survive (fly: 1 -- two balls kill, user/GB)
 
 .segment "ZEROPAGE"
+mus_base:    .res 2          ; current track's data base (per-track: LEVELS or FIXED).
+                             ; NOT at the ZP head: harness scripts poke mem[0]/mem[1]
+                             ; as frame_flag/frame_count -- that layout is ABI.
 
 ; ---------------------------------------------------------------------------
 .segment "CODE"
+
+music2_data:                     ; 1-3 ending tracks (boss/rescue/reveal): FIXED-
+    .incbin "../build/audio/music2.bin"  ; resident so they play with bank 2 mapped
 
 .proc reset
     sei
@@ -1646,40 +1652,44 @@ main_loop:
 ; SFX stream claims (sfx_chmask, set at sfx_play) and reclaims it afterwards.
 .proc mus_start                  ; A = track index (MUS_* in build/audio/music.inc)
     tax
+    lda mus_base_lo,x            ; per-track data base: old tracks sit in the LEVELS
+    sta mus_base                 ; prefix blob, the 1-3 ending set in FIXED
+    lda mus_base_hi,x
+    sta mus_base+1
     lda mus_lt_lo,x
     clc
-    adc #<music_data
+    adc mus_base
     sta mus_lt
     lda mus_lt_hi,x
-    adc #>music_data
+    adc mus_base+1
     sta mus_lt+1
     lda mus_l1_lo,x
     clc
-    adc #<music_data
+    adc mus_base
     sta mus_list
     lda mus_l1_hi,x
-    adc #>music_data
+    adc mus_base+1
     sta mus_list+1
     lda mus_l2_lo,x
     clc
-    adc #<music_data
+    adc mus_base
     sta mus_list+12
     lda mus_l2_hi,x
-    adc #>music_data
+    adc mus_base+1
     sta mus_list+1+12
     lda mus_l3_lo,x
     clc
-    adc #<music_data
+    adc mus_base
     sta mus_list+24
     lda mus_l3_hi,x
-    adc #>music_data
+    adc mus_base+1
     sta mus_list+1+24
     lda mus_l4_lo,x
     clc
-    adc #<music_data
+    adc mus_base
     sta mus_list+36
     lda mus_l4_hi,x
-    adc #>music_data
+    adc mus_base+1
     sta mus_list+1+36
     ldx #36
 @init:
@@ -1900,10 +1910,10 @@ main_loop:
     pha
     lda tmpL
     clc
-    adc #<music_data
+    adc mus_base
     sta mus_pos,x
     pla
-    adc #>music_data
+    adc mus_base+1
     sta mus_pos+1,x
     jmp @cell
 @jump:
@@ -1914,10 +1924,10 @@ main_loop:
     pha
     lda tmpL
     clc
-    adc #<music_data
+    adc mus_base
     sta mus_list,x
     pla
-    adc #>music_data
+    adc mus_base+1
     sta mus_list+1,x
     bra @next_phrase
 @dormant:
@@ -2128,10 +2138,10 @@ main_loop:
     pha
     lda tmpL
     clc
-    adc #<music_data
+    adc mus_base
     sta mus_pos,x
     pla
-    adc #>music_data
+    adc mus_base+1
     sta mus_pos+1,x
     jmp @cell
 @jump:
@@ -2142,10 +2152,10 @@ main_loop:
     pha
     lda tmpL
     clc
-    adc #<music_data
+    adc mus_base
     sta mus_list,x
     pla
-    adc #>music_data
+    adc mus_base+1
     sta mus_list+1,x
     bra @next_phrase
 @dormant:
@@ -2246,10 +2256,10 @@ main_loop:
     clc
     adc tmpL                     ; *3
     clc
-    adc #<(music_data+MUS_DRUMS)
+    adc #<(music2_data+MUS_DRUMS)
     sta tmpL
     lda #0
-    adc #>(music_data+MUS_DRUMS)
+    adc #>(music2_data+MUS_DRUMS)
     sta tmpH
     lda (tmpL)                   ; FREQVOL init
     pha
@@ -2303,10 +2313,10 @@ main_loop:
     pha
     lda tmpL
     clc
-    adc #<music_data
+    adc mus_base
     sta mus_pos,x
     pla
-    adc #>music_data
+    adc mus_base+1
     sta mus_pos+1,x
     jmp @cell
 @jump:
@@ -2317,10 +2327,10 @@ main_loop:
     pha
     lda tmpL
     clc
-    adc #<music_data
+    adc mus_base
     sta mus_list,x
     pla
-    adc #>music_data
+    adc mus_base+1
     sta mus_list+1,x
     bra @next_phrase
 @dormant:
@@ -9075,6 +9085,12 @@ GIFT_T  = $E6                    ; (bat tiles: see bat_row_a/b below)
     sec                          ; rows) covers his whole body
     sbc #8
     sta o_y,x
+    phx
+    jsr mus_stop                 ; GB $252F: a spawning type with score class 3
+    lda #MUS_BOSS                ; (phys byte2 >= $C0 -- the bosses) starts the
+    jsr mus_start                ; battle track $0B; it KEEPS playing even if he
+    plx                          ; dies (captured: no restore until the sphere)
+    lda o_y,x                    ; the mus calls clobbered A = the anchored y
 :
     stz o_vx,x
     sta o_vy,x                   ; base y = the pipe/column rim (draw clip + hold)

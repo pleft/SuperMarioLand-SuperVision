@@ -8,25 +8,32 @@ ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 
 def load():
     bin = open(os.path.join(ROOT, "build/audio/music.bin"), "rb").read()
+    bin2 = open(os.path.join(ROOT, "build/audio/music2.bin"), "rb").read()
     inc = open(os.path.join(ROOT, "build/audio/music.inc")).read()
-    drums = int(re.search(r"MUS_DRUMS = (\d+)", inc).group(1))
+    # drum table now lives in music2 (FIXED); model addresses stay music.bin-relative,
+    # so append music2 after music.bin and rebase its offsets by len(bin)
+    drums = len(bin) + int(re.search(r"MUS_DRUMS = (\d+)", inc).group(1))
+    base = int(re.search(r"; track \$07: music_data\+(\d+)", inc).group(1)) - 512
     lists = []
     for c in range(4):
         lo = re.search(r"mus_l%d_lo: \.byte (.*)" % (c+1), inc).group(1).split(", ")
-        lists.append(int(lo[0][1:]))          # track index 0 = MUS_LEVEL
-    lt = int(re.search(r"MUS_T07_LT = (\d+)", inc).group(1))
-    return bin, drums, lists, lt
+        lists.append(base + int(lo[0][1:]))   # track index 0 = MUS_LEVEL ($07)
+    lt = base + int(re.search(r"MUS_T07_LT = (\d+)", inc).group(1))
+    return bin + bin2, drums, lists, lt
 
 class Ch:
-    def __init__(s, bin, lst, lt):
-        s.bin=bin; s.list=lst; s.lt=lt; s.pos=None; s.active=True
+    def __init__(s, bin, lst, lt, base=0):
+        s.bin=bin; s.list=lst; s.lt=lt; s.base=base; s.pos=None; s.active=True
         s.wait=1; s.len=1; s.env=0; s.duty=0x40; s.vol=0; s.ectr=1
         s.pending_zero=True                   # mus_zero seeding
     def u16(s,o): return s.bin[o]|(s.bin[o+1]<<8)
 
 def model(frames, rate=3):
     bin, drums, L, lt = load()
-    ch=[Ch(bin,L[i],lt) for i in range(4)]
+    import re as _re
+    _base = int(_re.search(r"; track \$07: music_data\+(\d+)",
+                open(os.path.join(ROOT, "build/audio/music.inc")).read()).group(1)) - 512
+    ch=[Ch(bin,L[i],lt,_base) for i in range(4)]
     ch[2].duty=0x60
     borrowed=[None]                            # ch3's square (0/4/None)
     sq_user=[0,0]
@@ -77,8 +84,8 @@ def model(frames, rate=3):
                         else: sq_wr(i,"vd",0x40)
                         return
                     if e==0xFFFF:
-                        c.list=c.u16(c.list); continue
-                    c.pos=e; break
+                        c.list=c.base+c.u16(c.list); continue
+                    c.pos=c.base+e; break
                 continue
             if b==0x9D:
                 if i!=3:
@@ -138,8 +145,8 @@ def model(frames, rate=3):
                             break
                         if e==0xFE00: c.pos=None; c.active=False; break
                         if e==0xFFFF:
-                            c.list=c.u16(c.list); continue
-                        c.pos=e; break
+                            c.list=c.base+c.u16(c.list); continue
+                        c.pos=c.base+e; break
                     if c.pos is None: continue
                 cell(i,c)
     acc=0

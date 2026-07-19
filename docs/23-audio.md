@@ -49,9 +49,10 @@ time from the user's own ROM by `tools/extract_sfx.py` / `tools/extract_music.py
 | $dfe8 | $07 | 1-1 LEVEL MUSIC | mus_start at level start/respawn |
 | $dfe8 | $09 | BONUS GAME music (harness-verified: bonus state -> $dfe9=$09) | bonus_start |
 | $dfe8 | $0C | star music (ONE-SHOT: its end = the star's end, $1F08) | star grant / star tick |
-| $dfe8 | $0F | NOT the goal jingle (old label wrong; unknown later-level id) | -- |
-| $dfe8 | $11 | NOT hurry-up: written by routine $12F1 when $dfe9==0 (context unidentified) | extracted, UNWIRED |
-| $dfe8 | $12 | NOT the bonus music (old label wrong; context unknown) | -- |
+| $dfe8 | $0B | BOSS BATTLE (ObjectSpawnCheck $252F: spawn's phys byte2>=$C0 = score class 3) | l3_spawn OBJ_BAT -> MUS_BOSS |
+| $dfe8 | $0F | RESCUE WALK (x-3 ending state $22; the "28s epic") | MUS_RESCUE (ending) |
+| $dfe8 | $11 | state $31 "Mario rises" start-if-idle (the 4-3/real-Daisy path; future) | -- |
+| $dfe8 | $12 | "OH! DAISY" reveal jingle (x-3 ending state $25) | MUS_REVEAL (ending) |
 | $dfe8 | $10 | stop music | (port: mus_stop) |
 
 Level→track table: bank0 `$07CE`.
@@ -235,3 +236,19 @@ per pass. The sequence engine loops perfectly by construction.
    before committing. (This file was lost that way once.)
 10. A list terminator can legitimately NOT exist (track $0F ch2) — parse ROM
     structures with boundary sets, not just sentinels.
+
+## Per-track music bases (2026-07-19)
+
+The player resolves ALL track-relative offsets (length table, channel lists,
+phrase pointers, loop targets) against a per-track base latched by `mus_start`
+from `mus_base_lo/hi` — so a track's data can live in the LEVELS prefix
+(music.bin: the original 8 tracks) or in FIXED (music2.bin: the 1-3 ending set
+$0B/$0F/$12 + the DRUM TABLE, moved there to stop paying its bytes in every
+bank). Offsets are emitted +512 and the bases -512: the list sentinels are
+high-byte-coded ($00xx end / $FExx dormant / $FFxx jump) and small relative
+offsets would otherwise read as END. The note table stays at music.bin[0]
+(absolute music_data refs). tools/verify_music.py models the same scheme;
+1431/1431 register writes still identical.
+LESSON (harness ABI): frame_flag/frame_count MUST stay at ZP $00/$01 — every
+py65 script pokes mem[0]/mem[1] as the fake NMI; a ZP insertion above them
+silently corrupts whatever lands at $01 (mus_base did, killing all music).
