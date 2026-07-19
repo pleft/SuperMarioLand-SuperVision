@@ -106,6 +106,7 @@ e_my:        .res 1           ; moth screen y (top)
 e_px:        .res 1           ; last drawn moth box (for the blank erase)
 e_py:        .res 1
 e_hop:       .res 1           ; hop-arc segment index / rest counter
+e_sub:       .res 1           ; scroll: captive drawn yet
 b_tick:      .res 1          ; 4-frame tick divider ($da22; harness-calibrated)
 b_ladder:    .res 1          ; ladder cycle counter 1..6 ($da27); odd = visible at gap (n-1)/2
 b_floor:     .res 1          ; Mario's floor 0..3 (top..bottom)
@@ -534,7 +535,10 @@ main_loop:
     rts
 .endproc
 
-; read_map_tile: A = map_base[feet_col][mrow] (the raw tile), or $00 if the row is off-map.
+; read_map_tile: A = map_base[feet_col][mrow] (the raw tile), or $00 if the row
+; is off-map. During the x-3 ending, columns PAST the level's right edge read
+; as the rescue-room template (checker bands + blank) -- the transition is the
+; engine's own camera scroll streaming those virtual columns in (GB $22/$23).
 .proc read_map_tile
     lda mrow
     cmp #16
@@ -621,6 +625,28 @@ main_loop:
     lda #$2C
     rts
 @off:
+    lda ending13                 ; the virtual room right of the map
+    beq @off0
+    lda mrow
+    cmp #2
+    bcc @ckA                     ; world rows 0-1: the top checker band
+    cmp #13
+    bcs :+
+    lda #$2C                     ; rows 2-12: open SKY (tile 0 is the '0' glyph!)
+    rts
+:   lda mrow                     ; rows 13+: the floor band (opposite parity)
+    ina
+    bra @ck
+@ckA:
+    lda mrow
+@ck:
+    clc
+    adc feet_col
+    and #1
+    clc
+    adc #$8E
+    rts
+@off0:
     lda #0
     rts
 .endproc
@@ -1525,31 +1551,52 @@ MARIO_INX = 60                   ; Mario's walk-in stop (GB 61; he must not
 .proc l3e_seq
     lda e_phase
     cmp #E_WIPE
-    bcs @own
-    cmp #E_BEAT1
+    bcc :+
+    jmp l3e_room                 ; the room machine owns everything from here
+:   cmp #E_BEAT1
     beq @beat
     cmp #E_ROPE
     beq @rope
     cmp #E_BEAT2
     beq @beat
-    ; --- E_WALKOUT: 1px/f right with the walk anim; gone at the right edge ---
+    ; --- E_SCROLL (id E_WALKOUT): the camera itself rolls 224px right at 1px/f;
+    ; the engine streams the room template in (read_map_tile's past-edge branch)
+    ; while Mario keeps walking, drifting to his mark. GB $22/$23 exactly. ---
     jsr l3e_walkanim
-    inc spr_x
-    lda spr_x
-    cmp #159
-    bcc @rts
-    jsr l3e_mario_blank          ; he leaves the arena (blank = the sky he stood in)
-    jsr l3e_room_copy            ; pull the room machine over the retired kit
-    lda #E_WIPE
-    sta e_phase
+    lda frame_count
+    and #1
+    bne :+
+    lda spr_x                    ; drift left to his mark (GB: he ends at 61 with
+    cmp #MARIO_INX+1             ; the captive at 79), then walks in place
+    bcc :+
+    dec spr_x
+:   inc cam_x
+    bne :+
+    inc cam_x+1
+:   lda e_sub                    ; the captive: drawn ONCE after her columns have
+    bne @noc                     ; streamed; the DMA shifts carry her image along
+    lda cam_x+1
+    cmp #>2392
+    bcc @noc
+    bne @drawc
+    lda cam_x
+    cmp #<2392
+    bcc @noc
+@drawc:
+    inc e_sub
+    jsr l3e_captive_scroll
+@noc:
+    dec e_tmr
+    bne @rts
+    jsr l3e_room_copy            ; the scroll is done: the room machine takes over
     lda #1
-    sta e_own                    ; the machine owns the frames from here
-    stz e_ix
-    lda #8
+    sta e_own
+    lda #E_WALKIN
+    sta e_phase
+    stz e_ix                     ; text index
+    lda #16
     sta e_tmr
-    jsr mus_stop
-    lda #MUS_RESCUE              ; GB track $0F starts with the wipe ($22)
-    jmp mus_start
+    rts
 @beat:
     dec e_tmr
     bne @rts
@@ -1564,9 +1611,20 @@ MARIO_INX = 60                   ; Mario's walk-in stop (GB 61; he must not
 @rts:
     rts
 @towalk:
-    lda #E_WALKOUT               ; beat 2 done -> Mario walks out
+    lda #E_WALKOUT               ; beat 2 done -> the transition SCROLL (GB $22/$23)
     sta e_phase
-    rts
+    lda #224                     ; 1px/f; ends 0 mod 32 so the room lands at s=0
+    sta e_tmr
+    stz e_sub                    ; captive not drawn yet
+    lda fbmax_col                ; let the fb advance into the virtual room
+    clc
+    adc #32
+    sta fbmax_col
+    bcc :+
+    inc fbmax_col+1
+:   jsr mus_stop
+    lda #MUS_RESCUE              ; GB: track $0F starts as the scroll begins
+    jmp mus_start
 @rope:
     dec e_tmr
     bne @rts
@@ -1585,8 +1643,6 @@ MARIO_INX = 60                   ; Mario's walk-in stop (GB 61; he must not
     lda #47
     sta e_tmr
     rts
-@own:
-    jmp l3e_room
 .endproc
 
 ; --- the rope: world col 298, rows 11,10,9,8 bottom-up; the cell is BLANKED
@@ -1629,43 +1685,42 @@ MARIO_INX = 60                   ; Mario's walk-in stop (GB 61; he must not
 @cyc: .byte 1, 2, 5, 2
 .endproc
 
-.proc l3e_mario_blank            ; 3x3-cell blank box over Mario (sky区 only)
-    lda spr_col
-    and #$FE
-    sta dcol
-    lda spr_y
-    and #$F8
-    sta dy
-    ldx #3
-@row:
-    ldy #3
-@col:
-    phx
-    phy
-    lda dcol
-    cmp #47
-    bcs :+
-    jsr set_dst
-    jsr blit_blank
-:   ply
-    plx
-    lda dcol
-    clc
-    adc #2
-    sta dcol
-    dey
-    bne @col
-    lda dcol
+; l3e_captive_scroll: draw the captive ONCE into the fb at her WORLD spot
+; (2544 = final screen x 80): after this the DMA shifts carry her image with
+; the scrolling world, pixel-exact, with no per-frame redraws.
+.proc l3e_captive_scroll
+    lda fb_col0                  ; base byte col = (2544 - fb_col0*8) / 4
+    asl                          ;   = 636 - fb_col0*2  (fits a byte here)
+    sta tmpL2
+    lda fb_col0+1
+    rol
+    sta tmpH2
+    lda #<636
     sec
-    sbc #6
-    sta dcol
-    lda dy
+    sbc tmpL2
+    sta tmpL2                    ; (high byte is zero in the trigger window)
+    ldy #0
+@q: phy
+    lda @cols,y
     clc
-    adc #8
+    adc tmpL2
+    sta dcol
+    lda @rows,y
     sta dy
-    dex
-    bne @row
+    stz spr_subx
+    lda #1
+    sta do_flip
+    ldx @tiles,y
+    jsr draw_quad
+    ply
+    iny
+    cpy #4
+    bne @q
+    stz do_flip
     rts
+@cols:  .byte 0, 2, 0, 2
+@rows:  .byte CAPT_Y, CAPT_Y, CAPT_Y+8, CAPT_Y+8
+@tiles: .byte $49, $4E, $51, $50
 .endproc
 
 ; --- every live L3 enemy bursts into the explosion cloud at the tally start ---
@@ -1744,7 +1799,7 @@ MARIO_INX = 60                   ; Mario's walk-in stop (GB 61; he must not
     pha
     rts                          ; rts-dispatch
 @tab:
-    .word @wipe-1, @settle-1, @walkin-1, @text1-1, @text2-1
+    .word @rts-1, @rts-1, @walkin-1, @text1-1, @text2-1
     .word @jingle-1, @puff-1, l3e_fly-1, @out-1
 @out:
     ; --- E_OUT ---
@@ -1753,41 +1808,6 @@ MARIO_INX = 60                   ; Mario's walk-in stop (GB 61; he must not
     stz ending13
     jmp enter_bonus
 @rts:
-    rts
-@wipe:
-    dec e_tmr
-    bne @rts
-    lda #8
-    sta e_tmr
-    ldx e_ix
-    cpx #24                      ; 24 byte-col pairs = the visible 20 + the margin
-    bcs @wipedone
-    jsr l3e_wipe_col
-    inc e_ix
-    rts
-@wipedone:
-    lda #E_SETTLE
-    sta e_phase
-    lda #60
-    sta e_tmr
-    jsr l3e_captive              ; the captive stands waiting as the room settles
-    rts
-@settle:
-    dec e_tmr
-    bne @rts
-    lda #E_WALKIN
-    sta e_phase
-    lda #8                       ; Mario re-enters from the left edge
-    sta spr_x
-    lda #CAPT_Y                  ; same floor as the captive
-    sta spr_y
-    lda #2                       ; fresh erase anchor (the stale one points at
-    sta prev_col                 ; his arena exit spot)
-    lda #CAPT_Y
-    sta prev_y
-    stz e_ix                     ; text index
-    lda #16
-    sta e_tmr                    ; char cadence
     rts
 @walkin:
     jsr l3e_walkanim
@@ -1842,24 +1862,29 @@ MARIO_INX = 60                   ; Mario's walk-in stop (GB 61; he must not
     lda #E_PUFF
     sta e_phase
     stz e_ix
-    lda #1
-    sta e_tmr
 @rts2:
     rts
 @puff:
-    dec e_tmr
+    inc e_ix                     ; the TRANSFORM SWIRL (captured $25 tail): a
+    lda e_ix                     ; 16x16 four-quadrant spin of tiles $06/$07
+    cmp #60                      ; alternating every 8f for ~60f, three thumps
+    bcs @pdone                   ; inside it, THEN the moth
+    and #7
     bne @rts2
-    lda #16
-    sta e_tmr
-    ldx e_ix
-    cpx #3
-    bcs @pdone
-    lda #SFX_DFF8_03             ; three transform thumps, 16f apart (captured)
+    lda e_ix
+    cmp #8
+    beq @thump
+    cmp #24
+    beq @thump
+    cmp #40
+    bne :+
+@thump:
+    lda #SFX_DFF8_03
     jsr sfx_play
-    inc e_ix
-    rts
+:   jmp l3e_swirl
 @pdone:
-    lda #CAPT_X                  ; the captive becomes the moth (sprite swap)
+    jsr l3e_moth_blank_at_capt   ; clear the last swirl frame
+    lda #CAPT_X                  ; ...and the moth takes her place
     sta e_mx
     sta e_px
     lda #CAPT_Y
@@ -1994,73 +2019,22 @@ l3e_txt2: .byte $18,$11,$28,$2C,$0D,$0A,$12,$1C,$22
     jmp blit_tile
 .endproc
 
-; --- one wipe column: rows 2-19 become the room template. All room drawing is
-; SCREEN-anchored: fb x = screen x + scroll_s (the port's convention; the frozen
-; camera can leave the sub-scroll latched at 32 -- the pause-strip lesson) ---
-.proc l3e_wipe_col
+; --- the transform swirl: 4-quadrant 16x16 (tile $06 or $07 by phase) ---
+.proc l3e_swirl
+    jsr l3e_moth_blank_at_capt   ; wipe the previous swirl/captive image
+    lda e_ix
+    lsr
+    lsr
+    lsr
+    and #1
+    clc
+    adc #6                       ; tile $06 / $07
+    sta tmpH3
     lda scroll_s
     lsr
     lsr
     sta tmpL2
-    lda e_ix
-    asl
-    clc
-    adc tmpL2
-    cmp #47                      ; past the fb stride: nothing to draw
-    bcc :+
-    rts
-:   sta dcol
-    lda #2
-    sta tmpL3                    ; row
-@row:
-    lda tmpL3
-    asl
-    asl
-    asl
-    sta dy
-    lda tmpL3
-    cmp #4
-    bcc @checker_top
-    cmp #15
-    bcc @blank
-    ; bottom checker (rows 15-19): (row+col+1) parity
-    lda tmpL3
-    clc
-    adc e_ix
-    ina
-    bra @checker
-@checker_top:                    ; top checker: (row+col) parity
-    lda tmpL3
-    clc
-    adc e_ix
-@checker:
-    and #1
-    clc
-    adc #$8E
-    jsr get_tile_src
-    jsr set_dst
-    jsr blit_tile
-    bra @next
-@blank:
-    jsr set_dst
-    jsr blit_blank
-@next:
-    inc tmpL3
-    lda tmpL3
-    cmp #20                      ; rows 18-19: the SV playfield is 16px taller than
-    bcc @row                     ; the GB's -- the floor band runs to the bottom
-    rts
-.endproc
-
-; --- the captive: 2x2 OBJ tiles $49/$4E/$51/$50, each x-flipped (captured OAM) ---
-.proc l3e_captive
     stz spr_subx
-    lda #1
-    sta do_flip
-    lda scroll_s
-    lsr
-    lsr
-    sta tmpL2                    ; screen-anchor
     ldy #0
 @q: phy
     lda @cols,y
@@ -2069,8 +2043,17 @@ l3e_txt2: .byte $18,$11,$28,$2C,$0D,$0A,$12,$1C,$22
     sta dcol
     lda @rows,y
     sta dy
-    ldx @tiles,y
+    lda @flips,y
+    sta do_flip
+    ldx tmpH3
+    tya
+    and #2                       ; bottom quadrants blit bottom-up (y-mirror)
+    bne @yf
     jsr draw_quad
+    bra @nx
+@yf:
+    jsr draw_tile_yflip
+@nx:
     ply
     iny
     cpy #4
@@ -2079,8 +2062,22 @@ l3e_txt2: .byte $18,$11,$28,$2C,$0D,$0A,$12,$1C,$22
     rts
 @cols:  .byte CAPT_X/4, CAPT_X/4+2, CAPT_X/4, CAPT_X/4+2
 @rows:  .byte CAPT_Y, CAPT_Y, CAPT_Y+8, CAPT_Y+8
-@tiles: .byte $49, $4E, $51, $50
+@flips: .byte 0, 1, 0, 1
 .endproc
+
+.proc l3e_moth_blank_at_capt     ; 2-row blank box at the captive/swirl home
+    lda scroll_s
+    lsr
+    lsr
+    clc
+    adc #CAPT_X/4
+    sta dcol
+    lda #CAPT_Y
+    sta dy
+    ldx #2
+    jmp l3e_box
+.endproc
+
 
 .segment "CODE"                  ; generic helpers: FIXED has slack, the overlay
                                  ; window is the tight one
@@ -2209,6 +2206,7 @@ l3e_txt2: .byte $18,$11,$28,$2C,$0D,$0A,$12,$1C,$22
 :   jmp draw_quad
 .endproc
 
+.segment "L13E"
 ; the rescue scene's own OBJ overlay tiles (GB loads them at $8A00 during the
 ; ending; the W1 sheet has different graphics at those indices): the MOTH.
 moth_tiles: .incbin "../build/gfx/moth.svt"
@@ -2232,7 +2230,7 @@ moth_tiles: .incbin "../build/gfx/moth.svt"
     stz blit_opaque
     jmp sprite_blit_subpx
 .endproc
-.segment "L13E"
+.segment "CODE"
 
 .proc l3e_mario_draw             ; blank-erase + draw at the current walk pos
     lda prev_col
@@ -8073,7 +8071,7 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
 @notsq:
     cpy #OBJ_BOOM
     bne :+
-    lda #3
+    lda #$83                     ; 16x16 four-quadrant cloud: wide + tall erase
 :   cpy #OBJ_NOKO
     bne :+
     lda #$82
@@ -8516,20 +8514,40 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     ldx #BOOM_TB
 :   phx
     stz do_flip
-    jsr draw_quad                ; left half
-    ldx oi
-    lda o_y,x
-    clc
-    adc #8
-    sta dy
+    jsr draw_quad                ; TL
     lda spr_col
     ina
     ina
-    sta dcol                     ; right half = the same tile X-mirrored, 8px right
+    sta dcol                     ; TR = the same tile X-mirrored, 8px right
     lda #1
     sta do_flip
     plx
+    phx
     jsr draw_quad
+    ldx oi                       ; the GB cloud is FOUR mirrored quadrants (16x16,
+    lda o_y,x                    ; captured OAM attrs 0/$20/$40/$60) -- the port
+    clc                          ; drew only the top row ("half sphere", user x3)
+    adc #16
+    cmp #152
+    bcs @boomdone                ; bottom clip at the screen edge
+    sta dy
+    lda spr_col
+    sta dcol
+    stz do_flip
+    plx
+    phx
+    jsr draw_tile_yflip          ; BL = y-mirror
+    lda spr_col
+    ina
+    ina
+    sta dcol
+    lda #1
+    sta do_flip
+    plx
+    phx
+    jsr draw_tile_yflip          ; BR = xy-mirror
+@boomdone:
+    plx
     stz do_flip
     rts
 @fly:
@@ -10168,7 +10186,7 @@ l3_updtab:
     lda o_hp,x
     cmp #5                       ; 5 hits (user-verified; GB: 800 gao + 2000 boss = 2800)
     bcs @die
-    lda #SFX_DFE0_03             ; the hit chirp
+    lda #SFX_DFE0_06             ; the hit sound (captured: $dfe0=$06 per hit)
     jsr sfx_play
     bra @ball
 @die:

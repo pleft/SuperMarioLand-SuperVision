@@ -159,3 +159,34 @@ of bug sails through every visual check.
    (8 tiles) and the port draws the moth from that sheet via l3e_mothtile.
    The composite is PAIR-SWAPPED mirrored (left = the higher tile index,
    each x-flipped), per the captured OAM.
+
+## Polish round 3 (2026-07-19): the transition is a SCROLL + the missed windows
+
+Re-examining the GB FILM (not just BG-map diffs) shows states $22/$23 are a
+CAMERA SCROLL: ~222px at 1px/f rolling the arena out and the room in from the
+right, Mario walking THROUGHOUT (he never exits), the captive entering with
+the room. The port now drives the transition through the engine's own
+scroller: cam_max/fbmax_col extended 224px (ends 0 mod 32 so the room lands
+at scroll_s=0), read_map_tile's past-edge branch serves the room template
+(checker rows 0-1 / sky $2C -- NOT tile 0, the '0' glyph! -- / floor 13+),
+the streaming+shifts do the rest, and the captive is drawn ONCE into the fb
+when her columns have streamed (the DMA shifts then carry her image,
+pixel-exact, no redraws). Mario drifts to his mark (60; GB 61).
+
+Also from the newly captured windows:
+- The EXPLOSION is the GB's full 16x16 FOUR-QUADRANT cloud (attrs 0/$20/$40/
+  $60) -- the port drew only the top mirrored pair ("half sphere"; this also
+  finally un-parks the old Nokobon explosion nuance). o_pw -> $83.
+- The superball hit sound is $dfe0=$06 (captured; was the wrong chirp id).
+- The captive->moth TRANSFORM (state $25 tail, a window never OAM-logged
+  before): a 16x16 four-quadrant SWIRL of tiles $06/$07 alternating every 8f
+  for ~60f with the three thumps inside it, THEN the moth. Ported as
+  l3e_swirl.
+
+LESSON (why these were missed): verification only covered the instrumented
+windows -- OAM was logged from $26 on (the transform lives in $25's tail),
+the film was read as BG-diff columns (which cannot distinguish a wipe from a
+scroll), and the port's existing boom renderer was trusted against a capture
+that showed four quadrants. The rule going forward: for any cutscene, film
+EVERY state at full rate AND diff the port's own film against the GB's,
+state by state, before shipping.

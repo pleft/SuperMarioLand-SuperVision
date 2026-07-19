@@ -25,6 +25,18 @@ Newest entries at the top. Every entry should be traceable to ROM bytes/code.
 rendering/perf rounds, blocks/powerups, enemies, goal+bonus game, death/title,
 audio phase. See docs/22 + docs/23 and the memory index.)
 
+## 2026-07-19 (night 3) — ending polish 3: the transition is a SCROLL
+The GB $22/$23 "wipe" is actually a 222px camera scroll (the film, not the
+BG diffs, shows it): the port now rides its own scroller — cam_max/fbmax
+extended 224px, read_map_tile serves the room template past the map edge,
+the captive is drawn once and carried by the DMA shifts, Mario walks through
+the whole transition to his GB mark. Also captured-and-fixed: the explosion
+is the FULL 16x16 four-quadrant cloud (was the top half — un-parks the old
+Nokobon nuance too), the superball-hit sound is $dfe0=$06, and the
+captive->moth transform is a $06/$07 four-quadrant swirl (~60f, thumps
+inside) that lived in state $25's tail — a window the earlier OAM logging
+never covered. docs/25 has the full account + the process lesson.
+
 ## 2026-07-19 (night 2) — ending polish 2: rope offset, captive, bursts, THE MOTH
 Four more user-caught: rope rows were BG-row values (world rows 6-9, +2 HUD
 offset) so the wall under the gate got holes; Mario's walk-in stop (68)
