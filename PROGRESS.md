@@ -28,6 +28,16 @@ Newest entries at the top. Every entry should be traceable to ROM bytes/code.
 rendering/perf rounds, blocks/powerups, enemies, goal+bonus game, death/title,
 audio phase. See docs/22 + docs/23 and the memory index.)
 
+## 2026-07-20 — post-close fix: the superball kill left boss remains
+User-caught: l3_boss_hit still morphed the dying boss's slot into the cloud
+IN PLACE — the same bug class fixed for the tally burst, at a second site.
+Both sites now share boom_swap (free the victim so the pipeline erases his
+full 24px rect; the cloud spawns via find_free_evict at his center).
+Sim: 5 point-blank balls -> hp 1..5, burst, +5000, area spotless after the
+cloud. (Test lesson: a ball fired from across the arena gets trapped
+bouncing in the upper wall pocket at x2225-2285 and never reaches him —
+fire close, like a real player.)
+
 ## 2026-07-19 — WORLD 1-3 CLOSED: user verdict "perfect!" (thru bc4ad37)
 
 ## 2026-07-19 (night 6) — ending polish 6: real gravity + the fight flicker

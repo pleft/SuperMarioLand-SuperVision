@@ -1741,6 +1741,36 @@ MARIO_INX = 60                   ; Mario's walk-in stop (GB 61; he must not
 .endproc
 
 ; --- every live L3 enemy bursts into the explosion cloud at the tally start ---
+; boom_swap: X = victim slot, tmpH3 = cloud y. Free the victim (the pipeline
+; erases the DEAD object's full drawn rect, tall included) and spawn the 44f
+; cloud in a FRESH slot at his spot -- morphing in place leaves any body taller
+; than the cloud's erase envelope on screen (tally burst + boss kill, both
+; user-caught).
+.proc boom_swap
+    lda o_xl,x
+    sta tmpL2
+    lda o_xh,x
+    sta tmpH2
+    stz o_type,x
+    phx
+    jsr find_free_evict
+    bcs @none
+    lda #OBJ_BOOM
+    sta o_type,x
+    lda tmpL2
+    sta o_xl,x
+    lda tmpH2
+    sta o_xh,x
+    lda tmpH3
+    sta o_y,x
+    lda #BOOM_LIFE
+    sta o_tmr,x
+    stz o_st,x
+@none:
+    plx
+    rts
+.endproc
+
 .proc l3e_boom
     ldx #OBJ_MAX-1
     stz tmpL3                    ; any found?
@@ -1751,45 +1781,27 @@ MARIO_INX = 60                   ; Mario's walk-in stop (GB 61; he must not
     bcs @next
     cmp #OBJ_BAT
     php                          ; (Z = it's the tall boss)
-    lda o_xl,x                   ; remember the victim's spot
-    sta tmpL2
-    lda o_xh,x
-    sta tmpH2
     lda o_y,x
     plp
     bne :+
     clc                          ; head-anchored 24px boss: center the cloud
     adc #8
 :   sta tmpH3
-    stz o_type,x                 ; free the slot: the render pipeline erases the
-    inc tmpL3                    ; DEAD object's full drawn rect (tall included)
-    lda tmpL2                    ; screen x = o_x - cam: clouds only for slots ON
+    inc tmpL3
+    lda o_xl,x                   ; screen x = o_x - cam: clouds only for slots ON
     sec                          ; SCREEN -- an off-screen-left leftover drew a
     sbc cam_x                    ; half cloud at the edge (user-caught)
     sta tmpL2
-    lda tmpH2
+    lda o_xh,x
     sbc cam_x+1
-    bne @nofree0
+    bne @off
     lda tmpL2
     cmp #160
-    bcs @nofree0
-    phx
-    jsr find_free_evict          ; the cloud gets its own slot
-    bcs @nofree
-    lda #OBJ_BOOM
-    sta o_type,x
-    lda tmpL2
-    sta o_xl,x
-    lda tmpH2
-    sta o_xh,x
-    lda tmpH3
-    sta o_y,x
-    lda #44                      ; the standard 44f cloud
-    sta o_tmr,x
-    stz o_st,x
-@nofree:
-    plx
-@nofree0:
+    bcs @off
+    jsr boom_swap
+    bra @next
+@off:
+    stz o_type,x                 ; off-screen: just free (pipeline-erased if drawn)
 @next:
     dex
     bpl @l
@@ -10208,10 +10220,11 @@ l3_updtab:
     lda #SFX_DFF8_01             ; the burst (the $4F chain's F9 01)
     jsr sfx_play
     ldx oi2
-    lda #OBJ_BOOM
-    sta o_type,x
-    lda #BOOM_LIFE
-    sta o_tmr,x
+    lda o_y,x                    ; head-anchored 24px: center the cloud, and let
+    clc                          ; boom_swap free his slot so the full tall rect
+    adc #8                       ; erases (in-place morph left his lower body)
+    sta tmpH3
+    jsr boom_swap
     lda #$50                     ; 5000 (user-verified on GB)
     jsr award_kill
 @ball:
