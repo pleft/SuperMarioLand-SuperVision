@@ -28,6 +28,19 @@ Newest entries at the top. Every entry should be traceable to ROM bytes/code.
 rendering/perf rounds, blocks/powerups, enemies, goal+bonus game, death/title,
 audio phase. See docs/22 + docs/23 and the memory index.)
 
+## 2026-07-20 (3) — room mod-bit collision: the U-ring gaps + the "trap"
+User (GB screenshot): the 1-3 secret room's U-shaped brick ring is complete
+on first entry; the port showed 2 gaps in the bottom row — and big Mario
+wedged in a single-wide gap ("does not fit in 1 block space"). ROOT: the
+shared mod bitmap keys rooms at cols 0-19 = the SURFACE's first screen;
+early bonks/coins leaked into the room's bricks (transform -> blank). Fix:
+room cells key into a 40-byte tail of tile_mod (+640, room_mode branch in
+mod_ptr), CLEARED at enter_room — GB rooms are fresh each visit. Verified
+with all surface mods polluted: ring complete; and the intended flow works
+end-to-end (big Mario breaks 2 adjacent bottom bricks from below, jumps up
+through the 16px hole, collects, drops back out). The "trap" was the
+leak-gaps wedging him; an intact box is inescapable on the GB too.
+
 ## 2026-07-20 (2) — the 5000 tag rides the burst
 User: no 5000 on the boss kill. spawn_popup anchored EVERY popup at Mario
 (right for stomps — he's on top — wrong for a ranged ball kill: the GB film

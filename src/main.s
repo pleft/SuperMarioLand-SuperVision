@@ -230,7 +230,12 @@ block_tab:   .res 40         ; RAM copy: 4 bytes/block, up to 10 ?-block entries
 spawn_tab:   .res 384        ; RAM copy: 5 bytes/spawn + $FFFF sentinel
 revpix:      .res 256        ; reverse the 4 2bpp pixels in a byte (built at boot)
 flipbuf:     .res 16         ; row-reversed tile scratch for the Y-flipped corpse draw
-tile_mod:    .res 640        ; "modified" bitmap, 1 bit per surface (col,row): used ?-block / broken brick
+tile_mod:    .res 680        ; "modified" bitmap, 1 bit per (col,row): used ?-block / broken
+                             ; brick / taken coin. Cols 0-319 = the surface; the LAST 40
+                             ; bytes = the ROOM's 20 cols (offset +640): room keys collided
+                             ; with surface cols 0-19 (bonks/coins leaked into room bricks
+                             ; -- the U-ring gaps, user-caught). Cleared at room entry: GB
+                             ; rooms are FRESH each visit.
 ; --- object slots (items / coin-pop / brick debris / enemies). SoA, 10 entries like the
 ;     GB ($D100-$D190): 1-2's goal area runs 2 bees + 4 arrows + platform + 2 stones. ---
 OBJ_MAX = 10
@@ -667,7 +672,14 @@ main_loop:
     bne @nolo
     inc map_ptr+1
 @nolo:
-    lda map_ptr
+    lda room_mode                ; room cells key at +640 (their own 40-byte tail)
+    beq :+
+    lda map_ptr                  ; col < 20 -> col*2+bit < 64: +$80 never carries
+    ora #$80
+    sta map_ptr
+    inc map_ptr+1
+    inc map_ptr+1
+:   lda map_ptr
     clc
     adc #<tile_mod
     sta map_ptr
@@ -2227,13 +2239,6 @@ l3e_txt2: .byte $18,$11,$28,$2C,$0D,$0A,$12,$1C,$22
 .endproc
 
 .segment "CODE"
-.proc l3e_quad_clip              ; draw_quad unless the 3-byte blit row would
-    lda dcol                     ; run past the fb stride (s=32 right edge)
-    cmp #46
-    bcc :+
-    rts
-:   jmp draw_quad
-.endproc
 
 .segment "L13E"
 ; the rescue scene's own OBJ overlay tiles (GB loads them at $8A00 during the
@@ -3559,6 +3564,11 @@ NUM_LEVELS = 3
 ; (The surface state was saved when the sink animation began, in pipe_check.)
 .proc enter_room
     pha
+    ldx #39                      ; fresh room state every entry (GB reloads the room)
+    lda #0
+:   sta tile_mod+640,x
+    dex
+    bpl :-
     lda #1
     sta room_mode
     pla
