@@ -2288,27 +2288,11 @@ moth_tiles: .incbin "../build/gfx/moth.svt"
 .import __L13E_SIZE__
 .assert __L13E_SIZE__ <= $7C0, error, "L13E overlay exceeds the RAM window"
 .proc l3e_room_copy
-    lda #(1 << 5) | (SYSCTRL_NMI_EN | SYSCTRL_TIMER_IRQ)
-    sta SYS_CTRL
     lda #<(__TITLE0_LOAD__+__L11CODE_SIZE__)
     sta lvl_ptr
     lda #>(__TITLE0_LOAD__+__L11CODE_SIZE__)
     sta lvl_ptr+1
-    lda #$15
-    sta tmpH2
-    stz tmpL2
-    ldx #8
-@pg:
-    ldy #0
-:   lda (lvl_ptr),y
-    sta (tmpL2),y
-    iny
-    bne :-
-    inc lvl_ptr+1
-    inc tmpH2
-    dex
-    bne @pg
-    rts
+    jmp copy_overlay
 .endproc
 
 ; ---------------------------------------------------------------------------
@@ -2328,12 +2312,14 @@ moth_tiles: .incbin "../build/gfx/moth.svt"
 ; placed there by the packer) into the shared overlay RAM at $1500. The next
 ; load_level restores whichever overlay the next level needs.
 .proc bonus_enter_copy
-    lda #(1 << 5) | (SYSCTRL_NMI_EN | SYSCTRL_TIMER_IRQ)
-    sta SYS_CTRL
     lda #<__TITLE0_LOAD__
     sta lvl_ptr
     lda #>__TITLE0_LOAD__
     sta lvl_ptr+1
+.endproc                         ; fall through
+.proc copy_overlay               ; bank 1 -> 8 pages from (lvl_ptr) to $1500
+    lda #(1 << 5) | (SYSCTRL_NMI_EN | SYSCTRL_TIMER_IRQ)
+    sta SYS_CTRL
     lda #$15
     sta tmpH2
     stz tmpL2
@@ -5172,28 +5158,40 @@ STAR_ARC_N = 42
 
 ; --- floating score popup ("1000"/"1UP") --- RE bank2 $5892/$59a5: 2 glyph sprites at the
 ; pickup point, rising 1px every 2 frames, 32 ticks (= 64 frames) then gone.
-.proc spawn_popup                ; A = left glyph tile, Y = right glyph tile
+.proc mario_anchor               ; tmpL2/H2 = Mario world x, tmpH3 = his y
+    lda cam_x                    ; (original: $ffeb = $c202 + $fc, $ffec = $c201 - $10)
+    clc
+    adc spr_x
+    sta tmpL2
+    lda cam_x+1
+    adc #0
+    sta tmpH2
+    lda spr_y
+    sta tmpH3
+    rts
+.endproc
+
+.proc spawn_popup                ; A = left glyph tile, Y = right glyph tile, at MARIO
     sta tmpL
     sty tmpH
+    jsr mario_anchor
+    bra go
+at:                              ; ...or at tmpL2/H2 (world x) + tmpH3 (y):
+    sta tmpL                     ; the BALL-KILL tag rides the VICTIM (GB film:
+    sty tmpH                     ; "5000" above the boss's burst, Mario at range)
+go:
     jsr find_free_obj
     bcs @full
     lda #OBJ_POPUP
     sta o_type,x
-    lda cam_x                    ; x = Mario world X - 4 (original: $ffeb = $c202 + $fc)
-    clc
-    adc spr_x
-    sta o_xl,x
-    lda cam_x+1
-    adc #0
-    sta o_xh,x
-    lda o_xl,x
+    lda tmpL2
     sec
     sbc #4
     sta o_xl,x
-    lda o_xh,x
+    lda tmpH2
     sbc #0
     sta o_xh,x
-    lda spr_y                    ; y = Mario Y - 16 (original: $ffec = $c201 - $10)
+    lda tmpH3
     sec
     sbc #16
     sta o_y,x
@@ -5206,6 +5204,7 @@ STAR_ARC_N = 42
 @full:
     rts
 .endproc
+spawn_popup_at = spawn_popup::at
 
 .proc upd_popup
     lda frame_count              ; 1px up every 2nd frame (slot-staggered so several
@@ -6481,7 +6480,12 @@ fly_dy:
     bne :-
     ; fall through
 .endproc
-.proc award_kill
+.proc award_kill                 ; popup at Mario (the pre-boss callers)
+    pha
+    jsr mario_anchor
+    pla
+.endproc                         ; fall through
+.proc award_kill_at              ; popup at tmpL2/H2/tmpH3 (the victim)
     pha
     tax                          ; add the code as BCD hundreds (the original's amount
     lda #$00                     ; chain is literally D=code, E=00)
@@ -6511,7 +6515,7 @@ fly_dy:
     ldx #$5D
 @have:
     txa
-    jmp spawn_popup              ; A = left tile, Y = right tile
+    jmp spawn_popup_at           ; A = left tile, Y = right tile
 .endproc
 
 ; hurt_mario: shared side-contact/explosion damage (RE: big -> shrink flash + powers
@@ -10224,9 +10228,9 @@ l3_updtab:
     clc                          ; boom_swap free his slot so the full tall rect
     adc #8                       ; erases (in-place morph left his lower body)
     sta tmpH3
-    jsr boom_swap
-    lda #$50                     ; 5000 (user-verified on GB)
-    jsr award_kill
+    jsr boom_swap                ; leaves tmpL2/H2/tmpH3 = his spot: the 5000
+    lda #$50                     ; tag rides the burst, not Mario (GB film)
+    jsr award_kill_at
 @ball:
     ldx oi
     stz o_type,x                 ; the ball expires against him

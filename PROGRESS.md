@@ -28,6 +28,15 @@ Newest entries at the top. Every entry should be traceable to ROM bytes/code.
 rendering/perf rounds, blocks/powerups, enemies, goal+bonus game, death/title,
 audio phase. See docs/22 + docs/23 and the memory index.)
 
+## 2026-07-20 (2) — the 5000 tag rides the burst
+User: no 5000 on the boss kill. spawn_popup anchored EVERY popup at Mario
+(right for stomps — he's on top — wrong for a ranged ball kill: the GB film
+shows the tag above the victim's burst). spawn_popup grew a second entry
+(spawn_popup_at: coords in tmpL2/H2/tmpH3) and award_kill_at feeds it the
+boss's spot straight from boom_swap. Space came from merging the two
+identical 8-page overlay-copy loops (bonus_enter_copy/l3e_room_copy ->
+copy_overlay). Sim: tag at 2332 vs boss 2336, riding the cloud.
+
 ## 2026-07-20 — post-close fix: the superball kill left boss remains
 User-caught: l3_boss_hit still morphed the dying boss's slot into the cloud
 IN PLACE — the same bug class fixed for the tally burst, at a second site.
