@@ -28,6 +28,17 @@ Newest entries at the top. Every entry should be traceable to ROM bytes/code.
 rendering/perf rounds, blocks/powerups, enemies, goal+bonus game, death/title,
 audio phase. See docs/22 + docs/23 and the memory index.)
 
+## 2026-07-21 (2) — the one-block bridging bug (all levels, user x2)
+Big Mario stood bridged over 1-block holes everywhere (and wedged in the
+secret room's broken-brick gap earlier): the foot probes at +4/+12 span
+EXACTLY 8px, so both feet could never fit inside an 8px hole — bridging was
+geometrically guaranteed. Probes narrowed to +5/+10 (span 5): a centered
+1-block hole now swallows him like the GB, while ledge-edge hangs (the
+original pillar case) still stand. Sim: falls through the col-206 hole in
+1-3 (y 39->48 descending); stomp + full 1-3 ending walk (incl. the bridge
+run-cross) green. WATCH on hardware: the collapsing-bridge walk-falls
+calibration (plat slop untouched, but the map-tile handoff shifted ~1px).
+
 ## 2026-07-21 — the user was RIGHT: the flower IS ball-killable (RE corrected)
 I had "settled" the pipe flower as superball-immune from the $3186 table plus
 a teleport-harness test — the user pushed back hard, and their control case

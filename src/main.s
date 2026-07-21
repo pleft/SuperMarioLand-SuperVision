@@ -1057,12 +1057,12 @@ main_loop:
     sta mrow
     jsr read_solid                ; centre probe (feet_col set at entry, +8)
     bne @sup
-    lda #4                        ; GB probes TWO foot points: the left foot...
-    jsr calc_feet_col
-    jsr read_solid
-    bne @sup
-    lda #12                       ; ...and the right (body mostly over a ledge
-    jsr calc_feet_col             ; = supported; user-caught at the pillar edge)
+    lda #5                        ; two foot points, SPAN 5px: wide enough to hang
+    jsr calc_feet_col             ; over ledge edges (the pillar case), NARROWER
+    jsr read_solid                ; than a tile so a 1-block hole swallows him
+    bne @sup                      ; when centred -- he must NOT bridge one (the
+    lda #10                       ; +4/+12 span was exactly 8: bridging was
+    jsr calc_feet_col             ; geometrically GUARANTEED; user x2)
     jsr read_solid
     beq @unsup                    ; nothing under either foot -> fall
 @sup:
@@ -1209,11 +1209,11 @@ main_loop:
     sta mrow
     jsr read_solid                ; centre...
     bne @snap
-    lda #4                        ; ...then both feet (edge landings, GB-lenient)
-    jsr calc_feet_col
-    jsr read_solid
+    lda #5                        ; ...then both feet (edge landings; span 5 so a
+    jsr calc_feet_col             ; 1-block hole is NOT bridged -- see the walk
+    jsr read_solid                ; support probe)
     bne @snap
-    lda #12
+    lda #10
     jsr calc_feet_col
     jsr read_solid
     beq @done                     ; no ground -> keep falling
