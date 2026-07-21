@@ -28,6 +28,25 @@ Newest entries at the top. Every entry should be traceable to ROM bytes/code.
 rendering/perf rounds, blocks/powerups, enemies, goal+bonus game, death/title,
 audio phase. See docs/22 + docs/23 and the memory index.)
 
+## 2026-07-21 — the user was RIGHT: the flower IS ball-killable (RE corrected)
+I had "settled" the pipe flower as superball-immune from the $3186 table plus
+a teleport-harness test — the user pushed back hard, and their control case
+(Totomesu, table ball=$00 yet 5-hit killable on hardware) broke my harness's
+authority. The REAL system (Call_000_200a/$2a68, disasm-read at last):
+ball-vs-slot collision per ball per move; slot byte +$0A bit7 = ball-immune
+(low bits = hitbox code, ball box 4x3px); slot byte +$0C&$3F = HP (init from
+phys byte2 — Totomesu $C4 -> 4 absorbed clinks ($dff0=1! the mailbox we had
+"unhooked") + the killing 5th = the user's exact count); at HP 0 the morph
+target is table column +3 (we had it labeled "star"): $00 = no effect, $FF =
+despawn (the FLOWER: instant silent kill, +100 class 0 — wiki: upward 100 /
+downward 400). Port: OBJ_SUU added to ball_hits (gated on poking out, +100
+tag at the pipe via award_kill_at); Totomesu's hit sound corrected to
+SFX_DFF0_01. Sim: flower dies to a close-range ball (+100 tag at x=208);
+boss 5-hit + burst + tag intact; ending/stomp regressions identical. docs/12
+carries the full corrected RE + the harness lesson (a teleported ball can
+miss type-specific hitbox windows — natural repro or code-read before
+declaring immunity).
+
 ## 2026-07-20 (3) — room mod-bit collision: the U-ring gaps + the "trap"
 User (GB screenshot): the 1-3 secret room's U-shaped brick ring is complete
 on first entry; the port showed 2 gaps in the bottom row — and big Mario

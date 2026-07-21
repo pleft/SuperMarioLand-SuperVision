@@ -360,3 +360,37 @@ edges his body still covered.
   and the original. Port: l3_water re-blits visible $5D cells (rows 4-6, max 3
   on screen) with a build-time alt tile (water_alt.svt) on the same 8f cadence;
   cells under a drawn sprite skip a tick (sprite-erase safety).
+
+## RE CORRECTION: the superball-vs-object system (2026-07-21, disasm-verified)
+
+The old reading of the $3186 contact table ("+1 ball morph, +3 star morph") was
+WRONG, discovered when the user proved the pipe flower dies to a superball
+(port had it immune). The REAL system, from Call_000_200a / Call_000_2a68:
+
+- **Call_000_200a** (called per live ball right after its move, $1F92): loops
+  the 10 slots. Skip if slot byte **+$0A bit7** set (ball-immune flag; low
+  bits = the hitbox code fed to the overlap test $0AAF). Ball box = tiny
+  **4x3 px** ([x..x+4] x [y..y+3]) — why sim balls whiff so easily.
+- **Call_000_2a68** (on overlap): slot byte **+$0C & $3F = HP**. HP>0: DEC,
+  and for types **$08/$32** play **$dff0=1** (the hit clink — the mailbox we
+  had mislabeled "wave effect, UNHOOKED"); ball expires, no kill. HP==0:
+  morph target = **$3186 row +3** (the column we mislabeled "star"): $00 =
+  ball passes with NO effect (ret), **$FF = despawn**, else morph to that
+  type + Call_000_2cbb (re-init the slot's phys bytes for the new type).
+- Slot byte $0C inits from **phys byte2** ($3375): Totomesu $C4 -> HP 4 =
+  four absorbed clinks + the killing 5th ball = the user's hardware count,
+  EXACTLY. Gao $80 -> HP 0, morph $41 = one-ball corpse. Flower $00 -> HP 0,
+  morph $FF = one-ball silent despawn (+100, class 0) — wiki: upward Piranha
+  100, downward (W2+) 400.
+- The ball engine: spawn $4A0C on **$ff81 & 3 (A OR B pressed)**, gated on
+  $ffb5 (the superball FORM flag — $ff99=2 just means BIG); THREE ball slots
+  in state $0D (the demo/special mode) vs one in play; data $c000 [y,x,tile,
+  attr] (the OAM shadow head), list $ffa9 ($09/$0A = direction+bounce bits),
+  lifetime $c0a9=$FF, despawn at y >= $A2; mover $1F2D, tile test $1FD2
+  ($F4 coins collect +100 with a popup at the cell, $ffed=$c0).
+
+PORT: flower ball-kill shipped (poking-out gate = o_y < o_vy, silent despawn,
++100 tag at the pipe via award_kill_at); Totomesu hit sound corrected to
+SFX_DFF0_01. LESSON (harness): a teleported $c000 ball can miss type-specific
+hitbox windows — calibrate against a known-killable type AND treat "no effect"
+as unproven until a NATURAL hit reproduces or the code path is read.

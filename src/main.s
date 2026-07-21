@@ -1545,15 +1545,14 @@ E_BEAT1   = 1                    ; 71f  (GB $1C 7f + $1D 64f)
 E_ROPE    = 2                    ; 4 rope tiles bottom-up, one per 8f, SFX $0B
 E_BEAT2   = 3                    ; 47f  (GB $20)
 E_WALKOUT = 4                    ; Mario auto-walks right to the edge (GB $21)
-E_WIPE    = 5                    ; 24 cols x 8f; MUS_RESCUE (GB $22/$23, track $0F)
-E_SETTLE  = 6                    ; 60f; the captive appears
-E_WALKIN  = 7                    ; Mario re-enters 8->68 @1px/f; text types with him
-E_TEXT1   = 8                    ; "THANK YOU MARIO." 1 char/16f (GB $24)
-E_TEXT2   = 9                    ; "OH! DAISY" (GB $24 tail/$25)
-E_JINGLE  = 10                   ; MUS_REVEAL + 64f (GB $25, track $12)
-E_PUFF    = 11                   ; 3 thumps 16f apart, then the sprite swap
-E_FLY     = 12                   ; moth rest/hop arcs rightward until off-screen
-E_OUT     = 13                   ; short hold, then the bonus game
+E_WIPE    = 5                    ; first room-machine phase (the scroll ends here)
+E_WALKIN  = 5                    ; Mario re-enters 8->68 @1px/f; text types with him
+E_TEXT1   = 6                    ; "THANK YOU MARIO." 1 char/16f (GB $24)
+E_TEXT2   = 7                    ; "OH! DAISY" (GB $24 tail/$25)
+E_JINGLE  = 8                    ; MUS_REVEAL + 64f (GB $25, track $12)
+E_PUFF    = 9                    ; 3 thumps 16f apart, then the sprite swap
+E_FLY     = 10                   ; moth rest/hop arcs rightward until off-screen
+E_OUT     = 11                   ; short hold, then the bonus game
 
 CAPT_X    = 80                   ; the captive/moth home (screen px; film-measured)
 CAPT_Y    = 104
@@ -1565,13 +1564,11 @@ MARIO_INX = 60                   ; Mario's walk-in stop (GB 61; he must not
     cmp #E_WIPE
     bcc :+
     jmp l3e_room                 ; the room machine owns everything from here
-:   cmp #E_BEAT1
-    beq @beat
-    cmp #E_ROPE
+:   cmp #E_ROPE
     bne :+
     jmp @rope
-:   cmp #E_BEAT2
-    beq @beat
+:   cmp #E_WALKOUT
+    bne @beat                    ; phases 1/3 = the beats; 4 falls through = the scroll
     ; --- E_SCROLL (id E_WALKOUT): the camera itself rolls 224px right at 1px/f;
     ; the engine streams the room template in (read_map_tile's past-edge branch)
     ; while Mario keeps walking, drifting to his mark. GB $22/$23 exactly. ---
@@ -1677,11 +1674,8 @@ MARIO_INX = 60                   ; Mario's walk-in stop (GB 61; he must not
 ; --- the rope: world col 298, rows 11,10,9,8 bottom-up; the cell is BLANKED
 ; on screen and MOD-marked so any later map-driven redraw keeps it blank ---
 .proc l3e_rope_tile
-    lda #<298
-    sec
-    sbc fb_col0
-    asl                          ; dcol = (298 - fb_col0) * 2
-    sta dcol
+    lda #44                      ; deterministic: the rope opens at the PINNED end
+    sta dcol                     ; (cam 2240, fb_col0 276) -> (298-276)*2 = 44
     ldx e_ix
     lda @rows,x
     sta mrow                     ; mod_set is (feet_col, mrow)-keyed
@@ -1718,23 +1712,16 @@ MARIO_INX = 60                   ; Mario's walk-in stop (GB 61; he must not
 ; (2544 = final screen x 80): after this the DMA shifts carry her image with
 ; the scrolling world, pixel-exact, with no per-frame redraws.
 .proc l3e_captive_scroll
-    lda fb_col0                  ; base byte col = (2544 - fb_col0*8) / 4
-    asl                          ;   = 636 - fb_col0*2  (fits a byte here)
-    sta tmpL2
-    lda fb_col0+1
-    rol
-    sta tmpH2
-    lda #<636
-    sec
-    sbc tmpL2
-    sta tmpL2                    ; (high byte is zero in the trigger window)
-    ldy #0
+    ldy #0                       ; trigger geometry is deterministic: cam==2392,
+                                 ; fb_col0=296 -> her byte col = 636-592 = 44
 @q: phy
-    lda @cols,y
+    lda quad_cols,y
     clc
-    adc tmpL2
+    adc #44
     sta dcol
-    lda @rows,y
+    lda quad_rows,y
+    clc
+    adc #CAPT_Y
     sta dy
     stz spr_subx
     lda #1
@@ -1747,10 +1734,10 @@ MARIO_INX = 60                   ; Mario's walk-in stop (GB 61; he must not
     bne @q
     stz do_flip
     rts
-@cols:  .byte 0, 2, 0, 2
-@rows:  .byte CAPT_Y, CAPT_Y, CAPT_Y+8, CAPT_Y+8
 @tiles: .byte $49, $4E, $51, $50
 .endproc
+quad_cols: .byte 0, 2, 0, 2      ; shared 2x2 metasprite quadrant offsets
+quad_rows: .byte 0, 0, 8, 8
 
 ; --- every live L3 enemy bursts into the explosion cloud at the tally start ---
 ; boom_swap: X = victim slot, tmpH3 = cloud y. Free the victim (the pipeline
@@ -1840,7 +1827,7 @@ MARIO_INX = 60                   ; Mario's walk-in stop (GB 61; he must not
     pha
     rts                          ; rts-dispatch
 @tab:
-    .word @rts-1, @rts-1, @walkin-1, @text1-1, @text2-1
+    .word @walkin-1, @text1-1, @text2-1
     .word @jingle-1, @puff-1, l3e_fly-1, @out-1
 @out:
     ; --- E_OUT ---
@@ -2078,11 +2065,14 @@ l3e_txt2: .byte $18,$11,$28,$2C,$0D,$0A,$12,$1C,$22
     stz spr_subx
     ldy #0
 @q: phy
-    lda @cols,y
+    lda quad_cols,y
     clc
+    adc #CAPT_X/4
     adc tmpL2
     sta dcol
-    lda @rows,y
+    lda quad_rows,y
+    clc
+    adc #CAPT_Y
     sta dy
     lda @flips,y
     sta do_flip
@@ -2101,8 +2091,6 @@ l3e_txt2: .byte $18,$11,$28,$2C,$0D,$0A,$12,$1C,$22
     bne @q
     stz do_flip
     rts
-@cols:  .byte CAPT_X/4, CAPT_X/4+2, CAPT_X/4, CAPT_X/4+2
-@rows:  .byte CAPT_Y, CAPT_Y, CAPT_Y+8, CAPT_Y+8
 @flips: .byte 0, 1, 0, 1
 .endproc
 
@@ -2215,11 +2203,11 @@ l3e_txt2: .byte $18,$11,$28,$2C,$0D,$0A,$12,$1C,$22
     clc
     adc tmpL2
     clc
-    adc @cofs,y
+    adc quad_cols,y
     sta dcol
     lda e_my
     clc
-    adc @rofs,y
+    adc quad_rows,y
     sta dy
     lda tmpL3                    ; sheet: [fly TL TR sit TL TR fly BL BR sit BL BR]
     clc                          ; order below composes the GB's PAIR-SWAPPED
@@ -2233,8 +2221,6 @@ l3e_txt2: .byte $18,$11,$28,$2C,$0D,$0A,$12,$1C,$22
     stz do_flip
     stz spr_subx
     rts
-@cofs: .byte 0, 2, 0, 2
-@rofs: .byte 0, 0, 8, 8
 @tofs: .byte 1, 0, 5, 4
 .endproc
 
@@ -5182,14 +5168,12 @@ STAR_ARC_N = 42
 .endproc
 
 .proc spawn_popup                ; A = left glyph tile, Y = right glyph tile, at MARIO
-    sta tmpL
-    sty tmpH
+    pha
     jsr mario_anchor
-    bra go
+    pla
 at:                              ; ...or at tmpL2/H2 (world x) + tmpH3 (y):
-    sta tmpL                     ; the BALL-KILL tag rides the VICTIM (GB film:
+    sta tmpL                     ; a KILL tag can ride the VICTIM instead (GB film:
     sty tmpH                     ; "5000" above the boss's burst, Mario at range)
-go:
     jsr find_free_obj
     bcs @full
     lda #OBJ_POPUP
@@ -6510,22 +6494,10 @@ fly_dy:
     lsr
     lsr
     lsr
-:   ldx #$59                     ; left tile by code: $01->$59 .. $08->$5D
-    cmp #$02
-    bcc @have
-    ldx #$5A
-    cmp #$04
-    bcc @have
-    ldx #$5B
-    cmp #$05
-    bcc @have
-    ldx #$5C
-    cmp #$08
-    bcc @have
-    ldx #$5D
-@have:
-    txa
+:   tax
+    lda @lt-1,x                  ; left tile by code: $01->$59 .. $08->$5D
     jmp spawn_popup_at           ; A = left tile, Y = right tile
+@lt: .byte $59,$5A,$5A,$5B,$5C,$5C,$5C,$5D
 .endproc
 
 ; hurt_mario: shared side-contact/explosion damage (RE: big -> shrink flash + powers
@@ -7242,6 +7214,8 @@ title_tiles:                     ; the used tiles, SV-packed
     beq :+
     cmp #OBJ_BAT                 ; Totomesu: 5-hit HP (user-verified on GB)
     beq :+
+    cmp #OBJ_SUU                 ; the pipe flower dies to the ball while POKING
+    beq :+                       ; OUT (user-proven + wiki; upward variety = 100)
     jmp @next
 :   ldy oi                       ; dx = |ball - enemy| (16-bit)
     lda o_xl,y
@@ -7264,7 +7238,7 @@ title_tiles:                     ; the used tiles, SV-packed
 @dxok:
     lda tmpL3
     cmp #10
-    bcs @next
+    bcs @next2b
     ldy oi                       ; dy
     lda o_y,y
     ldx oi2
@@ -7274,13 +7248,29 @@ title_tiles:                     ; the used tiles, SV-packed
     eor #$FF
     ina
 :   cmp #10
-    bcs @next
-    lda #$01                     ; value code: walkers 100
+    bcc :+
+@next2b:
+    jmp @next
+:   lda #$01                     ; value code: walkers 100
     sta tmpH2
     lda o_type,x
     cmp #OBJ_BAT
     bne :+
     jmp l3_boss_hit              ; X = the boss slot; the ball = oi
+:   cmp #OBJ_SUU
+    bne :+
+    lda o_y,x                    ; only while poking out of the pipe (retracted =
+    cmp o_vy,x                   ; head at the rim: the ball passes through)
+    bcs @next2b
+    sta tmpH3                    ; the +100 tag rises from the pipe (user's shot);
+    lda o_xl,x                   ; the kill is a morph to $FF = silent despawn
+    sta tmpL2                    ; (RE $2a68: HP 0 -> table+3 = $FF for type $02)
+    lda o_xh,x
+    sta tmpH2
+    stz o_type,x
+    lda #$01                     ; upward flower = 100 (class 0; wiki confirms)
+    jsr award_kill_at
+    bra @ballgone
 :   cmp #OBJ_GAO
     bne :+
     lda #1                       ; corpse thrown along Mario's facing
@@ -7291,6 +7281,7 @@ title_tiles:                     ; the used tiles, SV-packed
     jsr l3_gao_kill              ; thump + flipped corpse
     lda #$08                     ; class 2 = 800
     jsr award_kill
+@ballgone:
     ldx oi
     stz o_type,x                 ; the ball expires against it
     rts
@@ -10227,8 +10218,8 @@ l3_updtab:
     lda o_hp,x
     cmp #5                       ; 5 hits (user-verified; GB: 800 gao + 2000 boss = 2800)
     bcs @die
-    lda #SFX_DFE0_06             ; the hit sound (captured: $dfe0=$06 per hit)
-    jsr sfx_play
+    lda #SFX_DFF0_01             ; the hit sound (RE $2a68: HP>0 hits on types
+    jsr sfx_play                 ; $08/$32 play $dff0=1; HP = slot byte $0C & $3F)
     bra @ball
 @die:
     lda #SFX_DFF8_01             ; the burst (the $4F chain's F9 01)

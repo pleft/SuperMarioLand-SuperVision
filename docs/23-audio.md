@@ -39,7 +39,7 @@ time from the user's own ROM by `tools/extract_sfx.py` / `tools/extract_music.py
 | $dfe0 | $08 | 1UP | add_life_snd |
 | $dfe0 | $0A | goal-tally tick ($0CB6: fires when the ones bit0 is clear) | goal_seq @tally |
 | $dfe0 | $0B | item emerge from block | spawn_item_snd |
-| $dff0 | $01 | wave effect, not a 1-1 action | UNHOOKED (revisit multi-level) |
+| $dff0 | $01 | the superball HIT CLINK on an HP-absorbing type ($08 Totomesu/$32; RE $2a68) | l3_boss_hit hits 1-4 |
 | $dff8 | $01 | Nokobon explosion | upd_bomb |
 | $dff8 | $02 | brick smash (noise shards) | break_brick |
 | $dff8 | $03 | fly (Goombo) death | enemy_contact type 4 |
