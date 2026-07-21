@@ -426,6 +426,7 @@ main_loop:
     lda mario_big
     eor #1
     sta mario_big
+    sta mario_superball          ; big brings the superball; small drops it (GB rule)
 @nosizet:
     jsr pause_dingdong
     jmp main_loop
@@ -2105,18 +2106,15 @@ l3e_txt2: .byte $18,$11,$28,$2C,$0D,$0A,$12,$1C,$22
 
 .segment "CODE"                  ; generic helpers: FIXED has slack, the overlay
                                  ; window is the tight one
-.proc l3e_box                    ; blank an X-row x 3-cell box at (dcol, dy),
-@row:                            ; clipped at the fb stride
-    ldy #3
+.proc l3e_box                    ; blank an X-row x 3-cell box at (dcol, dy).
+@row:                            ; (No stride clip: post-de-anchor the callers'
+    ldy #3                       ; dcol tops out at 46.)
 @col:
     phx
     phy
-    lda dcol
-    cmp #47
-    bcs :+
     jsr set_dst
     jsr blit_blank
-:   ply
+    ply
     plx
     lda dcol
     clc
