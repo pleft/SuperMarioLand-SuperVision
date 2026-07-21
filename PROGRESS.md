@@ -28,6 +28,15 @@ Newest entries at the top. Every entry should be traceable to ROM bytes/code.
 rendering/perf rounds, blocks/powerups, enemies, goal+bonus game, death/title,
 audio phase. See docs/22 + docs/23 and the memory index.)
 
+## 2026-07-21 (3) — DEBUG: pause + Select toggles small/big Mario
+Playtest helper (user request): while PAUSED, Select flips mario_big — no
+more replaying half a level to test big-Mario geometry. Paid for by dropping
+the room machine's dead screen-anchoring (+scroll_s everywhere was wipe-era;
+the transition scroll ENDS at s=0 by design) and L3CODE reclaims (redundant
+mus_rate/ride at the sphere, a 1-byte bull squeeze). Banks now LITERALLY 0
+free in bank2 — nothing more ships before the 128K step. Toggle sim-verified;
+ending walk + stomp green.
+
 ## 2026-07-21 (2) — the one-block bridging bug (all levels, user x2)
 Big Mario stood bridged over 1-block holes everywhere (and wedged in the
 secret room's broken-brick gap earlier): the foot probes at +4/+12 span

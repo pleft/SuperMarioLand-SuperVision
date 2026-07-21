@@ -420,6 +420,13 @@ main_loop:
 @nopause:
     lda paused
     beq :+
+    lda pad_pressed              ; DEBUG (user request): Select while PAUSED
+    and #GB_SELECT               ; toggles small <-> big Mario for playtesting
+    beq @nosizet
+    lda mario_big
+    eor #1
+    sta mario_big
+@nosizet:
     jsr pause_dingdong
     jmp main_loop
 :   lda death_anim               ; the death hop owns the frame (everything else frozen)
@@ -1614,7 +1621,7 @@ MARIO_INX = 60                   ; Mario's walk-in stop (GB 61; he must not
 @noc:
     dec e_tmr
     bne @rts
-    jsr l3e_room_copy            ; the scroll is done: the room machine takes over
+    jsr l3e_room_copy            ; pull the room machine over the dead kit
     lda #1
     sta e_own
     lda #E_WALKIN
@@ -1745,11 +1752,16 @@ quad_rows: .byte 0, 0, 8, 8
 ; cloud in a FRESH slot at his spot -- morphing in place leaves any body taller
 ; than the cloud's erase envelope on screen (tally burst + boss kill, both
 ; user-caught).
-.proc boom_swap
+.proc victim_xy                  ; tmpL2/H2 = slot X's world x
     lda o_xl,x
     sta tmpL2
     lda o_xh,x
     sta tmpH2
+    rts
+.endproc
+
+.proc boom_swap
+    jsr victim_xy
     stz o_type,x
     phx
     jsr find_free_evict
@@ -1989,8 +2001,6 @@ quad_rows: .byte 0, 0, 8, 8
     cpx #9
     bne @c
     lda spr_x
-    clc
-    adc scroll_s
     sta mario_vx
     jmp draw_player
 .endproc
@@ -2014,13 +2024,9 @@ l3e_txt2: .byte $18,$11,$28,$2C,$0D,$0A,$12,$1C,$22
     rts
 .endproc
 
-.proc l3e_char                   ; A = tile, Y = row, X = char index; col base per row
-    pha
-    lda scroll_s
-    lsr
-    lsr
-    sta tmpL2
-    tya
+.proc l3e_char                   ; A = tile, Y = row, X = char index; col base per
+    pha                          ; row. Room drawing is s=0 by design (the scroll
+    tya                          ; ends 0 mod 32) -- no anchoring needed.
     asl
     asl
     asl
@@ -2038,8 +2044,6 @@ l3e_txt2: .byte $18,$11,$28,$2C,$0D,$0A,$12,$1C,$22
     clc
     adc #8
 @setc:
-    clc
-    adc tmpL2                    ; screen-anchor (+scroll_s/4)
     sta dcol
     pla
     jsr get_tile_src
@@ -2058,17 +2062,12 @@ l3e_txt2: .byte $18,$11,$28,$2C,$0D,$0A,$12,$1C,$22
     clc
     adc #6                       ; tile $06 / $07
     sta tmpH3
-    lda scroll_s
-    lsr
-    lsr
-    sta tmpL2
     stz spr_subx
     ldy #0
 @q: phy
     lda quad_cols,y
     clc
     adc #CAPT_X/4
-    adc tmpL2
     sta dcol
     lda quad_rows,y
     clc
@@ -2095,11 +2094,7 @@ l3e_txt2: .byte $18,$11,$28,$2C,$0D,$0A,$12,$1C,$22
 .endproc
 
 .proc l3e_moth_blank_at_capt     ; 2-row blank box at the captive/swirl home
-    lda scroll_s
-    lsr
-    lsr
-    clc
-    adc #CAPT_X/4
+    lda #CAPT_X/4
     sta dcol
     lda #CAPT_Y
     sta dy
@@ -2143,17 +2138,35 @@ l3e_txt2: .byte $18,$11,$28,$2C,$0D,$0A,$12,$1C,$22
 .endproc
 .segment "L13E"
 
+; the rescue scene's own OBJ overlay tiles (GB loads them at $8A00 during the
+; ending; the W1 sheet has different graphics at those indices): the MOTH.
+moth_tiles: .incbin "../build/gfx/moth.svt"
+.proc l3e_mothtile               ; X = moth sheet index (0-7), edge-clipped
+    lda dcol
+    cmp #46
+    bcc :+
+    rts
+:   txa
+    asl
+    asl
+    asl
+    asl
+    clc
+    adc #<moth_tiles
+    sta src_ptr
+    lda #>moth_tiles
+    adc #0
+    sta src_ptr+1
+    jsr set_dst
+    stz blit_opaque
+    jmp sprite_blit_subpx
+.endproc
+
 .proc l3e_moth_blank             ; blank the cell box at the last drawn spot;
-    lda scroll_s
-    lsr
-    lsr
-    sta tmpL2
     lda e_px                     ; NEVER row 15+ (the floor band lives there)
     lsr
     lsr
     and #$FE
-    clc
-    adc tmpL2
     sta dcol
     lda e_py
     and #$F8
@@ -2191,17 +2204,11 @@ l3e_txt2: .byte $18,$11,$28,$2C,$0D,$0A,$12,$1C,$22
     lda #2                       ; sheet cols 2-3 = sitting
     sta tmpL3
 @go:
-    lda scroll_s
-    lsr
-    lsr
-    sta tmpL2
     ldy #0
 @q: phy
     lda e_mx
     lsr
     lsr
-    clc
-    adc tmpL2
     clc
     adc quad_cols,y
     sta dcol
@@ -2227,29 +2234,6 @@ l3e_txt2: .byte $18,$11,$28,$2C,$0D,$0A,$12,$1C,$22
 .segment "CODE"
 
 .segment "L13E"
-; the rescue scene's own OBJ overlay tiles (GB loads them at $8A00 during the
-; ending; the W1 sheet has different graphics at those indices): the MOTH.
-moth_tiles: .incbin "../build/gfx/moth.svt"
-.proc l3e_mothtile               ; X = moth sheet index (0-7), edge-clipped
-    lda dcol
-    cmp #46
-    bcc :+
-    rts
-:   txa
-    asl
-    asl
-    asl
-    asl
-    clc
-    adc #<moth_tiles
-    sta src_ptr
-    lda #>moth_tiles
-    adc #0
-    sta src_ptr+1
-    jsr set_dst
-    stz blit_opaque
-    jmp sprite_blit_subpx
-.endproc
 .segment "CODE"
 
 .proc l3e_mario_draw             ; blank-erase + draw at the current walk pos
@@ -2261,10 +2245,8 @@ moth_tiles: .incbin "../build/gfx/moth.svt"
     sta dy
     ldx #2                       ; y is floor-aligned (104): 2 rows, floor untouched
     jsr l3e_box
-    lda spr_x                    ; the render pass normally derives mario_vx --
-    clc                          ; feed it the standard screen-anchor formula
-    adc scroll_s
-    sta mario_vx
+    lda spr_x                    ; the render pass normally derives mario_vx
+    sta mario_vx                 ; (room s=0: screen == fb)
     jsr draw_player
     lda spr_col
     sta prev_col
@@ -2274,17 +2256,6 @@ moth_tiles: .incbin "../build/gfx/moth.svt"
 .endproc
 .segment "CODE"
 
-; the ending-room overlay pull: bank 1 mapped (and left mapped -- nothing after
-; the wipe reads level data; the bonus follows on the same bank anyway)
-.import __L13E_SIZE__
-.assert __L13E_SIZE__ <= $7C0, error, "L13E overlay exceeds the RAM window"
-.proc l3e_room_copy
-    lda #<(__TITLE0_LOAD__+__L11CODE_SIZE__)
-    sta lvl_ptr
-    lda #>(__TITLE0_LOAD__+__L11CODE_SIZE__)
-    sta lvl_ptr+1
-    jmp copy_overlay
-.endproc
 
 ; ---------------------------------------------------------------------------
 ; BONUS GAME (top-door exit). RE: docs/14 "Bonus game RE" — screen drawn by code
@@ -7263,11 +7234,8 @@ title_tiles:                     ; the used tiles, SV-packed
     cmp o_vy,x                   ; head at the rim: the ball passes through)
     bcs @next2b
     sta tmpH3                    ; the +100 tag rises from the pipe (user's shot);
-    lda o_xl,x                   ; the kill is a morph to $FF = silent despawn
-    sta tmpL2                    ; (RE $2a68: HP 0 -> table+3 = $FF for type $02)
-    lda o_xh,x
-    sta tmpH2
-    stz o_type,x
+    jsr victim_xy                ; the kill is a morph to $FF = silent despawn
+    stz o_type,x                 ; (RE $2a68: HP 0 -> table+3 = $FF for type $02)
     lda #$01                     ; upward flower = 100 (class 0; wiki confirms)
     jsr award_kill_at
     bra @ballgone
@@ -8960,7 +8928,16 @@ lvl_bank_tab: .byte 1, 0, 2     ; level id -> ROM bank (1-2 shares bank 0 with t
 .endproc
 
 .import __L3CODE_LOAD__, __L3CODE_RUN__, __L3CODE_SIZE__
-.import __L11CODE_SIZE__
+.import __L11CODE_SIZE__, __L13E_SIZE__
+.assert __L13E_SIZE__ <= $7C0, error, "L13E overlay exceeds the RAM window"
+
+.proc l3e_room_copy
+    lda #<(__TITLE0_LOAD__+__L11CODE_SIZE__)
+    sta lvl_ptr
+    lda #>(__TITLE0_LOAD__+__L11CODE_SIZE__)
+    sta lvl_ptr+1
+    jmp copy_overlay
+.endproc
 .assert __L3CODE_SIZE__ <= $7C0, error, "L3CODE overlay exceeds the RAM window"
 .assert __L11CODE_SIZE__ <= $7C0, error, "L11CODE overlay exceeds the RAM window"
 
@@ -10443,9 +10420,8 @@ l3_updtab:
     txa                          ; 30Hz staggered like the 1-2 arrows: 2px every
     eor frame_count              ; other frame on slot parity -- same trajectory,
     lsr                          ; half the redraws (two shots fly in the fight)
-    bcc :+
-    rts
-:   lda o_vx,x
+    bcs @done
+    lda o_vx,x
     bmi @ml
     lda o_xl,x
     clc
@@ -10968,11 +10944,8 @@ water_alt: .incbin "build/gfx/water_alt.svt"   ; tile $5D, high plane = ROM $3fc
     stz goal_top
     stz mario_frame
     stz mario_duck
-    stz ride
-    lda #3
-    sta mus_rate
-    jsr mus_stop
-    lda #MUS_GOAL
+    jsr mus_stop                 ; (mus_rate is 3 all level; nothing to ride at
+    lda #MUS_GOAL                ; the pedestal -- ride is clear here)
     jsr mus_start
 @done:
     rts
