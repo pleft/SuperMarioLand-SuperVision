@@ -28,6 +28,17 @@ Newest entries at the top. Every entry should be traceable to ROM bytes/code.
 rendering/perf rounds, blocks/powerups, enemies, goal+bonus game, death/title,
 audio phase. See docs/22 + docs/23 and the memory index.)
 
+## 2026-07-21 (4) — GB-verified: wall-adjacent 1-block openings don't swallow
+User asked whether Mario should fall through the secret room's 1-block
+opening beside a wall (room1 col 18, and the room0 corner case). PyBoy on
+the real GB (legit pipe entry — note: 1-3's "pipes" are the stone barrel
+COLUMNS, mouth on top of the tall col-80/81 stack): Mario walks straight
+across the opening (x 98->154, y constant) and stands at the wall — the
+ORIGINAL does not fall through either. The port is faithful; no change.
+(The wall stops the approach before both feet can clear the last brick —
+same geometry in both engines. Openings away from walls DO swallow, per
+the probe fix.)
+
 ## 2026-07-21 (3) — DEBUG: pause + Select toggles small/big Mario
 Playtest helper (user request): while PAUSED, Select flips mario_big — no
 more replaying half a level to test big-Mario geometry. Paid for by dropping
