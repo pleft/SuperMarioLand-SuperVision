@@ -28,6 +28,19 @@ Newest entries at the top. Every entry should be traceable to ROM bytes/code.
 rendering/perf rounds, blocks/powerups, enemies, goal+bonus game, death/title,
 audio phase. See docs/22 + docs/23 and the memory index.)
 
+## 2026-07-21 (5) — the user proved the corner-adjacent fall (probes +6/+10)
+The user's GB screenshots: big Mario DOES drop through a broken brick one
+tile from the ring's wall (room0 col 13) — my room1 wall-slot test had
+measured a different case (full-height wall beside the slot) and I over-
+generalized. Root: at the wall stop (x pinned at wall-14) the +5 probe
+lands exactly 1px onto the last solid brick. Probes now +6/+10: the port
+falls at the GB position (sim: drops at x=98 through the broken col-13
+hole, exits the room), open-field 1-block holes still swallow, ledge hangs
+keep 10px, ending walk + stomp + holetest green. RAW-ROM re-decode also
+confirmed room0's ring is COMPLETE in data (the user's gap was player-made)
+— the extractor is exonerated. Still true: FULL-HEIGHT-wall-adjacent slots
+(room1 col 18) don't pass on the GB (measured).
+
 ## 2026-07-21 (4) — GB-verified: wall-adjacent 1-block openings don't swallow
 User asked whether Mario should fall through the secret room's 1-block
 opening beside a wall (room1 col 18, and the room0 corner case). PyBoy on

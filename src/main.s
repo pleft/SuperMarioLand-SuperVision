@@ -1065,12 +1065,12 @@ main_loop:
     sta mrow
     jsr read_solid                ; centre probe (feet_col set at entry, +8)
     bne @sup
-    lda #5                        ; two foot points, SPAN 5px: wide enough to hang
-    jsr calc_feet_col             ; over ledge edges (the pillar case), NARROWER
-    jsr read_solid                ; than a tile so a 1-block hole swallows him
-    bne @sup                      ; when centred -- he must NOT bridge one (the
-    lda #10                       ; +4/+12 span was exactly 8: bridging was
-    jsr calc_feet_col             ; geometrically GUARANTEED; user x2)
+    lda #6                        ; two foot points +6/+10: narrower than a tile
+    jsr calc_feet_col             ; (1-block holes swallow when centred) AND the
+    jsr read_solid                ; left foot clears the last brick at a wall stop
+    bne @sup                      ; (x pins at wall-14: +5 left 1px on the brick --
+    lda #10                       ; the room's broken corner-adjacent brick, GB-
+    jsr calc_feet_col             ; proven fall, user-caught)
     jsr read_solid
     beq @unsup                    ; nothing under either foot -> fall
 @sup:
@@ -1217,9 +1217,9 @@ main_loop:
     sta mrow
     jsr read_solid                ; centre...
     bne @snap
-    lda #5                        ; ...then both feet (edge landings; span 5 so a
-    jsr calc_feet_col             ; 1-block hole is NOT bridged -- see the walk
-    jsr read_solid                ; support probe)
+    lda #6                        ; ...then both feet (+6/+10, matching the walk
+    jsr calc_feet_col             ; support probe)
+    jsr read_solid
     bne @snap
     lda #10
     jsr calc_feet_col
