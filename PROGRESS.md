@@ -28,6 +28,15 @@ Newest entries at the top. Every entry should be traceable to ROM bytes/code.
 rendering/perf rounds, blocks/powerups, enemies, goal+bonus game, death/title,
 audio phase. See docs/22 + docs/23 and the memory index.)
 
+## 2026-07-21 (6) — the LEFT mirror: off the pipe bowl into the 1-block shaft
+User: big Mario jumps onto room0's pipe bowl but can't get DOWN into the
+col-15 shaft between the bowl and the ring's wall column — the left-approach
+mirror of the corner fall: at the left wall stop the +10 outer probe kept a
+toe on the bowl. Probes now +6/+8 (span 2). Sim: bowl -> shaft descent falls
+at x=116; the corner fall (x=98) intact; open-field holes swallow (bigger
+window now); stomp + full ending walk green. Ledge-hang asymmetry: right
+hangs 10px, left hangs 8px — watch feel on hardware.
+
 ## 2026-07-21 (5) — the user proved the corner-adjacent fall (probes +6/+10)
 The user's GB screenshots: big Mario DOES drop through a broken brick one
 tile from the ring's wall (room0 col 13) — my room1 wall-slot test had

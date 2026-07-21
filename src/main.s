@@ -1069,10 +1069,11 @@ main_loop:
     jsr calc_feet_col             ; (1-block holes swallow when centred) AND the
     jsr read_solid                ; left foot clears the last brick at a wall stop
     bne @sup                      ; (x pins at wall-14: +5 left 1px on the brick --
-    lda #10                       ; the room's broken corner-adjacent brick, GB-
-    jsr calc_feet_col             ; proven fall, user-caught)
-    jsr read_solid
-    beq @unsup                    ; nothing under either foot -> fall
+    lda #8                        ; the room's broken corner-adjacent brick, GB-
+    jsr calc_feet_col             ; proven, user-caught; +8 not +10 so the LEFT
+    jsr read_solid                ; mirror clears too: descending off the pipe
+    beq @unsup                    ; bowl into the col-15 shaft, x pins at wall+
+    ;                             ; edge-1 and +10 kept a toe on the bowl (user)
 @sup:
     jmp @done                     ; supported -> stay grounded
 @unsup:
@@ -1217,11 +1218,11 @@ main_loop:
     sta mrow
     jsr read_solid                ; centre...
     bne @snap
-    lda #6                        ; ...then both feet (+6/+10, matching the walk
+    lda #6                        ; ...then both feet (+6/+8, matching the walk
     jsr calc_feet_col             ; support probe)
     jsr read_solid
     bne @snap
-    lda #10
+    lda #8
     jsr calc_feet_col
     jsr read_solid
     beq @done                     ; no ground -> keep falling
