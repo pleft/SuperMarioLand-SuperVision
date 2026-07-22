@@ -64,9 +64,23 @@ W2-only enemies skipped; 2-2/2-3 load+run+render. W1 fully re-verified
 DBG-IDENTICAL. Sim gotcha logged twice today: REBUILD dbg.txt with the ROM --
 stale symbol pokes corrupt the loaded image and fabricate regressions.
 
-NEXT (W2 proper): Muda enemies (2-1 types $10,$24,$90,$A4 + $05/$16 in 2-2 --
-Honen/Yurarin/Gunion RE), the 2-3 Marine Pop shooter mode, Dragonzamasu boss,
-bonus-screen check between W2 levels, W2 hard-mode entries.
+NEXT (W2 proper):
+- Muda enemies: NEW types $10, $24 (2-1), $05, $16 (2-2) -- identify via PyBoy
+  forced-2-1 captures (RULE 0), then port. CORRECTION queued: type ids are
+  GLOBAL (one 99-entry phys/AI table), so 2-1's $02/$0C ARE the Suu spider +
+  spiky ball from the 1-3 kit -- the cur_level==2 gate is over-broad; W2 needs
+  the kit types resident (W2 overlay or kit sharing), not skipped.
+- SECRETS (user request): 2-1 room0 hidden $5F block @ col1 row10 and room1
+  @ cols 4/18 row11 (the climb-to-exit secret) are IN the shipped room maps
+  (bonkable now), but the GB block-CONTENTS for room segments (raw bank3
+  $6536 entries (1,1,$28),(1,9,$28)...) are dropped by the extractor (surface
+  segs only) -> room blocks wrongly default to single coins instead of
+  power-ups. Fix: extractor emits room entries under a namespaced col key
+  (600 + room*20 + col; surface cols max 360) + find_block applies the same
+  key in room_mode. Also investigate content code $F0 (seg2 col18).
+- 2-3 Marine Pop shooter mode, Dragonzamasu boss, bonus screen between W2
+  levels (bank-1 prefix draws it: W1 bg tiles -- font/frame are common, check
+  prize icons), W2 hard-mode entries.
 
 ## 2026-07-22 (6) ending corruption: leftover objects ghost-drew through the scene
 
