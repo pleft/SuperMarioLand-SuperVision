@@ -28,6 +28,18 @@ Newest entries at the top. Every entry should be traceable to ROM bytes/code.
 rendering/perf rounds, blocks/powerups, enemies, goal+bonus game, death/title,
 audio phase. See docs/22 + docs/23 and the memory index.)
 
+## 2026-07-22 (2) — GB support geometry measured; +6/+8 kept deliberately
+Asked to make the hangs GB-accurate, we measured the GB's real numbers:
+support points ~+2/+3 in sprite coords (left-biased: right hang 15px, left
+3px; right-wall flush = c202-2, c202 = port spr_x+16). Tried +2/+3 in the
+port: the user-proven corner-hole fall DIES because our two-row wall check
+clamps airborne x where the GB's narrower test does not — exact parity
+needs the full body-geometry harmonization (body width + wall rows +
+probes), queued for the 128K era. Kept +6/+8: every OBSERVED GB outcome
+reproduces (corner drop, shaft descent, open holes, wall-slot bridging);
+ledge hangs remain the known 10/8-vs-15/3 deviation. Full numbers in
+docs/12. Regressions: hole/stomp/ending green.
+
 ## 2026-07-22 — honest GB room measurements (a harness confession + repair)
 The earlier "GB-verified wall-slot bridging" run had NEVER entered the room:
 $ffe5 counts SURFACE segments too, so the detector fired on segment 2 of the

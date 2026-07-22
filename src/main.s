@@ -1065,15 +1065,14 @@ main_loop:
     sta mrow
     jsr read_solid                ; centre probe (feet_col set at entry, +8)
     bne @sup
-    lda #6                        ; two foot points +6/+10: narrower than a tile
-    jsr calc_feet_col             ; (1-block holes swallow when centred) AND the
-    jsr read_solid                ; left foot clears the last brick at a wall stop
-    bne @sup                      ; (x pins at wall-14: +5 left 1px on the brick --
-    lda #8                        ; the room's broken corner-adjacent brick, GB-
-    jsr calc_feet_col             ; proven, user-caught; +8 not +10 so the LEFT
-    jsr read_solid                ; mirror clears too: descending off the pipe
-    beq @unsup                    ; bowl into the col-15 shaft, x pins at wall+
-    ;                             ; edge-1 and +10 kept a toe on the bowl (user)
+    lda #6                        ; foot probes +6/+8. GB-measured truth (docs/12)
+    jsr calc_feet_col             ; is probes ~+2/+3 with a NARROWER wall test --
+    jsr read_solid                ; adopting that needs the full body-geometry
+    bne @sup                      ; harmonization (128K era). +6/+8 reproduces
+    lda #8                        ; every observed GB outcome with OUR wall spans:
+    jsr calc_feet_col             ; corner-hole fall, bowl-shaft descent, open
+    jsr read_solid                ; holes swallow, full-wall slots bridge; ledge
+    beq @unsup                    ; hangs deviate (10/8 vs GB 15/3) -- known
 @sup:
     jmp @done                     ; supported -> stay grounded
 @unsup:

@@ -394,3 +394,30 @@ PORT: flower ball-kill shipped (poking-out gate = o_y < o_vy, silent despawn,
 SFX_DFF0_01. LESSON (harness): a teleported $c000 ball can miss type-specific
 hitbox windows — calibrate against a known-killable type AND treat "no effect"
 as unproven until a NATURAL hit reproduces or the code path is read.
+
+## GB ground-support geometry, MEASURED (2026-07-22)
+
+In-room + surface measurements on the real GB (PyBoy; states + world-x
+alignment; the pipe-entry state pulse $ffb3=$09 is the in-room detector):
+
+- Right-wall flush stop: c202 = wall_px + 2 (room1 col-19 wall at 152 ->
+  c202 154). Port calibration: c202 == port spr_x + 16.
+- LEFT-edge walk-off: falls at c202 = platform_start + 13 (measured 45 vs
+  start 32) => outer support point ~ c202 - 13 (port: spr_x + 3).
+- RIGHT-edge walk-off (surface pit at col 88, stable-ground gated): falls at
+  wx = edge + 18 (721 vs last px 703) => inner support point ~ c202 - 17
+  (port: spr_x + 1..2).
+- => the GB's support is a ~+2/+3 pair (sprite coords), hard against the
+  sprite's LEFT side: right-edge hangs ~15px, left hangs ~3px -- the famous
+  left-biased SML hitbox. Its wall test is also NARROWER than the port's
+  two-row body check (the corner-hole landing at c202 117-124 requires x
+  inside our wall-clamped zone).
+
+PORT DECISION: keep probes +6/+8. Adopting +2/+3 verbatim fails the
+user-proven corner-hole fall because OUR wall check clamps x at 98 in all
+airborne states -- matching the GB exactly here means harmonizing the whole
+body geometry (body width, wall spans/rows, probe pair) in one project,
+queued for the 128K era. +6/+8 reproduces every OBSERVED GB outcome:
+corner-hole drop (port: walking + landing; GB: landing), bowl-shaft descent,
+open 1-block holes swallow, full-height-wall slots bridge. Known deviation:
+ledge hangs 10px right / 8px left vs the GB's 15/3.
