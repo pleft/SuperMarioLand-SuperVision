@@ -1255,6 +1255,9 @@ main_loop:
     jmp game_over
 :   jsr lose_life                ; dying costs a spare life
     stz room_mode                ; always restart on the surface
+    stz pipe_tab+1               ; death RE-ARMS used pipes (user-verified on GB);
+    stz pipe_tab+6               ; all current pipe cols have hi=0 -- revisit if a
+    stz pipe_tab+11              ; W2+ level ever puts a pipe past col 255
     lda cam_x
     sta cam_dead
     lda cam_x+1
@@ -1785,7 +1788,6 @@ quad_rows: .byte 0, 0, 8, 8
 
 .proc l3e_boom
     ldx #OBJ_MAX-1
-    stz tmpL3                    ; any found?
 @l: lda o_type,x
     cmp #OBJ_SUU
     bcc @next
@@ -1799,7 +1801,6 @@ quad_rows: .byte 0, 0, 8, 8
     clc                          ; head-anchored 24px boss: center the cloud
     adc #8
 :   sta tmpH3
-    inc tmpL3
     lda o_xl,x                   ; screen x = o_x - cam: clouds only for slots ON
     sec                          ; SCREEN -- an off-screen-left leftover drew a
     sbc cam_x                    ; half cloud at the edge (user-caught)
@@ -1817,12 +1818,9 @@ quad_rows: .byte 0, 0, 8, 8
 @next:
     dex
     bpl @l
-    lda tmpL3
-    beq :+
-    lda #SFX_DFF8_01             ; the bang (same mailbox value as the GB)
-    jmp sfx_play
-:   rts
-.endproc
+    lda #SFX_DFF8_01             ; the bang (unconditional: silent only in the
+    jmp sfx_play                 ; star-killed-boss-then-sphere edge case, where
+.endproc                         ; a lone bang is a harmless 1-shot)
 
 ; ---------------- the room scenes (e_own frames) ----------------
 ; These live in the L13E overlay: a bank-1 blob after L11CODE, copied into the
@@ -1973,12 +1971,10 @@ quad_rows: .byte 0, 0, 8, 8
     lda e_ix
     cmp #7
     bcc @rts
-    stz e_hop                    ; landed: rest again
-    lda #40
+    stz e_hop                    ; landed: rest again (the arc's per-frame deltas
+    lda #40                      ; sum to exactly 0 over 7x8 frames -- no snap
     sta e_tmr
     stz e_ix
-    lda #CAPT_Y                  ; snap the arc's rounding to the floor line
-    sta e_my
     jsr l3e_moth_draw
     lda e_mx
     cmp #160                     ; off the right edge: hold, then the bonus game
@@ -2169,13 +2165,9 @@ moth_tiles: .incbin "../build/gfx/moth.svt"
     lda e_py
     and #$F8
     sta dy
-    ldx #3
-    lda e_py
-    and #7
-    bne :+
-    dex                          ; aligned box: 16px = exactly 2 rows
-:   lda dy
-    cmp #104                     ; a 3-row box from y104 would hit the floor row
+    ldx #3                       ; 3 rows (an aligned box wastes one blank row of
+    lda dy                       ; sky -- harmless; the floor cap below protects
+    cmp #104                     ; the checker band)
     bcc :+
     ldx #2
 :   jmp l3e_box

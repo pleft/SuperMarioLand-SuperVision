@@ -33,12 +33,13 @@ The user tested the original: once you exit an underground room, pressing
 Down on its pipe does nothing — pipes are ONE-SHOT. Port: on entry the
 matched pipe_tab entry's column-high byte is poisoned ($FF) so find_pipe
 can never match it again (zero-cost check); load_level's fresh copy re-arms
-pipes per level load. Port sim: enter -> exit -> Down = blocked. OPEN: does
-death re-arm pipes on the GB? (The port keeps them shut across respawn;
-user check pending — my GB automation hit a wall: room1's exit mechanism
-itself resists scripting; Mario walks THROUGH the bowl tiles with no
-trigger, so the exit trigger there is NOT the 1-1-style walk-into-$74 —
-noted for the W2-era pipe RE.)
+pipes per level load. Port sim: enter -> exit -> Down = blocked.
+RESOLVED by two user hardware checks: (a) death RE-ARMS pipes on the GB —
+ported: do_respawn un-poisons the entries (all W1 pipe cols have hi=0);
+(b) the room1 "exit mystery" was MY HARNESS failing to steer, not a hidden
+mechanism — the user confirms every room exits by mouth-proximity suction
+on the original, same behavior as the port's rule. No fidelity gap; the
+research item is withdrawn.
 
 ## 2026-07-22 (2) — GB support geometry measured; +6/+8 kept deliberately
 Asked to make the hangs GB-accurate, we measured the GB's real numbers:
