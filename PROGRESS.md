@@ -28,6 +28,18 @@ Newest entries at the top. Every entry should be traceable to ROM bytes/code.
 rendering/perf rounds, blocks/powerups, enemies, goal+bonus game, death/title,
 audio phase. See docs/22 + docs/23 and the memory index.)
 
+## 2026-07-22 (3) — one-shot pipes (user-verified on GB in 1-1 AND 1-3)
+The user tested the original: once you exit an underground room, pressing
+Down on its pipe does nothing — pipes are ONE-SHOT. Port: on entry the
+matched pipe_tab entry's column-high byte is poisoned ($FF) so find_pipe
+can never match it again (zero-cost check); load_level's fresh copy re-arms
+pipes per level load. Port sim: enter -> exit -> Down = blocked. OPEN: does
+death re-arm pipes on the GB? (The port keeps them shut across respawn;
+user check pending — my GB automation hit a wall: room1's exit mechanism
+itself resists scripting; Mario walks THROUGH the bowl tiles with no
+trigger, so the exit trigger there is NOT the 1-1-style walk-into-$74 —
+noted for the W2-era pipe RE.)
+
 ## 2026-07-22 (2) — GB support geometry measured; +6/+8 kept deliberately
 Asked to make the hangs GB-accurate, we measured the GB's real numbers:
 support points ~+2/+3 in sprite coords (left-biased: right hang 15px, left

@@ -3444,6 +3444,8 @@ NUM_LEVELS = 3
     cmp #$FF
     beq @none
     sta pipe_room                ; remember the room, save the surface state for the resume
+    lda #$FF                     ; ONE-SHOT (user-verified on GB in 1-1 AND 1-3:
+    sta pipe_tab+1,x             ; a used pipe never re-opens): poison the col hi
     lda cam_x
     sta save_cam_x
     lda cam_x+1
