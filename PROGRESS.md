@@ -28,6 +28,23 @@ Newest entries at the top. Every entry should be traceable to ROM bytes/code.
 rendering/perf rounds, blocks/powerups, enemies, goal+bonus game, death/title,
 audio phase. See docs/22 + docs/23 and the memory index.)
 
+## 2026-07-22 — honest GB room measurements (a harness confession + repair)
+The earlier "GB-verified wall-slot bridging" run had NEVER entered the room:
+$ffe5 counts SURFACE segments too, so the detector fired on segment 2 of the
+overworld and every "room1 measurement" ran against surface terrain. Redone
+with real entry (the pipe-entry STATE PULSE $09 is the correct in-room
+signal; entering took a hop-sweep across the column mouth at world x
+634-658). Valid results: (a) room1's col-18 slot beside the full-height
+wall NEVER passes on the GB — a 22-position drop sweep straight over it all
+landed bridged (the old conclusion was right, its evidence was not);
+(b) walking LEFT off a row end the GB falls essentially AT the edge (left
+hang ~0-1px; the port's 8px is more lenient) — consistent with the
+bowl-shaft descent; (c) right-wall stop c202=154 vs wall at 152 calibrates
+the GB's coordinate convention (body right ≈ c202-2). The +6/+8 probes
+reproduce every observed GB behavior. LESSON: validate the DETECTOR before
+trusting a measurement — and a state save now exists for instant room entry
+(gb13_room1.state).
+
 ## 2026-07-21 (6) — the LEFT mirror: off the pipe bowl into the 1-block shaft
 User: big Mario jumps onto room0's pipe bowl but can't get DOWN into the
 col-15 shaft between the bowl and the ring's wall column — the left-approach
