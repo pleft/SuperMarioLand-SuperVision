@@ -1,4 +1,5 @@
-"""py65 harness for the 64K banked SV image: loads [bank0][fixed], watches
+"""py65 harness for the banked SV image (64K-512K): loads [bank0][last-16K=fixed],
+watches
 SYS_CTRL ($2026) bits 7:5 and remaps $8000-$BFFF on bank change.
 
 Usage (run from the repo root; needs the -g debug build's build/dbg.txt):
@@ -17,7 +18,7 @@ DBG_PATH = "build/dbg.txt"
 class Harness:
     def __init__(self, rom=ROM_PATH, dbg=DBG_PATH):
         self.file = open(rom, "rb").read()
-        assert len(self.file) == 65536
+        assert len(self.file) % 0x4000 == 0 and len(self.file) >= 0x8000
         self.dbg = open(dbg).read()
         self.mem = bytearray(0x10000)
         self.cur_bank = 0
@@ -40,7 +41,8 @@ class Harness:
         b = (self.mem[0x2026] >> 5) & 7
         if b != self.cur_bank:
             self.cur_bank = b
-            self.mem[0x8000:0xC000] = self.file[b * 0x4000:(b + 1) * 0x4000]
+            o = (b * 0x4000) % len(self.file)   # Potator: bankOffset % programRomSize
+            self.mem[0x8000:0xC000] = self.file[o:o + 0x4000]
 
     def _dma(self):
         if self.mem[0x200D] & 0x80:

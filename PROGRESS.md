@@ -28,6 +28,23 @@ Newest entries at the top. Every entry should be traceable to ROM bytes/code.
 rendering/perf rounds, blocks/powerups, enemies, goal+bonus game, death/title,
 audio phase. See docs/22 + docs/23 and the memory index.)
 
+## 2026-07-22 (5) 128K cart migration (Phase: pre-W2)
+
+The 64K image is full (bank2 0B, bank1 ~5B, FIXED ~1B free) with only World 1
+done, so the cart grows to 128K = 8 x 16K banks -- the max addressable by
+SYS_CTRL $2026 bits7:5 without MAGNUM-style extra registers. VERIFIED from
+Potator memorymap.c: $8000 window = (reg & $E0) << 9 mod programRomSize;
+$C000 fixed = programRomSize - 0x4000 (the LAST 16K, any size 32K-512K).
+
+Changes: cfg adds BANK3..BANK6 ($FF fill, reserved for W2+); pack_banks.py
+asserts the 128K layout + valid bank ids; svharness accepts any 16K-multiple
+image and masks the bank mod ROM size (Potator-exact). NO game code changed:
+lvl_bank_tab / copy_overlay still address banks 0-2, and FIXED stays the last
+16K in CPU space. Regression: walk13e (full 1-3 ending -> bonus, s=0) and
+roomtest (room lifecycle, pipes one-shot + death re-arm) both pass on the
+128K image; vectors verified at file $1FFFA; banks 3-6 verified all-$FF.
+DBG build byte-identical.
+
 ## 2026-07-22 (4) rescue-ending regression fix (user screenshots: shifted texts + garbled Mario)
 
 De-anchoring the room machine (dropping +scroll_s from every draw) assumed the

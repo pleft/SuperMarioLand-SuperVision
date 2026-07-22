@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """
-Pack level banks into the 64K Supervision image (post-link step).
+Pack level banks into the 128K Supervision image (post-link step).
 
-The linker emits [BANK0][BANK1=fill][BANK2=fill][FIXED]. BANK0 = common prefix
+The linker emits [BANK0][BANK1=fill][BANK2=fill][BANK3..6=fill][FIXED] (FIXED is
+the LAST 16K: Potator maps $C000 from programRomSize-0x4000 whatever the size,
+and the $8000 window = SYS_CTRL bits7:5 * 16K mod size). BANK0 = common prefix
 (audio engine + data, BG charset, banked code, tables, title) followed by
 level_hdr + World 1-1's data. This script rewrites BANK1/BANK2 as:
 
@@ -23,11 +25,17 @@ import os, re, sys
 
 BANK = 0x4000
 BASE = 0x8000
+NBANKS = 8                                  # 128K cart: banks 0-6 + FIXED (last)
 
 def main():
     img_path, map_path = sys.argv[1], sys.argv[2]
     jobs = [tuple(int(x) for x in a.split(":")) for a in sys.argv[3:]]
     img = bytearray(open(img_path, "rb").read())
+    assert len(img) == NBANKS * BANK, \
+        f"pack_banks: image is {len(img)} bytes, expected {NBANKS * BANK} (128K) — " \
+        "linker config out of sync (FIXED must be the LAST 16K of the file)"
+    for level, bank in jobs:
+        assert 0 <= bank < NBANKS - 1, f"level {level}: bank {bank} is not a switchable bank"
     # the L3CODE overlay (the 1-3 kit) is linked at BANK2's start; bank 2 is laid
     # out below as [prefix][L3 blob @ TITLE0][header][level data] — load_level
     # finds the header at TITLE0 + __L3CODE_SIZE__
