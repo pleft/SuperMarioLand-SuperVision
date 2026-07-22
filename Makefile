@@ -9,6 +9,7 @@ ASFLAGS = --cpu 65C02 -I src
 CFG     = cfg/supervision.cfg
 ROM_IN  = super-mario-land-gb.gb
 SVT     = build/gfx/w1_obj_8000.svt
+W2GFX   = build/gfx/w2_ovl_8A00.svt build/gfx/w2_ovl_9310.svt
 LVL     = build/levels/level_01.bin
 ARC     = build/data/jumparc.bin
 TABLES  = build/data/jumparc.bin build/data/speedtab.bin build/data/mario_poses.bin build/data/mario_big_poses.bin build/data/statusbar.bin
@@ -19,9 +20,9 @@ ROM     = build/super-mario-land.sv
 
 all: $(ROM)
 
-$(ROM): $(OBJS) $(CFG) tools/pack_banks.py
-	$(LD) -C $(CFG) $(OBJS) -o $@ -m build/rom.map
-	python3 tools/pack_banks.py $@ build/rom.map 0:1 2:2
+$(ROM): $(OBJS) $(CFG) tools/pack_banks.py $(W2GFX)
+	$(LD) -C $(CFG) $(OBJS) -o $@ -m build/rom.map -Ln build/rom.lbl
+	python3 tools/pack_banks.py $@ build/rom.map 0:1 2:2 3:3 4:4 5:5
 	@echo "built $@ ($$(wc -c < $@) bytes)"
 
 build/main.o: src/main.s src/supervision.inc build/levels/title_map.bin build/gfx/title_tiles.svt build/audio/sfx.bin build/audio/sfx.inc build/audio/music.bin build/audio/music.inc

@@ -28,6 +28,46 @@ Newest entries at the top. Every entry should be traceable to ROM bytes/code.
 rendering/perf rounds, blocks/powerups, enemies, goal+bonus game, death/title,
 audio phase. See docs/22 + docs/23 and the memory index.)
 
+## 2026-07-22 (7) WORLD 2 SCAFFOLD: 2-1/2-2/2-3 load, render and play as walker levels
+
+RULE-0 finding that shaped everything: GB SelectWorldBank ($0D6D, disasm) shows
+worlds 2-4 do NOT reload the base sheets -- they overlay ONLY obj tiles $A0-$DC
+(61 tiles @ $8A00) and BG tiles $31-$6F (63 tiles @ $9310) over W1's. (The
+extractor's wN_obj_8000/wN_bg_9000 for N>=2 are junk; the real per-world
+payload is under 1K.) Consequences:
+- Level header grew 18->20 bytes: +18/19 = the level's base for quad tiles
+  $A0-$DC (chardata for W1; the in-bank overlay blob - $A00 for W2). draw_quad
+  routes that id range through it; get_tile_src untouched (W2 maps' hi ids are
+  all common: 80-82,8E,8F,E1,EC,F4 -- and E1/EC come from the COMMON base
+  sheet on the GB too, so they're already right in FIXED chardata).
+- W2 banks 3-5 = [prefix'][header(20)+level data][w2_ovl_8A00 blob]. prefix' =
+  the common prefix with w2_ovl_9310 patched over bg_chardata $31-$6F and the
+  W2 music track written into the W1-theme slot's byte-space (music_data+304,
+  511B): track $08 Muda (422B) for 2-1/2-2, $05 Marine Pop (425B) for 2-3,
+  slot 0's list pointers repointed per bank. lvl_track_tab = MUS_LEVEL for all
+  three: slot 0 IS the world theme, exactly how the GB's $07CE table works.
+- Music: extract_music.py converts $08/$05 via the same engine (one new drum,
+  +3B music2/FIXED). pack_banks.py does all per-bank patching (symbols via
+  ld65 -Ln label dump; the map's export list only shows imported symbols).
+- Spawns: unknown types now CONSUME their entry (a set carry jammed the
+  spawner); the 1-3 kit types ($02/$0C/$3F/$08) are gated to cur_level==2 --
+  type ids are per-world (W2's $02 hung 2-1 by jsr'ing an unloaded overlay).
+- Byte donors: spawn_chib/noko/fly merged over obj_alloc_typed + a shared
+  edge-walker core (also used by plat/bunbun spawners); lvl_bank_tab moved
+  from the frozen LEVELS prefix (bank 2 has 1 byte free) to FIXED, 6 entries.
+- NUM_LEVELS=6: title level-select cycles all six; HUD tables already had 12.
+
+Verified (svharness): 2-1 walked END TO END (cam 0->2400 cap, goal fires,
+tally runs), Muda scenery/music correct, platforms + shared walkers spawn,
+W2-only enemies skipped; 2-2/2-3 load+run+render. W1 fully re-verified
+(roomtest all GB-true; walk13e full rescue ending -> bonus, scroll_s=0).
+DBG-IDENTICAL. Sim gotcha logged twice today: REBUILD dbg.txt with the ROM --
+stale symbol pokes corrupt the loaded image and fabricate regressions.
+
+NEXT (W2 proper): Muda enemies (2-1 types $10,$24,$90,$A4 + $05/$16 in 2-2 --
+Honen/Yurarin/Gunion RE), the 2-3 Marine Pop shooter mode, Dragonzamasu boss,
+bonus-screen check between W2 levels, W2 hard-mode entries.
+
 ## 2026-07-22 (6) ending corruption: leftover objects ghost-drew through the scene
 
 User screenshots (full 1-1->1-2->1-3 session): a full-height column of '0'

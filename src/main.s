@@ -215,7 +215,9 @@ shtab_lo:    .res 1024      ; 4 pages: subx 0..3
 shtab_hi:    .res 1024
 ; --- per-level bindings, set by load_level from the current bank's level_hdr ---
 cur_level:   .res 1          ; level id 0.. (GB $ffe4); selects the ROM bank
-hdr_buf:     .res 18         ; RAM copy of the current bank's level header
+hdr_buf:     .res 20         ; RAM copy of the current bank's level header
+                             ; (+18/19: base for quad tiles $A0-$DC -- chardata for
+                             ; W1; the in-bank overlay blob minus $A00 for W2+)
 p1c:         .res 1          ; render pass-1 loop counter (rotated scan)
 rot1:        .res 1          ; pass-1 scan origin, +1 per frame (fairness)
 surf_map:    .res 2          ; surface tilemap base (map_base resets to this)
@@ -3205,6 +3207,8 @@ mus_zero: .byte 0                ; mus_start seeds phrase ptrs here ("fetch next
 sfx_data:
     .incbin "../build/audio/sfx.bin"
 .include "../build/audio/music.inc"
+.export mus_l1_lo, mus_l1_hi, mus_l2_lo, mus_l2_hi, mus_l3_lo, mus_l3_hi
+.export mus_l4_lo, mus_l4_hi, music_data
 music_data:
     .incbin "../build/audio/music.bin"
 .segment "CODE"
@@ -3323,7 +3327,7 @@ music_data:
 ; start it FRESH from column 0. Score, coins, lives and Mario's power-ups
 ; (big/superball) PERSIST; everything level-local resets. Levels shipped so far:
 ; 1-1 and 1-2 — the wrap constant grows as more of World 1 comes online.
-NUM_LEVELS = 3
+NUM_LEVELS = 6
 .proc next_level
     stz goal_phase
     stz room_mode
@@ -5529,8 +5533,14 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     cmp #$3F
     beq @l3
     cmp #$08
-    bne @skip
+    beq @l3
+@unk:
+    clc                          ; UNKNOWN type (W2+ not yet ported): consume the
+    bra @skip                    ; entry -- a set carry here would jam the spawner
 @l3:
+    ldx cur_level                ; type ids are PER-WORLD: $02/$0C/$3F/$08 mean the
+    cpx #2                       ; 1-3 kit ONLY on level 2 (elsewhere the overlay
+    bne @unk                     ; is not resident -- jsr'ing it hung 2-1, f1720)
     jsr l3_spawn
     bra @skip
 @chib:
@@ -5543,14 +5553,28 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     rts
 .endproc
 
-.proc spawn_chib                 ; Y = table byte offset (preserved by find_free_obj? no ->
-    phy                          ; save it)
+.proc obj_alloc_typed            ; A = type -> C=0: X = fresh slot with the type
+    sta tmpL2                    ; stored; C=1: pool full. Preserves Y.
+    phy
     jsr find_free_obj
     ply
-    bcs @full
-    lda #OBJ_CHIB
+    bcs @rts
+    lda tmpL2
     sta o_type,x
-    lda cam_x                    ; world x = cam + 180 (original enters at OAM x 188)
+@rts:
+    rts
+.endproc
+.proc spawn_noko
+    lda #OBJ_NOKO                ; walks left, same measured speed engine as the Chibibo
+    .byte $2C                    ; BIT abs: swallow the next LDA
+.endproc
+.proc spawn_chib
+    lda #OBJ_CHIB
+.endproc                         ; falls into the shared walker core
+.proc spawn_edge_walker          ; A = type; Y = table byte offset. Left-walker
+    jsr obj_alloc_typed          ; entering at world cam+180 (GB enters at OAM 188)
+    bcs @full
+    lda cam_x
     clc
     adc #180
     sta o_xl,x
@@ -5568,53 +5592,19 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     rts
 .endproc
 
-.proc spawn_noko
-    phy
-    jsr find_free_obj
-    ply
-    bcs @full
-    lda #OBJ_NOKO
-    sta o_type,x
-    lda cam_x
-    clc
-    adc #180
-    sta o_xl,x
-    lda cam_x+1
-    adc #0
-    sta o_xh,x
-    lda spawn_tab+2,y
-    sta o_y,x
-    lda #$FF                     ; walks left, same measured speed engine as the Chibibo
-    sta o_vx,x
-    stz o_st,x
-    stz o_tmr,x
-    clc                          ; C=0: spawned
-@full:
-    rts
-.endproc
-
 .proc spawn_fly
-    phy
-    jsr find_free_obj
-    ply
-    bcs @full
     lda #OBJ_FLY
-    sta o_type,x
-    lda cam_x                    ; trace: enters at OAM 199 = world cam+191
+    jsr spawn_edge_walker
+    bcs @full
+    lda o_xl,x                   ; trace: enters at OAM 199 = world cam+191
     clc
-    adc #191
+    adc #11
     sta o_xl,x
-    lda cam_x+1
-    adc #0
-    sta o_xh,x
-    lda spawn_tab+2,y
-    sta o_y,x
-    lda #$FF                     ; faces/hops left initially
-    sta o_vx,x
-    stz o_st,x                   ; state: 0 = sitting
-    lda #FLY_SIT
+    bcc :+
+    inc o_xh,x
+:   lda #FLY_SIT                 ; state 0 (sitting) already set by the core
     sta o_tmr,x
-    clc                          ; C=0: spawned
+    clc
 @full:
     rts
 .endproc
@@ -5651,13 +5641,8 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     ; falls through
 .endproc
 .proc spawn_plat                 ; A = platform type; patrol origin from entry Y
-    sta tmpL2
-    phy
-    jsr find_free_obj
-    ply
+    jsr obj_alloc_typed
     bcs @full
-    lda tmpL2
-    sta o_type,x
     jsr spawn_tabx
     lda spawn_tab+2,y            ; o_y = bin oy + 16 (platform top+8 convention; this
     clc                          ; reproduces 1-1's traced o_y bounds 64..124 exactly)
@@ -5672,12 +5657,9 @@ riding_this:                     ; Z=1 if Mario rides slot oi
 
 .segment "L12"
 .proc spawn_bunbun               ; the bee flies level at its spawn height
-    phy
-    jsr find_free_obj
-    ply
-    bcs @full
     lda #OBJ_BUNBUN
-    sta o_type,x
+    jsr obj_alloc_typed
+    bcs @full
     jsr spawn_tabx
     lda spawn_tab+2,y
     sta o_y,x
@@ -8766,7 +8748,6 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
 ; the LEVELS common prefix: identical bytes at the identical address in every
 ; bank, so it stays valid across a bank switch.
 .segment "LEVELS"
-lvl_bank_tab: .byte 1, 0, 2     ; level id -> ROM bank (1-2 shares bank 0 with the title)
 .proc load_level
     stz ending13                 ; a fresh level never inherits ending state
     stz e_phase
@@ -8805,7 +8786,7 @@ lvl_bank_tab: .byte 1, 0, 2     ; level id -> ROM bank (1-2 shares bank 0 with t
     ldy #>(__TITLE0_LOAD__+__L11CODE_SIZE__+__L13E_SIZE__)
     sty lvl_ptr+1
 @hcopy:
-    ldy #17                      ; header -> RAM (18 bytes)
+    ldy #19                      ; header -> RAM (20 bytes)
 :   lda (lvl_ptr),y
     sta hdr_buf,y
     dey
@@ -9140,21 +9121,33 @@ wcyc: .byte 2, 5, 1              ; port pose ids for GB metasprites 1, 2, 3
 ; ---------------------------------------------------------------------------
 ; draw_quad: X = tile index; dcol/dy set. src_ptr = chardata + X*16; blit transparent.
 .proc draw_quad
-    txa                          ; src_ptr = chardata + X*16
-    stz src_ptr+1
+    txa                          ; src_ptr = chardata + X*16 -- except tiles
+    stz src_ptr+1                ; $A0-$DC: the per-WORLD overlay (GB $8A00 load),
+    asl                          ; resolved via the level header's base (hdr_buf
+    rol src_ptr+1                ; +18 = chardata for W1, the in-bank blob for W2+)
     asl
     rol src_ptr+1
     asl
     rol src_ptr+1
     asl
     rol src_ptr+1
-    asl
-    rol src_ptr+1
+    cpx #$A0
+    bcc @common
+    cpx #$DD
+    bcs @common
+    clc
+    adc hdr_buf+18
+    sta src_ptr
+    lda src_ptr+1
+    adc hdr_buf+19
+    bra @haveb
+@common:
     clc
     adc #<chardata
     sta src_ptr
     lda src_ptr+1
     adc #>chardata
+@haveb:
     sta src_ptr+1
     jsr set_dst
     stz blit_opaque              ; Mario is transparent (GB colour 0 = see-through)
@@ -9886,6 +9879,10 @@ bit_masks: .byte $01,$02,$04,$08,$10,$20,$40,$80
 
 MUS_T13 = 7                      ; track $03's index in the extractor's TRACKS list
 lvl_track_tab:  .byte MUS_LEVEL, MUS_LEVEL, MUS_T13   ; GB per-level table $07CE
+                .byte MUS_LEVEL, MUS_LEVEL, MUS_LEVEL  ; W2: slot 0 IS the world
+                                                       ; theme (per-bank music patch)
+; level id -> ROM bank. In FIXED (the prefix is byte-frozen: bank 2 is full).
+lvl_bank_tab:   .byte 1, 0, 2, 3, 4, 5
 
 .proc lvl_music                  ; start the current level's tune
     ldx cur_level
