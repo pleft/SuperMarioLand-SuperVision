@@ -28,6 +28,24 @@ Newest entries at the top. Every entry should be traceable to ROM bytes/code.
 rendering/perf rounds, blocks/powerups, enemies, goal+bonus game, death/title,
 audio phase. See docs/22 + docs/23 and the memory index.)
 
+## 2026-07-22 (4) rescue-ending regression fix (user screenshots: shifted texts + garbled Mario)
+
+De-anchoring the room machine (dropping +scroll_s from every draw) assumed the
+transition scroll ends at s=0. It did NOT: the scroll's last frame set e_own=1
+in the same logic frame cam reached 2464, so the NMI never processed the final
+32px shift -- the room rendered with the hardware window at s=31 (texts cut to
+"NK YOU MARIO.", and the walk-in erase missed Mario's stale image -> the
+doubled/garbled sprite). Fix: e_tmr=226 at @towalk; cam increments only while
+e_tmr>=3 (224 steps), leaving TWO settle frames for scroll_apply to process
+cam=2464 (fb0->308, s=0) before e_own starts skipping it. The captive trigger
+became `e_tmr==75` (cam=2240+227-e_tmr, deterministic) replacing the 16-bit
+cam>=2392 compare + e_sub flag -- net ~12 bytes freed, funding the gate.
+Sim-verified: XSCROLL=0 at E_WALKIN, full "THANK YOU MARIO." from col 1,
+single clean Mario through the whole scene.
+
+LESSON: "de-anchored" drawing is only valid if the thing that anchors it is
+PROVEN to land at 0 -- measure the scroll state at the handoff, don't assume.
+
 ## 2026-07-22 (3) — one-shot pipes (user-verified on GB in 1-1 AND 1-3)
 The user tested the original: once you exit an underground room, pressing
 Down on its pipe does nothing — pipes are ONE-SHOT. Port: on entry the
