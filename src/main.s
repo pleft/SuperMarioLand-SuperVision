@@ -395,9 +395,10 @@ main_loop:
 @normal:
     jsr read_input
     lda pad_pressed              ; Start toggles pause (gameplay only, like the original's
-    and #GB_START                ; state<$0e gate; the bonus is not pausable)
-    beq @nopause
-    lda bonus_phase
+    and #GB_START                ; state<$0e gate; the bonus is not pausable -- and
+    beq @nopause                 ; neither is the clear/rescue sequence (GB states
+    lda bonus_phase              ; $0e+): pausing mid-ending let the strip restore
+    ora goal_phase               ; stamp map tiles over the hand-drawn room scenes
     bne @nopause
     lda paused
     eor #1
@@ -1465,6 +1466,11 @@ main_loop:
     sta e_phase
     lda #71                      ; GB states $1C+$1D
     sta e_tmr
+    ldx #9                       ; GB $1C+: the object engine stops for the ending.
+@oclr:                           ; update_objects keeps running here (line ~446), so
+    stz o_type,x                 ; live leftovers (stones, popups) GHOST-DRAW during
+    dex                          ; the 224px scroll -- their offscreen test wraps at
+    bpl @oclr                    ; 256px (user-caught: figures + glyph trails)
     rts
 :   lda goal_top                 ; top door -> the ladder bonus game first
     beq @next

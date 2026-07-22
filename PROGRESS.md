@@ -28,6 +28,34 @@ Newest entries at the top. Every entry should be traceable to ROM bytes/code.
 rendering/perf rounds, blocks/powerups, enemies, goal+bonus game, death/title,
 audio phase. See docs/22 + docs/23 and the memory index.)
 
+## 2026-07-22 (6) ending corruption: leftover objects ghost-drew through the scene
+
+User screenshots (full 1-1->1-2->1-3 session): a full-height column of '0'
+glyphs + stray figures mid-scroll, and a garbled Mario in the THANK YOU room.
+Root cause: goal_seq runs update_objects every frame ("platforms keep
+patrolling", correct for normal clears) -- but the x-3 rescue never stopped it,
+so slots still alive at the sphere trigger (3 stones; in real runs also the
+boss-kill 5000 popup / boom clouds) kept updating and drawing through the
+224px scroll and the hand-drawn room scenes. Their offscreen test wraps at
+256px, so during the long scroll (and with cam frozen in the rooms) they
+periodically re-enter the screen as ghost draws -- on Mario in the user's
+image #3. The '0' glyph stripe: tile id 0 is the '0' HUD digit (see
+read_map_tile @off0), stamped by ghost draws/restores with junk state.
+Repro: endfull.py (big superball Mario, real boss kill, mid-ending pauses)
+showed [0,21,21,21] alive through every ending phase.
+
+Fixes (FIXED, +11 bytes, 15 were free):
+1. The rescue trigger clears all 10 object slots (GB $1C+: the object engine
+   stops for the ending; last images stay in the fb = the GB freeze look).
+2. Pause is now refused during the clear/rescue (ora goal_phase in the gate)
+   -- GB state<$0e exact; unpausing mid-ending let pause_strip's restore
+   stamp map tiles over the room scenes. (User pauses to screenshot: use
+   RetroArch's own pause hotkey for the ending instead.)
+
+Verified: fullgame.py -- title -> 1-1 -> bonus -> 1-2 -> bonus -> 1-3 ->
+superball kill -> ending, 11K frames: slots [0..0] from the trigger on, all
+scroll/room shots clean, mid-ending pause refused (timeline 31f shorter).
+
 ## 2026-07-22 (5) 128K cart migration (Phase: pre-W2)
 
 The 64K image is full (bank2 0B, bank1 ~5B, FIXED ~1B free) with only World 1
