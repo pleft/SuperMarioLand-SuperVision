@@ -28,6 +28,20 @@ Newest entries at the top. Every entry should be traceable to ROM bytes/code.
 rendering/perf rounds, blocks/powerups, enemies, goal+bonus game, death/title,
 audio phase. See docs/22 + docs/23 and the memory index.)
 
+## 2026-07-25 (2) $F0 CORRECTED: a MATERIALIZING block, not a lift (user-caught)
+
+RULE 0 lesson repeated: I shipped the $F0 passage as a rising lift WITHOUT
+reading the GB's actual handler. GB $18C0 is two instructions: stamp the cell
+as tile $80 + the block hop -- content $F0 = the hidden cell MATERIALIZES as
+a solid block (a stepping stone). It also closes the loop on the user's other
+report: re-bonking the materialized $80 = the content-0 thud-nothing case.
+Port: w2_gift = jmp mark_used (the $5F mod renders used-solid) -- the whole
+OBJ_GIFT elevator wrapper deleted. Verified: bonk -> no object, room mod bit
+set, cell solid; Mario steps up and passes.
+Known cosmetic gaps vs GB (deferred, documented): the GB pre-renders $F0
+cells as visible blocks (ours are hidden until bonked) and stamps the $80
+?-glyph (ours shows the $7F used-block glyph).
+
 ## 2026-07-25 W2 KIT ONLINE: Suu + spiky ball + THE RISING LIFT in World 2
 
 The shared-kit refactor: 7 include slices (src/kit_sh1..7.inc) carved out of

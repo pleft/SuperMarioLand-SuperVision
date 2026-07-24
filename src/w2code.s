@@ -40,7 +40,13 @@ init:                            ; $1500: bind our vector table
     rts
 
 vec_tab:
-    .addr w2_spawn, w2_update, l3_token, l3_gift, w2_draw, l3_width
+    .addr w2_spawn, w2_update, l3_token, w2_gift, w2_draw, l3_width
+
+.proc w2_gift                    ; content $F0 (GB $18C0, READ this time): the
+    jmp mark_used                ; hidden cell MATERIALIZES as a solid block (GB
+.endproc                         ; stamps $80; our mod renders $5F as used-solid).
+                                 ; No object, no lift -- a stepping block. Its
+                                 ; re-bonk = the content-0 "nothing" case.
 
 .proc w2_spawn                   ; A = GB type, Y = spawn entry byte offset
     cmp #$02
