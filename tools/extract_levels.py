@@ -133,7 +133,7 @@ def decode_pipes(d, level, seg_flat, seg_room):
 
 BLOCK_TABLE = 0x6536              # bank 3: per-level pointer -> ?-block contents list
 
-def decode_blocks(d, level, seg_flat, cols):
+def decode_blocks(d, level, seg_flat, cols, rooms, seg_room):
     """?-block contents @ bank3 $6536[level]: 3-byte entries [segment, col-in-seg, value],
     $FF-terminated (Call_000_2321). The value ($c0cd) is what the block holds: $28 = Super
     Mushroom (-> $2d superball if Mario is already big); others = star/superball/multi-coin.
@@ -146,6 +146,17 @@ def decode_blocks(d, level, seg_flat, cols):
         if seg == 0xFF:
             break
         col, val = d[o + 1], d[o + 2]; o += 3
+        if seg in seg_room:
+            # ROOM-segment contents (e.g. 2-1's hidden power-up blocks, user-caught
+            # defaulting to coins): key = 512 + room*32 + local col -- the port's
+            # find_block builds the same key in room_mode (surface cols never
+            # reach 512, so the namespaces cannot collide)
+            room = seg_room[seg]
+            rows = [r for r in range(COL_HEIGHT)
+                    if rooms[room][col][r] in (0x80, 0x81, 0x5F)] if col < 20 else []
+            out.append({"col": 512 + room * 32 + col, "row": rows[0] if rows else 0,
+                        "value": val})
+            continue
         if seg not in seg_flat:
             continue
         fc = seg_flat[seg] + col
@@ -204,7 +215,7 @@ def main():
         segs = walk_segments(d, bank, seg_tab)      # segment list, $FF-terminated
         cols, rooms, seg_flat, seg_room = decode_level(d, bank, seg_tab, LEVEL_START_SEG.get(lvl, DEFAULT_START_SEG))
         pipes = decode_pipes(d, lvl, seg_flat, seg_room)
-        blocks = decode_blocks(d, lvl, seg_flat, cols)
+        blocks = decode_blocks(d, lvl, seg_flat, cols, rooms, seg_room)
         spawns = decode_spawns(d, bank, spawn_p, lvl)
         lvldata = {
             "level": lvl, "world": world, "stage": lvl % 3 + 1, "bank": bank, "param": param,

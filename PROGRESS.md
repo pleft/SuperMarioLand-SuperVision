@@ -28,6 +28,31 @@ Newest entries at the top. Every entry should be traceable to ROM bytes/code.
 rendering/perf rounds, blocks/powerups, enemies, goal+bonus game, death/title,
 audio phase. See docs/22 + docs/23 and the memory index.)
 
+## 2026-07-24 SECRETS: room ?-block contents are now GB-true (user request)
+
+The extractor only mapped block CONTENTS for surface segments, so every
+underground-room block fell back to a single coin. GB truth (bank3 $6536 raw
+entries for room segments): 2-1 room0's hidden $5F block (col 1 row 10) and
+its col-9 ?-block both hold $28 (mushroom/flower!) -- the user's "bonk the
+invisible block to reach the upper exit" secret; 1-3's rooms hold a 1-UP
+($2A), a mushroom and a multi-coin ($C0) that have been silently wrong since
+W1 shipped.
+
+Fix: extractor emits room entries under key 512 + room*32 + local col;
+find_block builds the same key when room_mode (blk_key zp pair -- NOTE:
+frame_flag/frame_count MUST stay at zp $00/$01, svharness pokes them by hard
+address; inserting blk_key at the ZP head wedged every sim in a fake-NMI wait
+until moved after them). Bytes: bank 2 was 11 over -> donors: l3_spawn
+restructured over obj_alloc_typed (-8), lvl_bank_tab now stores SYS_CTRL-
+pre-shifted bank bits killing load_level's asl chain (-5), one redundant clc
+(-1). (Also learned: lvl_track_tab/lvl_bank_tab sit in the LEVELS prefix --
+the 'moved to FIXED' comment was wrong; that was the mystery +6 of 07-22.)
+
+Verified: w2secret.py enters 2-1's room via the col-82 pipe, bonks the hidden
+block -> it turns solid (the stepping stone) AND spawns OBJ_FLOWER for big
+Mario (was: coin). roomtest all GB-true; walk13e full 1-3 ending -> bonus
+(exercises the restructured l3_spawn boss path). DBG-IDENTICAL.
+
 ## 2026-07-22 (7) WORLD 2 SCAFFOLD: 2-1/2-2/2-3 load, render and play as walker levels
 
 RULE-0 finding that shaped everything: GB SelectWorldBank ($0D6D, disasm) shows

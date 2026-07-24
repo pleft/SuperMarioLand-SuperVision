@@ -16,8 +16,11 @@
 
 ; ---------------------------------------------------------------------------
 .segment "ZEROPAGE"
-frame_flag:  .res 1          ; set by NMI, consumed by main loop
+frame_flag:  .res 1          ; set by NMI, consumed by main loop -- MUST stay at
+                             ; $00 (frame_count at $01): svharness pokes them by
+                             ; hard address as the fake NMI tick
 frame_count: .res 1          ; ++ every NMI (~61 Hz)
+blk_key:     .res 2          ; find_block compare key (room-namespaced)
 pad_held:    .res 1          ; current buttons, GB layout (0A 1B 2Sel 3St 4R 5L 6Up 7Dn)
 pad_prev:    .res 1
 pad_pressed: .res 1          ; newly pressed this frame
@@ -838,13 +841,30 @@ main_loop:
 ; find_block: search the contents table for (feet_col, mrow). Returns C=1 + A=value if listed,
 ; else C=0. (Unlisted ?-blocks hold a single coin.)
 .proc find_block
+    lda feet_col                 ; room contents are namespaced: key = 512 +
+    sta blk_key                  ; room*32 + local col (extractor writes the same;
+    lda feet_col+1               ; surface cols never reach 512 -- 2-1's hidden
+    sta blk_key+1                ; room power-ups read as coins before this)
+    lda room_mode
+    beq @go
+    lda pipe_room
+    asl
+    asl
+    asl
+    asl
+    asl                          ; pipe_room <= 3: the asl chain shifts out zeros,
+    adc feet_col                 ; so C is clear here (no clc -- FIXED is at 0 free)
+    sta blk_key
+    lda #2
+    sta blk_key+1
+@go:
     ldx #0
 @loop:
     lda block_tab,x
-    cmp feet_col
+    cmp blk_key
     bne @next
     lda block_tab+1,x
-    cmp feet_col+1
+    cmp blk_key+1
     bne @next
     lda block_tab+2,x
     cmp mrow
@@ -8753,12 +8773,9 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     stz e_phase
     stz e_own
     ldx cur_level                ; map the level's ROM bank at $8000 (bank 0 hosts 1-2
-    lda lvl_bank_tab,x           ; beside the title — the smallest W1 level; 1-1 = bank 1).
-    asl                          ; Safe mid-proc: load_level sits in the common prefix,
-    asl                          ; byte-identical at this address in every bank.
-    asl
-    asl
-    asl
+    lda lvl_bank_tab,x           ; beside the title -- the smallest W1 level; 1-1 = bank
+                                 ; 1). Safe mid-proc: load_level sits in the common
+                                 ; prefix, byte-identical at this address in every bank.
     ora #(SYSCTRL_NMI_EN | SYSCTRL_TIMER_IRQ)
     sta SYS_CTRL
     lda #<level_hdr              ; header base: bank 0 = the linked address; banks 1+
@@ -9881,8 +9898,9 @@ MUS_T13 = 7                      ; track $03's index in the extractor's TRACKS l
 lvl_track_tab:  .byte MUS_LEVEL, MUS_LEVEL, MUS_T13   ; GB per-level table $07CE
                 .byte MUS_LEVEL, MUS_LEVEL, MUS_LEVEL  ; W2: slot 0 IS the world
                                                        ; theme (per-bank music patch)
-; level id -> ROM bank. In FIXED (the prefix is byte-frozen: bank 2 is full).
-lvl_bank_tab:   .byte 1, 0, 2, 3, 4, 5
+; level id -> ROM bank, PRE-SHIFTED into SYS_CTRL bits 7:5 (saves the asl chain
+; in load_level -- this table lives in the byte-frozen LEVELS prefix).
+lvl_bank_tab:   .byte 1<<5, 0<<5, 2<<5, 3<<5, 4<<5, 5<<5
 
 .proc lvl_music                  ; start the current level's tune
     ldx cur_level
@@ -9901,12 +9919,6 @@ FIRE_T  = $E2
 GIFT_T  = $E6                    ; (bat tiles: see bat_row_a/b below)
 
 .proc l3_spawn                   ; A = GB type, Y = spawn entry offset; C=0 spawned
-    pha
-    phy
-    jsr find_free_obj
-    ply
-    pla
-    bcs @full
     cmp #$02
     bne :+
     lda #OBJ_SUU
@@ -9921,7 +9933,8 @@ GIFT_T  = $E6                    ; (bat tiles: see bat_row_a/b below)
     bra @common
 :   lda #OBJ_BAT
 @common:
-    sta o_type,x
+    jsr obj_alloc_typed          ; (bytes: the old inline alloc paid for the room
+    bcs @full                    ;  block-contents entries -- bank 2 is packed)
     jsr spawn_tabx               ; exact rule: world x = fire + 192 + x_off*4
     lda spawn_tab+2,y
     sta o_y,x
