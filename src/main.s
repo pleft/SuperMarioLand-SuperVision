@@ -277,29 +277,9 @@ music2_data:                     ; 1-3 ending tracks (boss/rescue/reveal): FIXED
     cld                      ; 65C02: ensure binary mode
     ldx #$FF
     txs
-
-    ; --- clear zero page ---
-    lda #0
-    tax
-:   sta $00,x
-    inx
-    bne :-
-
-    ; --- clear WRAM $0200-$1FFF ---
-    lda #<$0200
-    sta ptr
-    lda #>$0200
-    sta ptr+1
-    ldx #$1E                 ; $1E pages = $0200..$1FFF
-    lda #0
-@clr:
-    ldy #0
-:   sta (ptr),y
-    iny
-    bne :-
-    inc ptr+1
-    dex
-    bne @clr
+    lda #(6 << 5)            ; map BANK 6 (display/ints still off): the one-shot
+    sta SYS_CTRL             ; boot bulk runs from there -- FIXED is byte-starved
+    jsr boot6_init           ; ZP + WRAM clears, one-shot table builders
 
     ; --- select ROM bank 0 + enable display/NMI BEFORE drawing, so chardata at
     ;     $8000 is mapped while we blit (MAME needs this; Potator defaults to bank 0).
@@ -315,7 +295,6 @@ music2_data:                     ; 1-3 ending tracks (boss/rescue/reveal): FIXED
     stz XSCROLL
     stz YSCROLL
 
-    jsr build_revpix             ; pixel-reverse lookup for horizontal sprite flip
     jsr build_row48              ; dy*48 VRAM-stride tables
     jsr build_shtab              ; sub-pixel blit shift tables
     stz p_shlo                   ; the table pointers' lo bytes stay 0 forever
@@ -351,6 +330,71 @@ music2_data:                     ; 1-3 ending tracks (boss/rescue/reveal): FIXED
     sta mus_rate
     jsr lvl_music                ; per-level tune (GB table $07CE)
     cli
+
+
+.segment "BOOT6"                 ; ONE-SHOT boot bulk: runs with bank 6 mapped,
+                                 ; interrupts/display off (called from reset)
+.proc boot6_init
+    lda #0                       ; --- clear zero page ---
+    tax
+:   sta $00,x
+    inx
+    bne :-
+    lda #<$0200                  ; --- clear WRAM $0200-$1FFF ---
+    sta ptr
+    lda #>$0200
+    sta ptr+1
+    ldx #$1E                     ; $1E pages = $0200..$1FFF
+    lda #0
+@clr:
+    ldy #0
+:   sta (ptr),y
+    iny
+    bne :-
+    inc ptr+1
+    dex
+    bne @clr
+    jsr build_revpix             ; pixel-reverse lookup for horizontal sprite flip
+    rts
+.endproc
+.proc build_revpix
+    ldx #0
+@l:
+    txa
+    lsr                          ; px3 (bits7:6) -> bits1:0
+    lsr
+    lsr
+    lsr
+    lsr
+    lsr
+    sta tmpL
+    txa
+    lsr                          ; px2 (5:4) -> 3:2
+    lsr
+    and #$0C
+    ora tmpL
+    sta tmpL
+    txa
+    asl                          ; px1 (3:2) -> 5:4
+    asl
+    and #$30
+    ora tmpL
+    sta tmpL
+    txa
+    asl                          ; px0 (1:0) -> 7:6
+    asl
+    asl
+    asl
+    asl
+    asl
+    and #$C0
+    ora tmpL
+    sta revpix,x
+    inx
+    bne @l
+    rts
+.endproc
+.segment "CODE"
 
 main_loop:
     lda frame_flag
@@ -773,12 +817,13 @@ main_loop:
 :   jsr spawn_bounce             ; the block hops as a sprite while the outcome resolves
     jsr bonk_kill_above          ; the hop kills whoever stands on the block
     jsr find_block               ; C=1,A=value if this block is in the contents table
-    bcc @inert
-    cmp #$c0                     ; multi-coin: special lifecycle, NOT marked used yet
-    beq @multicoin
-    cmp #$F0                     ; $F0 = the RISING-LIFT content (2-1/2-2 passages):
-    beq @inert                   ; real lift = W2 overlay work; until then it thuds
-    pha                          ; and the cell stays LIVE (never marked used)
+    bcc @coin                    ; UNLISTED visible ?-block = a single coin (the
+    cmp #$c0                     ; long-standing, user-verified W1 behavior --
+    beq @multicoin               ; hidden $5F cells with no content stay inert via
+    cmp #$F0                     ; the ceiling @hidden path, which never gets here)
+    beq @inert                   ; $F0 = the RISING-LIFT content (2-1/2-2 passages):
+    pha                          ; real lift = W2 overlay work; until then it thuds
+                                 ; and the cell stays LIVE (never marked used)
     jsr mark_used                ; one-shot block -> used ($7F) + redraw
     pla
     cmp #$28                     ; $28 = power-up block
@@ -807,8 +852,10 @@ main_loop:
 @gift:
     jmp l3_gift
 @inert:
-    lda #SFX_DFE0_07             ; GB truth (user-caught in 2-1's room): an UNLISTED
-    jmp sfx_play                 ; ?-block just thuds and hops -- no coin, no used mark
+    lda #SFX_DFE0_07             ; the $F0 lift cell: thud only until the real lift
+    jmp sfx_play
+@coin:
+    jsr mark_used
 @coinspawn:
     jsr spawn_coin               ; coin-pop animation
     jmp award_coin               ; +1 coin, +100 score, 1-up at 100
@@ -9455,43 +9502,7 @@ row48_hi: .res 160           ; paid in EVERY bank)
 
 ; ---------------------------------------------------------------------------
 ; build_revpix: revpix[b] = b with its four 2bpp pixels reversed (px0<->px3, px1<->px2).
-.proc build_revpix
-    ldx #0
-@l:
-    txa
-    lsr                          ; px3 (bits7:6) -> bits1:0
-    lsr
-    lsr
-    lsr
-    lsr
-    lsr
-    sta tmpL
-    txa
-    lsr                          ; px2 (5:4) -> 3:2
-    lsr
-    and #$0C
-    ora tmpL
-    sta tmpL
-    txa
-    asl                          ; px1 (3:2) -> 5:4
-    asl
-    and #$30
-    ora tmpL
-    sta tmpL
-    txa
-    asl                          ; px0 (1:0) -> 7:6
-    asl
-    asl
-    asl
-    asl
-    asl
-    and #$C0
-    ora tmpL
-    sta revpix,x
-    inx
-    bne @l
-    rts
-.endproc
+; (build_revpix moved to BOOT6: one-shot boot code runs from bank 6)
 
 ; ---------------------------------------------------------------------------
 ; merge_byte_A: transparent merge of source byte A into (cur_dst),y.

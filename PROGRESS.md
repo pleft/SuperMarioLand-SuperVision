@@ -28,6 +28,18 @@ Newest entries at the top. Every entry should be traceable to ROM bytes/code.
 rendering/perf rounds, blocks/powerups, enemies, goal+bonus game, death/title,
 audio phase. See docs/22 + docs/23 and the memory index.)
 
+## 2026-07-24 (3) REGRESSION + REVERT: unlisted ?-blocks coin again
+
+Commit 88189b8 wrongly generalized "content miss = nothing" to ALL unlisted
+?-blocks -- most of W1's coin blocks are unlisted, so bonking them did NOTHING
+(user-caught, rightly furious). The GB inference was never runtime-verified:
+RULE 0 violated. Reverted: unlisted VISIBLE ?-block = single coin (sim-checked
+coins 0->1); the $F0 lift cell keeps the thud-only interim (it was the cell
+that wrongly coined in the user's room report -- NOT a plain hidden block);
+contentless hidden $5F cells stay inert via the ceiling @hidden path.
+STANDING RULE going forward: any change to user-play-verified behavior gets a
+GB-side runtime check AND a pixel-level sim check before commit.
+
 ## 2026-07-24 (2) GB physics rules the W2 playtest exposed (all RULE-0 from disasm)
 
 1. ONE-WAY PLATFORMS (user: "no bonk in the original"): GB $1A6B classifier +
