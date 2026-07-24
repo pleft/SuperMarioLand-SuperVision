@@ -11,7 +11,7 @@
 
 .import chardata
 .export level_hdr
-level_hdr:                                    ; 20-byte level header
+level_hdr:                                    ; 22-byte level header
     .addr level0_map                          ; +0  surface map (column-major, 16 B/col)
     .word (level0_end - level0_map) / 16      ; +2  column count
     .word 0                                   ; +4  room 0 map (0 = none — 1-2's two ROM
@@ -23,6 +23,7 @@ level_hdr:                                    ; 20-byte level header
     .byte (block_table_end - block_table) / 4 ; +15 block count
     .addr spawn_table                         ; +16 enemy spawns ($FFFF-terminated)
     .addr chardata                            ; +18 quad-tile $A0-$DC base (W1: FIXED)
+    .word 0                                   ; +20 overlay blob address (W1: none)
 
 level0_map:
     .incbin "build/levels/level_01.bin"      ; World 1-2, 16 tiles/column

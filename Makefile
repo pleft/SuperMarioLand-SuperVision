@@ -5,7 +5,7 @@
 
 AS      = ca65
 LD      = ld65
-ASFLAGS = --cpu 65C02 -I src
+ASFLAGS = --cpu 65C02 -g -I src
 CFG     = cfg/supervision.cfg
 ROM_IN  = super-mario-land-gb.gb
 SVT     = build/gfx/w1_obj_8000.svt
@@ -20,10 +20,14 @@ ROM     = build/super-mario-land.sv
 
 all: $(ROM)
 
-$(ROM): $(OBJS) $(CFG) tools/pack_banks.py $(W2GFX)
-	$(LD) -C $(CFG) $(OBJS) -o $@ -m build/rom.map -Ln build/rom.lbl
+$(ROM): $(OBJS) $(CFG) tools/pack_banks.py tools/gen_w2abi.py src/w2code.s cfg/w2code.cfg $(W2GFX)
+	$(LD) -C $(CFG) $(OBJS) -o $@ -m build/rom.map -Ln build/rom.lbl --dbgfile build/rel.dbg
+	python3 tools/gen_w2abi.py build/rel.dbg build/w2abi.inc
+	$(AS) $(ASFLAGS) -I build src/w2code.s -o build/w2code.o
+	$(LD) -C cfg/w2code.cfg build/w2code.o -o build/w2code.bin
 	python3 tools/pack_banks.py $@ build/rom.map 0:1 2:2 3:3 4:4 5:5
-	@echo "built $@ ($$(wc -c < $@) bytes)"
+	@cp build/rel.dbg build/dbg.txt   # the sim harness reads symbols from here:
+	@echo "built $@ ($$(wc -c < $@) bytes)"   # no separate debug build anymore
 
 build/main.o: src/main.s src/supervision.inc build/levels/title_map.bin build/gfx/title_tiles.svt build/audio/sfx.bin build/audio/sfx.inc build/audio/music.bin build/audio/music.inc
 	@mkdir -p build

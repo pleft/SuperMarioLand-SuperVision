@@ -36,7 +36,7 @@ import os, re, json, sys
 BANK = 0x4000
 BASE = 0x8000
 NBANKS = 8                                  # 128K cart: banks 0-6 + FIXED (last)
-HDR_SIZE = 20
+HDR_SIZE = 22
 W1_THEME_OFF = 304                          # track $07's offset in music_data
 W1_THEME_SIZE = 511                         # its byte-space (the W2 donor slot)
 
@@ -140,12 +140,17 @@ def main():
                           ("blocks", blobs["blocks"]), ("spawns", blobs["spawns"])]:
             place[key] = addr if data else 0
             addr += len(data)
+        w2blob = b""
         if level >= 3:
             quad_base = addr - 0xA00            # blob serves quad tiles $A0-$DC
-            ovl_at = addr
             addr += len(w2_ovl1)
+            w2blob = open("build/w2code.bin", "rb").read()
+            assert len(w2blob) <= 0x800, "w2code blob exceeds the $1500 window"
+            ovl_code_at = addr                  # the W2 kit overlay (header +20/21)
+            addr += len(w2blob)
         else:
             quad_base = chardata
+            ovl_code_at = 0
         assert addr <= BASE + BANK, f"level {level}: data overflows the bank by {addr - BASE - BANK} bytes"
 
         cols = len(blobs["map"]) // 16
@@ -157,12 +162,13 @@ def main():
         hdr.append(len(blobs["blocks"]) // 4)
         hdr += bytes((place["spawns"] & 0xFF, place["spawns"] >> 8))
         hdr += bytes((quad_base & 0xFF, quad_base >> 8))
+        hdr += bytes((ovl_code_at & 0xFF, ovl_code_at >> 8))
         assert len(hdr) == HDR_SIZE
 
         region = hdr + blobs["map"] + rooms[0] + rooms[1] + rooms[2] \
                      + blobs["pipes"] + blobs["blocks"] + blobs["spawns"]
         if level >= 3:
-            region += w2_ovl1
+            region += w2_ovl1 + w2blob
         region = preblob + region
         bank_img = pre + region
         assert len(bank_img) <= BANK, \

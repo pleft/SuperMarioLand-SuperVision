@@ -28,6 +28,31 @@ Newest entries at the top. Every entry should be traceable to ROM bytes/code.
 rendering/perf rounds, blocks/powerups, enemies, goal+bonus game, death/title,
 audio phase. See docs/22 + docs/23 and the memory index.)
 
+## 2026-07-24 (5) OVERLAY ABI: RAM vectors -- the W2 kit door is open
+
+The engine now reaches window ($1500) code through 6 RAM vectors (ovl_vec:
+spawn/update/token/gift/draw/width -- measured: only these are engine-called;
+the other 10 l3_* are window-internal). ovl_bind (after every load_level)
+binds: W1 -> the 1-3 kit's addresses (staged to l3vec_ram by BOOT6 -- the
+table costs FIXED nothing in bank 6), W2+ -> the level's own overlay blob
+(header +20/21 -> copy_win8 -> jmp $1500 = the blob's init binds itself).
+L3CODE is UNTOUCHED (bank 2 packed to its last byte: one BIT-skip donor).
+
+The W2 blob: src/w2code.s, assembled STANDALONE after the main link against
+build/w2abi.inc (tools/gen_w2abi.py reads the link's debug info -- release
+objects now carry -g, which also KILLS the separate debug build: dbg.txt is
+copied from the release link, ending the stale-symbol sim trap for good).
+Packer ships it inside each W2 bank's region. This iteration = safe scaffold
+(spawn consumes, handlers no-op); next = suu/rock/gift shared includes (the
+$F0 lift!), then Honen + the Yurarin leaper.
+
+Header is 22 bytes now (+20/21 = overlay blob addr). Byte funding: l3vec_tab
++ staging in BOOT6, redundant p_shlo/p_shhi inits dropped, spawn-gate clc
+folded into bcc, l3_spawn BIT-skip.
+Verified: walk13e (1-3 ending THROUGH THE VECTORS -> bonus), roomtest all
+GB-true, w2test 2-1 end-to-end on the scaffold blob, ROOM-twin lattice
+extension exact (cam 2488/fb0 311/s=0).
+
 ## 2026-07-24 (4) THE ENDING CORRUPTION, ROOT-CAUSED FOR GOOD: fb lattice rebase
 
 Why it kept coming back: the rescue scene's de-anchored drawing assumes the

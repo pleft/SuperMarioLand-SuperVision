@@ -219,7 +219,7 @@ shtab_lo:    .res 1024      ; 4 pages: subx 0..3
 shtab_hi:    .res 1024
 ; --- per-level bindings, set by load_level from the current bank's level_hdr ---
 cur_level:   .res 1          ; level id 0.. (GB $ffe4); selects the ROM bank
-hdr_buf:     .res 20         ; RAM copy of the current bank's level header
+hdr_buf:     .res 22         ; RAM copy of the current bank's level header
                              ; (+18/19: base for quad tiles $A0-$DC -- chardata for
                              ; W1; the in-bank overlay blob minus $A00 for W2+)
 p1c:         .res 1          ; render pass-1 loop counter (rotated scan)
@@ -261,6 +261,10 @@ o_nvx:       .res 10          ; this frame's computed screen x (render_all pass 
 o_ndy:       .res 10          ; this frame's computed dy
 o_nfl:       .res 10          ; bit0 = dirty, bit1 = visible (render_all flags)
 o_hp:        .res 10          ; extra hits to survive (fly: 1 -- two balls kill, user/GB)
+ovl_vec:     .res 12          ; overlay ABI vectors: spawn,update,token,gift,draw,
+                             ; width. 1-3 -> the kit's link addresses (staged to
+                             ; l3vec_ram at boot); W2+ -> the blob's own table
+l3vec_ram:   .res 12          ; the kit's vector values (copied from BOOT6 data)
 
 .segment "ZEROPAGE"
 mus_base:    .res 2          ; current track's data base (per-track: LEVELS or FIXED).
@@ -298,12 +302,13 @@ music2_data:                     ; 1-3 ending tracks (boss/rescue/reveal): FIXED
 
     jsr build_row48              ; dy*48 VRAM-stride tables
     jsr build_shtab              ; sub-pixel blit shift tables
-    stz p_shlo                   ; the table pointers' lo bytes stay 0 forever
-    stz p_shhi
+                                 ; (p_shlo/p_shhi stay 0 forever -- the boot6 ZP
+                                 ; clear already zeroed them)
     jsr clear_vram
     jsr title_screen             ; the SML title; waits for Start (Select = level select)
     jsr clear_vram
     jsr load_level               ; map the bank + bind level pointers/limits to its header
+    jsr ovl_bind                 ; window vectors for this level's overlay
     lda surf_map                 ; start on the surface map
     sta map_base
     lda surf_map+1
@@ -356,7 +361,13 @@ music2_data:                     ; 1-3 ending tracks (boss/rescue/reveal): FIXED
     dex
     bne @clr
     jsr build_revpix             ; pixel-reverse lookup for horizontal sprite flip
+    ldx #11                      ; stage the 1-3 kit's overlay-vector values: the
+:   lda l3vec_tab,x              ; table costs FIXED nothing here in bank 6
+    sta l3vec_ram,x
+    dex
+    bpl :-
     rts
+l3vec_tab:  .addr l3_spawn, l3_update, l3_token, l3_gift, l3_draw, l3_width
 .endproc
 .proc build_revpix
     ldx #0
@@ -851,7 +862,7 @@ main_loop:
 @star:
     jmp spawn_star
 @gift:
-    jmp l3_gift
+    jmp (ovl_vec+6)
 @inert:
     lda #SFX_DFE0_07             ; the $F0 lift cell: thud only until the real lift
     jmp sfx_play
@@ -2374,6 +2385,8 @@ moth_tiles: .incbin "../build/gfx/moth.svt"
 .proc copy_overlay               ; bank 1 -> 8 pages from (lvl_ptr) to $1500
     lda #(1 << 5) | (SYSCTRL_NMI_EN | SYSCTRL_TIMER_IRQ)
     sta SYS_CTRL
+.endproc                         ; falls through
+.proc copy_win8                  ; 8 pages from (lvl_ptr) to the $1500 window
     lda #$15
     sta tmpH2
     stz tmpL2
@@ -3437,6 +3450,7 @@ NUM_LEVELS = 6
     lda #0                       ; past the last shipped level: wrap to 1-1
 :   sta cur_level
     jsr load_level               ; map the new bank + rebind the level pointers
+    jsr ovl_bind                 ; window vectors for this level's overlay
     lda surf_map
     sta map_base
     lda surf_map+1
@@ -5631,20 +5645,23 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     cmp #$08
     beq @l3
 @unk:
-    clc                          ; UNKNOWN type (W2+ not yet ported): consume the
-    bra @skip                    ; entry -- a set carry here would jam the spawner
+    ldx cur_level                ; W2+: EVERY unknown type goes to the overlay's
+    cpx #3                       ; spawn entry (it consumes what it doesn't know);
+    bcs @ovl                     ; W1 surface: consume (C is clear on this path --
+    bra @skip                    ; a set carry would jam the spawner)
 @l3:
-    ldx cur_level                ; type ids are PER-WORLD: $02/$0C/$3F/$08 mean the
-    cpx #2                       ; 1-3 kit ONLY on level 2 (elsewhere the overlay
-    bne @unk                     ; is not resident -- jsr'ing it hung 2-1, f1720)
-    jsr l3_spawn
+    ldx cur_level                ; kit types ($02/$0C/$3F/$08): levels 2+ have a
+    cpx #2                       ; resident overlay; on 0/1 the window is stale
+    bcc @unk
+@ovl:
+    jsr ovl_spawn
     bra @skip
 @chib:
     jsr spawn_chib
 @skip:
     bcs @done                    ; pool full: DON'T consume — retry this entry next
     inc spawn_idx                ; frame (spawn x is fire-based so it still lands
-    bra spawn_check              ; right; the GB dodges this with 10 slots). Several
+    jmp spawn_check              ; right; the GB dodges this with 10 slots). Several
 @done:                           ; entries can share a fire column.
     rts
 .endproc
@@ -5667,6 +5684,33 @@ riding_this:                     ; Z=1 if Mario rides slot oi
 .proc spawn_chib
     lda #OBJ_CHIB
 .endproc                         ; falls into the shared walker core
+; --- overlay ABI: the engine reaches window code ($1500) through RAM vectors,
+; so DIFFERENT overlays (the 1-3 kit / the W2 kit) can back the same calls.
+ovl_spawn:  jmp (ovl_vec+0)      ; A = GB type, Y = spawn entry (C=0 spawned/consumed)
+ovl_update: jmp (ovl_vec+2)      ; X = slot (types >= OBJ_GIFT)
+ovl_width:  jmp (ovl_vec+10)     ; A = erase width for kit types
+.proc ovl_bind                   ; call RIGHT AFTER load_level (level bank mapped):
+    lda cur_level                ; bind the window vectors for this level's overlay
+    cmp #3
+    bcs @w2
+    ldx #11                      ; W1: the kit's addresses (staged at boot; levels
+                                 ; 0/1 never route through them -- harmless)
+:   lda l3vec_ram,x
+    sta ovl_vec,x
+    dex
+    bpl :-
+    rts
+@w2:
+    lda hdr_buf+20               ; W2+: header +20/21 = the blob's bank address
+    sta lvl_ptr
+    lda hdr_buf+21
+    sta lvl_ptr+1
+    jsr copy_win8                ; blob -> $1500 (8 pages; bank already mapped)
+    jmp $1500                    ; the blob's init entry binds its own vectors
+@rts:
+    rts
+.endproc
+
 .proc spawn_edge_walker          ; A = type; Y = table byte offset. Left-walker
     jsr obj_alloc_typed          ; entering at world cam+180 (GB enters at OAM 188)
     bcs @full
@@ -6979,7 +7023,7 @@ title_tiles:                     ; the used tiles, SV-packed
     lda o_type,x
     cmp #OBJ_GIFT
     bcc :+
-    jmp l3_token                 ; per-type tokens for the 1-3 kit
+    jmp (ovl_vec+4)              ; per-type tokens for the resident kit
 :   cmp #OBJ_ARROW
     beq @none
     cmp #OBJ_STONE
@@ -7510,7 +7554,7 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     jmp @next
 :   cmp #OBJ_GIFT
     bcc :+
-    jsr l3_update                ; the 1-3 kit (bank-2 RAM overlay, types 22+)
+    jsr ovl_update               ; the resident kit overlay (types 22+)
     jmp @next
 :   cmp #OBJ_COIN
     beq @coin
@@ -8129,7 +8173,7 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     ldy o_type,x                 ; bit7 = TALL (16px: the Nokobon)
     cpy #OBJ_GIFT
     bcc :+
-    jsr l3_width                 ; erase widths for the 1-3 kit
+    jsr ovl_width                ; erase widths for the resident kit
     bra @wset
 :
     cpy #OBJ_POPUP
@@ -8322,7 +8366,7 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     lda o_type,x
     cmp #OBJ_GIFT
     bcc :+
-    jmp l3_draw                  ; the 1-3 kit draws (RAM overlay)
+    jmp (ovl_vec+8)              ; the resident kit draws (RAM overlay)
 :   cmp #OBJ_COIN
     bne :+
     jmp @coin
@@ -8879,7 +8923,7 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     ldy #>(__TITLE0_LOAD__+__L11CODE_SIZE__+__L13E_SIZE__)
     sty lvl_ptr+1
 @hcopy:
-    ldy #19                      ; header -> RAM (20 bytes)
+    ldy #21                      ; header -> RAM (22 bytes; +20/21 = overlay blob)
 :   lda (lvl_ptr),y
     sta hdr_buf,y
     dey
@@ -9970,8 +10014,8 @@ GIFT_T  = $E6                    ; (bat tiles: see bat_row_a/b below)
 :   cmp #$3F
     bne :+
     lda #OBJ_GAO
-    bra @common
-:   lda #OBJ_BAT
+    .byte $2C                    ; BIT abs: swallow the LDA (saves a byte -- bank 2
+:   lda #OBJ_BAT                 ; is packed to the last byte)
 @common:
     jsr obj_alloc_typed          ; (bytes: the old inline alloc paid for the room
     bcs @full                    ;  block-contents entries -- bank 2 is packed)
