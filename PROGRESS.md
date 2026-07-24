@@ -28,6 +28,34 @@ Newest entries at the top. Every entry should be traceable to ROM bytes/code.
 rendering/perf rounds, blocks/powerups, enemies, goal+bonus game, death/title,
 audio phase. See docs/22 + docs/23 and the memory index.)
 
+## 2026-07-24 (4) THE ENDING CORRUPTION, ROOT-CAUSED FOR GOOD: fb lattice rebase
+
+Why it kept coming back: the rescue scene's de-anchored drawing assumes the
+transition scroll ends at scroll_s==0. That was only true on the fb shift
+lattice of a STRAIGHT run (fb0 pinned 276 at the arena, offset 32). Visiting
+an UNDERGROUND ROOM mid-level re-renders the fb at the pipe's resume column,
+REBASING the 4-col lattice: the arena then pins at fb0 277..279 (offset
+8/16/24), one extra shift PRE-STREAMS the first virtual columns while
+ending13 is still 0 (tile 0 -> the literal '0'-glyph columns the user saw
+appear as the scroll starts), and a fixed 224px scroll mathematically CANNOT
+land at s=0 -> the whole room scene draws shifted, Mario's erases miss = the
+garble. Reproduced deterministically with a room-visit twin (ROOM=1
+endfull.py: fb0=307 s=8); straight/death/mash/big twins were always clean --
+which is why it looked random: it tracked WHETHER THE RUN VISITED A ROOM.
+
+Fix (self-aligning, lattice-independent):
+1. @towalk measures the pinned offset and EXTENDS the scroll by (32-s)&31 px
+   (e_tmr = 226+D; captive mark = 75+D in e_cap) -> the scroll always ends
+   s=0 on ANY lattice. Room content is world-anchored bands (horizontally
+   uniform), captive/texts fb-anchored: the extension is invisible.
+2. read_map_tile @off0 returns $2C (blank) instead of 0 -- virtual columns
+   can pre-stream into the margin on a rebased lattice and tile 0 draws as
+   '0' glyphs.
+Verified: ROOM twin now cam=2488 fb0=311 s=0 (extension +24 exact), straight
+twin unchanged (2464/308/0), both -> bonus; roomtest/w2test/combtest green.
+DBG-IDENTICAL. (Also: do_respawn's 144-frame death pause busy-waits on
+frame_flag -- harness twins must feed ticks through it, not call it a hang.)
+
 ## 2026-07-24 (3) REGRESSION + REVERT: unlisted ?-blocks coin again
 
 Commit 88189b8 wrongly generalized "content miss = nothing" to ALL unlisted

@@ -109,6 +109,7 @@ e_my:        .res 1           ; moth screen y (top)
 e_px:        .res 1           ; last drawn moth box (for the blank erase)
 e_py:        .res 1
 e_hop:       .res 1           ; hop-arc segment index / rest counter
+e_cap:       .res 1           ; scroll: captive-draw e_tmr mark (75 + lattice pad)
 b_tick:      .res 1          ; 4-frame tick divider ($da22; harness-calibrated)
 b_ladder:    .res 1          ; ladder cycle counter 1..6 ($da27); odd = visible at gap (n-1)/2
 b_floor:     .res 1          ; Mario's floor 0..3 (top..bottom)
@@ -709,9 +710,9 @@ main_loop:
     adc #$8E
     rts
 @off0:
-    lda #0
-    rts
-.endproc
+    lda #$2C                     ; blank SKY: this can pre-stream into the fb margin
+    rts                          ; near the level end (a room visit rebases the fb
+.endproc                         ; lattice) -- tile 0 drew as literal '0' glyphs
 
 ; mod_ptr: map_ptr = &tile_mod[feet_col*2 + (mrow>>3)] ; tmpL = bit mask (1<<(mrow&7)).
 ; The "modified" bitmap is 1 bit per surface (col,row): set = used ?-block / broken brick.
@@ -1711,7 +1712,7 @@ MARIO_INX = 60                   ; Mario's walk-in stop (GB 61; he must not
     bne :+
     inc cam_x+1
 :   lda e_tmr                    ; the captive: drawn ONCE when her columns have
-    cmp #75                      ; streamed (cam=2240+227-e_tmr -> 2392 at 75;
+    cmp e_cap                    ; streamed (cam=2240+227+D-e_tmr -> 2392 at 75+D;
     bne @nocam                   ; deterministic, and cheaper than the old
     jsr l3e_captive_scroll       ; 16-bit compare -- pays for the settle gate)
 @nocam:
@@ -1742,10 +1743,18 @@ MARIO_INX = 60                   ; Mario's walk-in stop (GB 61; he must not
 @towalk:
     lda #E_WALKOUT               ; beat 2 done -> the transition SCROLL (GB $22/$23)
     sta e_phase
-    lda #226                     ; 224 cam steps + TWO settle frames: scroll_apply
-    sta e_tmr                    ; must PROCESS the final cam (2464) before e_own
-                                 ; starts skipping it, or the room sits at s=31
-                                 ; (user-caught: shifted texts + a stale Mario)
+    lda #32                      ; LATTICE NORMALIZATION (user-caught: a mid-level
+    sec                          ; ROOM VISIT re-renders the fb at the pipe resume
+    sbc scroll_s                 ; col, rebasing the 4-col shift lattice; the pinned
+    and #31                      ; arena offset is then 8/16/24 instead of 32, and a
+    sta e_cap                    ; fixed 224px scroll CANNOT end at s=0). Extend the
+    clc                          ; walk by (32-s)&31 px so it always lands s=0.
+    adc #226                     ; 224+D cam steps + TWO settle frames: scroll_apply
+    sta e_tmr                    ; must PROCESS the final cam before e_own starts
+    lda e_cap                    ; skipping it (else the room sits shifted).
+    clc                          ; captive trigger moves with the extension:
+    adc #75                      ; cam hits 2392 when e_tmr == 75 + D
+    sta e_cap
     lda fbmax_col                ; let the fb advance into the virtual room
     clc
     adc #32
