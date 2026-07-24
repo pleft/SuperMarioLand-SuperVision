@@ -28,6 +28,27 @@ Newest entries at the top. Every entry should be traceable to ROM bytes/code.
 rendering/perf rounds, blocks/powerups, enemies, goal+bonus game, death/title,
 audio phase. See docs/22 + docs/23 and the memory index.)
 
+## 2026-07-25 W2 KIT ONLINE: Suu + spiky ball + THE RISING LIFT in World 2
+
+The shared-kit refactor: 7 include slices (src/kit_sh1..7.inc) carved out of
+L3CODE -- BYTE-IDENTICAL (bank2 sha d4672d92 unchanged) -- now assembled into
+BOTH the 1-3 kit and the W2 overlay. src/w2code.s ships real content: w2_spawn
+($02 -> Suu, $0C -> spiky ball, else consume), w2_update/w2_draw 3-entry
+dispatch (GIFT/SUU/ROCK), l3_token/l3_width/l3_gift SHARED AS-IS. hit_qblock's
+$F0 content now routes to the overlay's gift handler = the RISING LIFT: the
+2-1/2-2 blocked room passages work (sim: bonk -> OBJ_GIFT emerges and sits,
+ride to rise -- the 1-3-proven object).
+The per-world ovl sheet became a packer SLICE (currently empty: suu/rock/gift
+draw COMMON tiles; Honen/leaper will set their range) -- bank3 breathes again.
+
+REGRESSION CAUGHT PRE-COMMIT (the fall-through trap, SECOND time): the thunk
+block landed between spawn_chib and spawn_edge_walker -- Chibibo's lda #12
+fell into ovl_spawn, which read A=12 as GB $0C = spiky ball (2-1 spawned
+rocks for every Goombo; W1 would have too). Fixed + .assert'ed: the
+noko->chib->walker chain now breaks the BUILD if split. Spawn-trace verified:
+2-1 = Chibibos/Nokobon/squash/popups/SUU 23 @cam1585 all correct; killtest
+boss flow, walk13e ending -> bonus green.
+
 ## 2026-07-24 (5) OVERLAY ABI: RAM vectors -- the W2 kit door is open
 
 The engine now reaches window ($1500) code through 6 RAM vectors (ovl_vec:

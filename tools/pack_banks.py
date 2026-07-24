@@ -142,8 +142,17 @@ def main():
             addr += len(data)
         w2blob = b""
         if level >= 3:
-            quad_base = addr - 0xA00            # blob serves quad tiles $A0-$DC
-            addr += len(w2_ovl1)
+            # per-world quad tiles $A0-$DC: ship only the slice current enemies
+            # use. THIS iteration's W2 kit (suu/rock/lift) draws COMMON tiles
+            # only -> no slice; when Honen/the leaper land, set their range.
+            OVL_LO, OVL_HI = 0, 0               # tile ids (inclusive), 0,0 = none
+            if OVL_HI > OVL_LO:
+                sl = w2_ovl1[(OVL_LO-0xA0)*16:(OVL_HI-0xA0+1)*16]
+                quad_base = addr - OVL_LO*16
+                addr += len(sl)
+            else:
+                sl = b""
+                quad_base = chardata            # $A0-$DC unused by this build
             w2blob = open("build/w2code.bin", "rb").read()
             assert len(w2blob) <= 0x800, "w2code blob exceeds the $1500 window"
             ovl_code_at = addr                  # the W2 kit overlay (header +20/21)
@@ -168,7 +177,7 @@ def main():
         region = hdr + blobs["map"] + rooms[0] + rooms[1] + rooms[2] \
                      + blobs["pipes"] + blobs["blocks"] + blobs["spawns"]
         if level >= 3:
-            region += w2_ovl1 + w2blob
+            region += sl + w2blob
         region = preblob + region
         bank_img = pre + region
         assert len(bank_img) <= BANK, \

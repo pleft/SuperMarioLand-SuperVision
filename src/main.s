@@ -833,9 +833,9 @@ main_loop:
     cmp #$c0                     ; long-standing, user-verified W1 behavior --
     beq @multicoin               ; hidden $5F cells with no content stay inert via
     cmp #$F0                     ; the ceiling @hidden path, which never gets here)
-    beq @inert                   ; $F0 = the RISING-LIFT content (2-1/2-2 passages):
-    pha                          ; real lift = W2 overlay work; until then it thuds
-                                 ; and the cell stays LIVE (never marked used)
+    beq @gift                    ; $F0 = the RISING LIFT (2-1/2-2 passages): the W2
+    pha                          ; overlay's gift handler spawns it -- the same
+                                 ; mechanic as 1-3's $07 hidden secret
     jsr mark_used                ; one-shot block -> used ($7F) + redraw
     pla
     cmp #$28                     ; $28 = power-up block
@@ -863,9 +863,6 @@ main_loop:
     jmp spawn_star
 @gift:
     jmp (ovl_vec+6)
-@inert:
-    lda #SFX_DFE0_07             ; the $F0 lift cell: thud only until the real lift
-    jmp sfx_play
 @coin:
     jsr mark_used
 @coinspawn:
@@ -5677,13 +5674,6 @@ riding_this:                     ; Z=1 if Mario rides slot oi
 @rts:
     rts
 .endproc
-.proc spawn_noko
-    lda #OBJ_NOKO                ; walks left, same measured speed engine as the Chibibo
-    .byte $2C                    ; BIT abs: swallow the next LDA
-.endproc
-.proc spawn_chib
-    lda #OBJ_CHIB
-.endproc                         ; falls into the shared walker core
 ; --- overlay ABI: the engine reaches window code ($1500) through RAM vectors,
 ; so DIFFERENT overlays (the 1-3 kit / the W2 kit) can back the same calls.
 ovl_spawn:  jmp (ovl_vec+0)      ; A = GB type, Y = spawn entry (C=0 spawned/consumed)
@@ -5711,6 +5701,16 @@ ovl_width:  jmp (ovl_vec+10)     ; A = erase width for kit types
     rts
 .endproc
 
+
+.proc spawn_noko
+    lda #OBJ_NOKO                ; walks left, same measured speed engine as the Chibibo
+    .byte $2C                    ; BIT abs: swallow the next LDA
+.endproc
+.proc spawn_chib
+    lda #OBJ_CHIB
+.endproc                         ; falls into the shared walker core
+.assert spawn_chib = spawn_noko+3, error, "noko->chib fall-through split!"
+.assert spawn_edge_walker = spawn_chib+2, error, "chib->walker fall-through split!"
 .proc spawn_edge_walker          ; A = type; Y = table byte offset. Left-walker
     jsr obj_alloc_typed          ; entering at world cam+180 (GB enters at OAM 188)
     bcs @full
@@ -10061,121 +10061,7 @@ l3_updtab:
     .word upd_gift-1, upd_suu-1, upd_rock-1, upd_gao-1, upd_fire-1
     .word upd_bat-1, upd_bull-1, upd_gsq-1, upd_gcorp-1
 
-; cull once the camera passes 20px beyond (the walker rule)
-.proc l3_cull                    ; C=1 -> culled (slot freed)
-    lda o_xl,x
-    clc
-    adc #20
-    sta tmpL3
-    lda o_xh,x
-    adc #0
-    cmp cam_x+1
-    bcc @cull
-    bne @keep
-    lda tmpL3
-    cmp cam_x
-    bcc @cull
-@keep:
-    clc
-    rts
-@cull:
-    stz o_type,x
-    sec
-    rts
-.endproc
-
-; Mario overlap (the enemy_contact box): |dx|<10 (centres) and |spr_y-o_y|<14
-.proc l3_box                     ; C=1 -> touching
-    jsr mario_dx
-    lda tmpH3
-    bne @no
-    lda tmpL3
-    cmp #10
-    bcs @no
-    lda spr_y
-    sec
-    sbc o_y,x
-    bpl :+
-    eor #$FF
-    ina
-:   cmp #14
-    bcs @no
-    sec
-    rts
-@no:
-    clc
-    rts
-.endproc
-
-; --- SUU $02: 200f cycle -- 62f hold low, 16f rise, 105f hold high (anim
-; toggles every ~16f), 16f descend (trace: y 120<->104 GB) ---
-.proc upd_suu
-    jsr l3_cull
-    bcc :+
-    rts
-:   lda o_tmr,x
-    cmp #62
-    bcs :+
-    jsr mario_dx                 ; classic pipe-plant rule (GB capture): while
-    lda tmpH3                    ; Mario is flush with the column it stays down
-    bne @tick
-    lda tmpL3
-    cmp #10
-    bcs @tick
-    ldx oi
-    stz o_tmr,x
-    bra @tick
-:   cmp #78
-    bcs :+
-    dec o_y,x                    ; rising 1px/f
-    bra @tick
-:   cmp #183
-    bcc @tick                    ; top hold (anim via l3_token/draw)
-    inc o_y,x                    ; descending
-@tick:
-    inc o_tmr,x
-    lda o_tmr,x
-    cmp #199
-    bcc :+
-    stz o_tmr,x
-:   ; contact: star -> silent despawn +100 ($3186 +3 = $FF); else ANY touch hurts
-    jsr l3_box
-    bcs :+
-    rts
-:   lda mario_starT
-    beq @hurt
-    stz o_type,x
-    lda #$01
-    jmp award_kill
-@hurt:
-    jmp l3_hurt                  ; hurt from the side only (see l3_hurt)
-.endproc
-
-; --- ROCK $0C: hangs 174f, then falls 1px/f THROUGH terrain; gone at y>=168.
-; Spiky: any contact hurts; star/ball have no effect ($3186: 00 00 FF 00 00) ---
-.proc upd_rock
-    lda o_tmr,x
-    cmp #174
-    bcs @fall
-    inc o_tmr,x
-    bra @touch
-@fall:
-    inc o_y,x
-    lda o_y,x
-    cmp #168
-    bcc @touch
-    stz o_type,x
-    rts
-@touch:
-    jsr l3_box
-    bcs :+
-    rts
-:   lda mario_starT              ; the star does NOT clear it -- but it must not
-    bne @no                      ; hurt starred Mario either
-    jmp l3_hurt    
-@no:
-    rts
-.endproc
+.include "kit_sh1.inc"
 
 ; --- GAO $3F: static; 137f cycle -- mouth opens at tick 89 (+SFX $04 + fireball
 ; from the muzzle), closes at wrap. Stomp -> flat 48f; ball/star/bonk -> corpse ---
@@ -10302,13 +10188,7 @@ l3_updtab:
     rts
 .endproc
 
-.proc l3_hurt                    ; the $3186 touch column ($FF) hurts, but the GB
-    jsr l3_above                 ; stomp-side path (+0 = 0) exits with NO effect:
-    bcc @no                      ; "stomping" passes harmlessly through the head
-    jmp hurt_mario               ; zone -- Mario lands on whatever is beneath
-@no:
-    rts
-.endproc
+.include "kit_sh2.inc"
 
 .proc l3_gao_kill                ; A = corpse drift dir; X = the Gao slot
     pha
@@ -10370,25 +10250,7 @@ l3_updtab:
     rts
 .endproc
 
-.proc l3_xoff                    ; X = slot; C=1 -> off-screen (slot freed)
-    lda o_xl,x
-    sec
-    sbc cam_x
-    sta tmpL3
-    lda o_xh,x
-    sbc cam_x+1
-    bne @off
-    lda tmpL3
-    cmp #200
-    bcc @on
-@off:
-    stz o_type,x
-    sec
-    rts
-@on:
-    clc
-    rts
-.endproc
+.include "kit_sh3.inc"
 
 ; --- BAT $08 (moai flyer, 32x16): fixed x; 162f cycle -- hold, bob up 17px and
 ; back at 0.5px/f; launches a shot at ticks 64 and 121 (SFX $04). Star -> BOOM
@@ -10536,80 +10398,7 @@ l3_updtab:
     jmp l3_hurt    
 .endproc
 
-; --- GIFT $13: sits on its block; stomp -> floats away 0.5px/f to the top row,
-; holds ~230f, pops with the kill thump (capture f395). No score, no hurt ---
-.proc upd_gift                   ; the hidden-block LIFT ($13->$14, the stone's
-    lda o_st,x                   ; ride-morph pattern: LANDING arms the rise)
-    beq @sit
-    cmp #1
-    beq @rise
-    inc o_tmr,x                  ; holding at the top row (~229f), then pops
-    lda o_tmr,x
-    cmp #229
-    bcc @done
-    lda #SFX_DFF8_03             ; the thump ($14's script tail); the rider falls
-    jsr sfx_play                 ; (ride_support clears when the slot dies)
-    ldx oi
-    stz o_type,x
-@done:
-    rts
-@rise:
-    txa                          ; 0.5px/f up, CARRYING the rider (GB: it hauls
-    eor frame_count              ; Mario 68px to the upper corridor)
-    lsr
-    bcs @done
-    dec o_y,x
-    jsr carry_y_up
-    ldx oi
-    lda o_y,x
-    cmp #9                       ; GB-exact top (GB holds at y=32 = o_y 8). The rider
-    bcs @done                    ; is hidden under the HUD up there until the over-HUD
-    lda #2                       ; sprite renderer ships (parked) — user-accepted
-    sta o_st,x
-    stz o_tmr,x
-    rts
-@sit:
-    lda o_tmr,x                  ; emerge: 4px rise over 8f
-    cmp #8
-    bcs @armed
-    inc o_tmr,x
-    lsr
-    bcs @done
-    dec o_y,x
-    rts
-@armed:
-    lda ride                     ; ridden -> start rising (the $13->$14 morph fires
-    beq @done                    ; on the LANDING, like the stone's $36->$37)
-    dea
-    cmp oi
-    bne @done
-    lda #1
-    sta o_st,x
-    stz o_tmr,x
-    rts
-.endproc
-
-.proc l3_gift                    ; hit_qblock content $07: emerge on top of the block
-    jsr spawn_item_snd           ; GB bonk capture: dfe0=$07 thud then $0B emerge --
-                                 ; the emerge chime is the surviving/distinctive one
-    jsr find_free_obj
-    bcs @full
-    lda #OBJ_GIFT
-    sta o_type,x
-    jsr obj_set_x8
-    lda mrow
-    asl
-    asl
-    asl
-    clc
-    adc #4                       ; emerges 4px (rises to mrow*8 over 8 frames)
-    sta o_y,x
-    stz o_st,x
-    stz o_tmr,x
-    stz o_vx,x
-@full:
-    rts
-.endproc
+.include "kit_sh4.inc"
 
 ; --- GSQ: the stomped Gao pair, 48f, then thump + corpse ---
 .proc upd_gsq
@@ -10707,103 +10496,7 @@ l3_drwtab:
     .word draw_gift-1, draw_suu-1, draw_rock-1, draw_gao-1, draw_fire-1
     .word draw_bat13-1, draw_bull-1, draw_gsq-1, draw_gcorp-1
 
-.proc suu_frame                  ; X = slot -> A = 0/2 (tile offset)
-    lda o_tmr,x
-    cmp #78
-    bcc @a
-    cmp #183
-    bcs @a
-    sec
-    sbc #78
-    lsr
-    lsr
-    lsr
-    lsr
-    and #1
-    beq @a
-    lda #2
-    rts
-@a:
-    lda #0
-    rts
-.endproc
-
-.proc draw_suu
-    ldx oi
-    lda o_y,x
-    cmp o_vy,x                   ; fully retracted into the pipe: invisible
-    bcs @done
-    jsr suu_frame
-    sta tmpL3
-    ldx oi
-    lda o_y,x                    ; top tile
-    sta dy
-    lda spr_col
-    sta dcol
-    lda #SUU_TA
-    clc
-    adc tmpL3
-    tax
-    jsr draw_quad
-    ldx oi
-    lda o_y,x                    ; bottom tile -- only once clear of the rim
-    clc
-    adc #8
-    cmp o_vy,x
-    bcs @done
-    sta dy
-    lda spr_col
-    sta dcol
-    lda #SUU_TA+1
-    clc
-    adc tmpL3
-    tax
-    jsr draw_quad
-@done:
-    rts
-.endproc
-
-.proc draw_rock
-    lda #ROCK_TL
-    sta tmpL3
-    lda #ROCK_TL+1
-    sta tmpH3
-    jmp l3_pair
-.endproc
-
-.proc l3_pair                    ; tmpL3/tmpH3 = left/right tiles, at o_y+8
-    ldx oi
-    lda o_y,x
-    clc
-    adc #8
-    sta dy
-    lda spr_col
-    sta dcol
-    ldx tmpL3
-    jsr draw_quad
-    ldx oi
-    lda o_y,x
-    clc
-    adc #8
-    sta dy
-    lda spr_col
-    ina
-    ina
-    sta dcol
-    ldx tmpH3
-    jmp draw_quad
-.endproc
-
-.proc l3_one                     ; X = tile, at o_y+8 (8x8 items)
-    ldy oi
-    lda o_y,y
-    clc
-    adc #8
-    sta dy
-    lda spr_col
-    sta dcol
-    jmp draw_quad
-.endproc
+.include "kit_sh5.inc"
 
 .proc draw_gcorp                 ; the statue y-flipped (rows swapped, tiles flipped)
     lda #1
@@ -10928,10 +10621,7 @@ bat_dx:    .byte 0,2,0,2,4,6,0,2,4
     jmp l3_pair
 .endproc
 
-.proc draw_gift
-    ldx #GIFT_T
-    jmp l3_one
-.endproc
+.include "kit_sh6.inc"
 
 .proc draw_gsq                   ; the flat pair: $B9 left, $B8 right
     lda #GAO_SQA
@@ -10943,62 +10633,7 @@ bat_dx:    .byte 0,2,0,2,4,6,0,2,4
 
 ; (draw_gcorp merged into gao_draw above)
 
-; --- pass-4 erase widths ---
-.proc l3_width                   ; Y = type -> A = o_pw
-    cpy #OBJ_SUU
-    bne :+
-    lda #$82                     ; 8 wide, 16 tall
-    rts
-:   cpy #OBJ_GAO
-    beq @w83
-    cpy #OBJ_GCORP
-    beq @w83
-    cpy #OBJ_BAT
-    bne :+
-    lda #$C5                     ; 32 wide + tall + EXTRA-tall (24px, bit6)
-    rts
-:   cpy #OBJ_FIRE
-    beq @w2
-    cpy #OBJ_GIFT
-    beq @w2
-    lda #3                       ; rock / bull / gsq: 16 wide
-    rts
-@w83:
-    lda #$83                     ; 16 wide + tall
-    rts
-@w2:
-    lda #2
-    rts
-.endproc
-
-; --- anim tokens (MUST mirror the draw-frame choices above) ---
-.proc l3_token                   ; X = slot -> A = token
-    lda o_type,x
-    cmp #OBJ_SUU
-    bne :+
-    jmp suu_frame
-:   cmp #OBJ_GAO
-    bne :+
-    lda o_tmr,x
-    cmp #89
-    lda #0
-    rol                          ; C -> bit0: the mouth state
-    rts
-:   cmp #OBJ_BAT
-    bne :+
-    lda o_tmr,x
-    cmp #31
-    lda #0
-    rol
-    rts
-:   cmp #OBJ_BULL
-    bne :+
-    lda frame_count
-    and #8
-    rts
-:   lda #0                       ; rock/fire/gift/gsq static; gcorp moves every frame
-    rts
-.endproc
+.include "kit_sh7.inc"
 
 ; --- the water shimmer: every 8 frames re-blit visible $5D cells (rows 4-6)
 ; with the phase source; cells under a drawn sprite are skipped this tick ---
