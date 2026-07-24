@@ -57,6 +57,26 @@ Runs each frame when `$C207 != 1`. When airborne with no solid tile under the fe
 On landing on a solid tile: align `$C201` to a tile boundary (`dec;dec;and $FC;or $06`),
 set `$C207 = 0`, `$C20A = 1`.
 
+## Run rule — `Player_FloorCheck` $17EC [FACT, 2026-07-24]
+The floor check probes TWO points: x-2 and x-2+b. b = 4 normally; **b = 8 when
+`$C20E` (speed index) == 4 (full run) AND `$C207` == 0 (grounded)**. An 8px
+probe spread cannot fit inside a 1-tile hole, so RUNNING BRIDGES 1-block holes
+deterministically while walking falls in (GB-measured on 2-2's comb, cols
+26-32: walk falls in the first gap, run crosses flat at y=110).
+Port: the second walk-support probe widens +8 -> +14 when h_idx==4 (grounded
+path only; landing/airborne probes unchanged).
+
+## One-way platforms — `Call_000_1A6B` + per-world lists @ `$1A93` [FACT, 2026-07-24]
+The CEILING check ($198C) and the WALL check (the $1AC5 horizontal probe) both
+pass any tile found in the current world's list at `$1A93` (FD-terminated):
+W1: 68 69 6A 7C (1-2 tree platforms), W2: 60 61 63 7C (Muda caps + GROUND),
+W3/W4: 7C. The floor check does NOT consult the list -> solid from above only.
+Port: the extractor REMAPS these ids above the coin ($F9-$FF; pixels planted in
+the hi charset's free slots -- $F6-$F8 are the coin spin), so the raw threshold
+checks do the work: ceiling passes >=$F4, wall_solid passes >=$F4, read_solid
+keeps >=$60 standable. The superball bounces off caps on the GB too (its $1FD2
+check has no list) -- port matches.
+
 ## Ceiling / head-bonk — `Player_CeilingCheck` @ `$198C` (bank 0) [FACT]
 Runs each frame when `$C207 == 1`. Reads tiles above Mario (offsets via `$FFAD/$FFAE`);
 on special tiles ($5F/$60/$80/$81/$82/$F4) handles block-hit/coin/pipe; on a solid

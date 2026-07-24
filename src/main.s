@@ -773,10 +773,12 @@ main_loop:
 :   jsr spawn_bounce             ; the block hops as a sprite while the outcome resolves
     jsr bonk_kill_above          ; the hop kills whoever stands on the block
     jsr find_block               ; C=1,A=value if this block is in the contents table
-    bcc @coin
+    bcc @inert
     cmp #$c0                     ; multi-coin: special lifecycle, NOT marked used yet
     beq @multicoin
-    pha
+    cmp #$F0                     ; $F0 = the RISING-LIFT content (2-1/2-2 passages):
+    beq @inert                   ; real lift = W2 overlay work; until then it thuds
+    pha                          ; and the cell stays LIVE (never marked used)
     jsr mark_used                ; one-shot block -> used ($7F) + redraw
     pla
     cmp #$28                     ; $28 = power-up block
@@ -795,24 +797,21 @@ main_loop:
     jsr spawn_walker
     rts
 @flower:
-    jsr spawn_flower
-    rts
+    jmp spawn_flower
 @heart:
     lda #OBJ_HEART               ; walks exactly like the mushroom (types $2A/$2B == $28/$29)
     jsr spawn_walker
     rts
 @star:
-    jsr spawn_star
-    rts
+    jmp spawn_star
 @gift:
-    jsr l3_gift
-    rts
-@coin:
-    jsr mark_used
+    jmp l3_gift
+@inert:
+    lda #SFX_DFE0_07             ; GB truth (user-caught in 2-1's room): an UNLISTED
+    jmp sfx_play                 ; ?-block just thuds and hops -- no coin, no used mark
 @coinspawn:
     jsr spawn_coin               ; coin-pop animation
-    jsr award_coin               ; +1 coin, +100 score, 1-up at 100
-    rts
+    jmp award_coin               ; +1 coin, +100 score, 1-up at 100
 @multicoin:
     lda mc_tmr                   ; window open (incl. the first bonk) -> another coin
     beq @mc_conv
@@ -840,6 +839,18 @@ main_loop:
 
 ; find_block: search the contents table for (feet_col, mrow). Returns C=1 + A=value if listed,
 ; else C=0. (Unlisted ?-blocks hold a single coin.)
+.proc lvl_ws                     ; cur_level -> X = world digit, A = stage digit
+    lda cur_level
+    ldx #1
+:   cmp #3
+    bcc :+
+    sbc #3                       ; (carry set by the cmp)
+    inx
+    bra :-
+:   ina
+    rts
+.endproc
+
 .proc find_block
     lda feet_col                 ; room contents are namespaced: key = 512 +
     sta blk_key                  ; room*32 + local col (extractor writes the same;
@@ -1017,15 +1028,22 @@ main_loop:
 ; FloorCheck), else 0. (Off-map rows are non-solid.)
 .proc read_solid
     jsr read_map_tile
+tile:
     cmp #$F4                     ; coins are walk-through (collectible), not floor
-    beq @no
+    beq no
     cmp #$60                     ; tiles >= $60 are solid floor
-    bcc @no
+    bcc no
     lda #1
     rts
-@no:
+no:
     lda #0
     rts
+.endproc
+.proc wall_solid                 ; body/wall variant: $F4 coin and the $F5+ one-way
+    jsr read_map_tile            ; caps (GB $1A93: the wall check passes them too)
+    cmp #$F4                     ; are NEVER walls; everything else as read_solid
+    bcc read_solid::tile
+    bra read_solid::no
 .endproc
 
 ; wall_ahead: A = edge pixel offset (14 = right edge, 1 = left edge). Returns A != 0 if a
@@ -1042,11 +1060,11 @@ main_loop:
     sta mrow
     lda mario_big                ; SMALL Mario is a 12px box: an overhang at his head row
     beq @low                     ; doesn't block him (original: he walks under 1-gap ledges)
-    jsr read_solid
+    jsr wall_solid
     bne @yes
 @low:
     inc mrow                     ; body bottom row
-    jsr read_solid
+    jsr wall_solid
     bne @yes
     lda #0
     rts
@@ -1092,8 +1110,12 @@ main_loop:
     jsr read_solid                ; adopting that needs the full body-geometry
     bne @sup                      ; harmonization (128K era). +6/+8 reproduces
     lda #8                        ; every observed GB outcome with OUR wall spans:
-    jsr calc_feet_col             ; corner-hole fall, bowl-shaft descent, open
-    jsr read_solid                ; holes swallow, full-wall slots bridge; ledge
+    ldy h_idx                     ; GB $17EC (RUN RULE, user-caught): at full run
+    cpy #4                        ; (c20e==4, grounded) the GB widens the second
+    bne :+                        ; support probe by +4px -- an 8px probe spread
+    lda #14                       ; never fits in a 1-block hole, so RUNNING
+:   jsr calc_feet_col             ; BRIDGES them while walking falls in
+    jsr read_solid                ; (probes: +6/+8 walking, +6/+14 running)
     beq @unsup                    ; hangs deviate (10/8 vs GB 15/3) -- known
 @sup:
     jmp @done                     ; supported -> stay grounded
@@ -1147,13 +1169,16 @@ main_loop:
     cmp #$60
     bcc @noceil                   ; < $60 -> not solid -> keep rising
     cmp #$F4
-    beq @noceil                   ; coin -> walk-through (grabbed by coin_collect), not a ceiling
+    bcs @noceil                   ; $F4 coin walk-through; $F5+ = ONE-WAY platform
+                                  ; caps (GB $1A93 list, remapped by the extractor):
+                                  ; jump up through them freely
     cmp #$80                      ; $80/$81 = ?-block (content decided by the block table)
     beq @qblock
     cmp #$81
     beq @qblock
     cmp #$82                      ; $82 = breakable brick
     beq @brick
+@thud:
     lda #SFX_DFE0_07              ; plain solid/used block: the THUD -- VERIFIED twice:
     jsr sfx_play                  ; used-block bonks fire seq $68A0 = the $dfe0=$07 handler
     bra @bonk
@@ -1177,9 +1202,7 @@ main_loop:
     bne @smash
     lda #$82
     jsr spawn_bounce
-    lda #SFX_DFE0_07              ; small Mario bonking a brick: the same thud
-    jsr sfx_play
-    bra @bonk
+    bra @thud                     ; small Mario bonking a brick: the same thud
 @smash:
     jsr break_brick               ; big Mario smashes it
 @bonk:
@@ -3992,19 +4015,16 @@ TIMER_RATE = 40                  ; frames per clock unit (SML's $da00 sub-counte
     lda timer                    ; tens/ones -> cols 18-19
     ldx #18
     jsr put_hud_byte
-    ldx cur_level                ; "W-S" under WORLD (row 1 cols 12/14; the '-' is
-    lda world_tab,x              ; static in the template)
+    jsr lvl_ws                   ; "W-S" under WORLD (row 1 cols 12/14; the '-' is
+    pha                          ; static in the template)
+    txa
     ldx #12
     jsr put_hud
-    ldx cur_level
-    lda stage_tab,x
+    pla
     ldx #14
     jsr put_hud
     stz hud_dirty
     rts
-world_tab: .byte 1,1,1,2,2,2,3,3,3,4,4,4   ; level id -> displayed world digit
-stage_tab: .byte 1,2,3,1,2,3,1,2,3,1,2,3   ; level id -> displayed stage digit
-.export world_tab, stage_tab               ; (title level-select reuses them)
 .endproc
 
 ; tick_timer: count down the level clock; dirties the HUD when the displayed value changes.
@@ -6820,15 +6840,15 @@ death_curve:                     ; ROM $0C19 verbatim (signed y deltas + $7F end
 ; title_lvl_show: draw the level-select pick ("1-1".."1-3") at the title's
 ; BOTTOM right (user request: keep the top clean).
 .proc title_lvl_show
-    ldx cur_level
-    lda draw_hud::world_tab,x
+    jsr lvl_ws
+    pha                          ; stage digit
+    txa                          ; world digit
     ldy #28                      ; cells at dcol 28/30/32 (cols 14-16), row 19
     jsr @put
     lda #$29                     ; the HUD font's '-'
     ldy #30
     jsr @put
-    ldx cur_level
-    lda draw_hud::stage_tab,x
+    pla
     ldy #32
 @put:
     pha

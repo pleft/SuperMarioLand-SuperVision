@@ -26,6 +26,15 @@ NUM_LEVELS     = 12
 COL_HEIGHT     = 16
 BLANK_TILE     = 0x2C
 
+# ONE-WAY PLATFORM caps (GB $1A93 per-world lists: the ceiling AND wall checks
+# treat these tiles as air; only the floor check lands on them). The port
+# remaps them ABOVE the coin ($F4): its ceiling check passes >=$F4, the wall
+# check gets the same exclusion, and read_solid's >=$60 keeps them standable.
+# Pixels for the new ids are planted in the hi sheet by extract_gfx.py.
+PASSTHRU = {1: {0x68: 0xF9, 0x69: 0xFA, 0x6A: 0xFB, 0x7C: 0xFF},
+            2: {0x60: 0xFC, 0x61: 0xFD, 0x63: 0xFE, 0x7C: 0xFF},
+            3: {0x7C: 0xFF}, 4: {0x7C: 0xFF}}
+
 def u16(d, off): return d[off] | (d[off + 1] << 8)
 
 COLS_PER_SEG = 0x14                     # 20 — game advances the segment index every 20 columns
@@ -214,6 +223,11 @@ def main():
         param   = d[PARAM_TABLE + lvl]
         segs = walk_segments(d, bank, seg_tab)      # segment list, $FF-terminated
         cols, rooms, seg_flat, seg_room = decode_level(d, bank, seg_tab, LEVEL_START_SEG.get(lvl, DEFAULT_START_SEG))
+        remap = PASSTHRU[world]
+        for grid in [cols] + rooms:
+            for col in grid:
+                for r in range(COL_HEIGHT):
+                    if col[r] in remap: col[r] = remap[col[r]]
         pipes = decode_pipes(d, lvl, seg_flat, seg_room)
         blocks = decode_blocks(d, lvl, seg_flat, cols, rooms, seg_room)
         spawns = decode_spawns(d, bank, spawn_p, lvl)

@@ -142,6 +142,26 @@ def main():
         moth += decode_tiles(d, off, 1)
     with open(os.path.join(out, "moth.svt"), "wb") as f:
         f.write(sv_pack(moth))
+    # ONE-WAY PLATFORM caps (GB $1A93 per-world jump-through lists; ceiling AND
+    # wall checks pass them, floor stands): the port remaps the cap tile ids to
+    # $F9-$FF (extract_levels.py) so the raw <$60/>=F4 threshold checks do the
+    # work; the PIXELS must therefore live at those ids in the SHARED hi sheet
+    # (chardata second half). Free slots verified: $F6-$F8 = coin spin; $F5,
+    # $F9-$FF unused. W1 caps $68/$69/$6A -> $F9/$FA/$FB, 7C -> $FF; W2 caps
+    # $60/$61/$63 (pixels inside ovl_9310, base id $31) -> $FC/$FD/$FE.
+    def slot(path, idx):
+        return open(path, "rb").read()[idx * 16:(idx + 1) * 16]
+    obj = bytearray(open(os.path.join(out, "w1_obj_8000.svt"), "rb").read())
+    bg  = os.path.join(out, "w1_bg_9000.svt")
+    ov2 = os.path.join(out, "w2_ovl_9310.svt")
+    for dst, src in ((0xF9, slot(bg, 0x68)), (0xFA, slot(bg, 0x69)),
+                     (0xFB, slot(bg, 0x6A)), (0xFF, slot(bg, 0x7C)),
+                     (0xFC, slot(ov2, 0x60 - 0x31)), (0xFD, slot(ov2, 0x61 - 0x31)),
+                     (0xFE, slot(ov2, 0x63 - 0x31))):
+        obj[dst * 16:(dst + 1) * 16] = src
+    with open(os.path.join(out, "w1_obj_8000.svt"), "wb") as f:
+        f.write(bytes(obj))
+    print("  one-way caps -> hi-sheet slots $F9-$FF")
     print(f"Extracted tile sheets -> {out}/ (gitignored)")
 
 if __name__ == "__main__":

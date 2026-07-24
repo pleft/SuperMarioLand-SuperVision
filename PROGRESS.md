@@ -28,6 +28,34 @@ Newest entries at the top. Every entry should be traceable to ROM bytes/code.
 rendering/perf rounds, blocks/powerups, enemies, goal+bonus game, death/title,
 audio phase. See docs/22 + docs/23 and the memory index.)
 
+## 2026-07-24 (2) GB physics rules the W2 playtest exposed (all RULE-0 from disasm)
+
+1. ONE-WAY PLATFORMS (user: "no bonk in the original"): GB $1A6B classifier +
+   per-world tile lists @ $1A93 -- ceiling AND wall checks pass W2's caps
+   $60/$61/$63/$7C (and W1's $68-$6A tree platforms: latent in our 1-2!),
+   floor stands. Port: extractor remaps them to $F9-$FF (pixels planted into
+   the hi-sheet's free tail slots by extract_gfx; $F6-$F8 = coin spin), the
+   ceiling check's coin test becomes >=$F4-passes, new wall_solid (body probe
+   variant) shares read_solid's tail. W2's whole GROUND is $61 -> one-way,
+   exactly like the GB (Mario's body overlaps caps from below: the user's own
+   mGBA screenshot shows it).
+2. RUN RULE (user: "running crosses 1-block holes"): GB $17EC widens the
+   SECOND floor probe +4 -> +8 at full run (c20e==4) while grounded. Port:
+   second walk-support probe +8 -> +14 when h_idx==4. GB-measured on 2-2's
+   comb: walk falls first gap / run crosses flat; port now matches exactly.
+3. UNLISTED ?-BLOCK (user: "bonking spawns nothing on the GB"): a content-table
+   miss = thud + hop only -- no coin, no used conversion (plain-coin ?-blocks
+   do not exist in SML; coins come from coin tiles + multi-coin bricks). Port
+   hit_qblock: miss -> thud; $F0 (the RISING-LIFT content, 2-1/2-2 passages)
+   also thuds INTERIM and the cell stays live -- the real lift rides the
+   coming W2 overlay (it is 1-3's OBJ_GIFT mechanic).
+Byte funding: world/stage HUD tables -> computed lvl_ws (div-3 loop), thud
+tail-merge in the ceiling path, hit_qblock tail jmps, wall_solid tail reuse.
+Verified: captest (stand on cap y80 -> jump THROUGH upper cap -> land ON it
+y48), combtest (walk falls / run crosses, GB-measured twins), full battery
+(roomtest GB-true, walk13e ending->bonus, w2test 2-1 end-to-end on the
+remapped ground, w2secret flower) all green. DBG-IDENTICAL.
+
 ## 2026-07-24 SECRETS: room ?-block contents are now GB-true (user request)
 
 The extractor only mapped block CONTENTS for surface segments, so every
