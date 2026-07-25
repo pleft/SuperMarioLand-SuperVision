@@ -66,8 +66,8 @@ operand → `$D003`. Decoder: `tools/decode_ai_scripts.py` (decodes all 28 scrip
 | Opcode | Operand | Effect |
 |--------|---------|--------|
 | `$00–$DF` | — | set **velocity** `$FFC1` = byte; mark active (`$FFC8=1`) |
-| `$E0–$EF` | — | set **movement-state** `$FFC8` = low nibble (`$EF` = advance/next-frame) |
-| `$F0 nn` | 1 | **facing / track player** (compare Mario Y `$C201` vs obj Y; set facing in `$FFC5`) |
+| `$E0–$EF` | — | set `$FFC8` = low nibble. DECODED ($2676): $FFC8 is a TICK COUNTDOWN, not a mode: each tick (paced by the $FFC9 divider: hi nibble counts to lo nibble) applies the current velocity via the mover ($2879) and DECREMENTS $FFC8; at 0 the next script byte is fetched. With $FFC7 bit1 set, the floor probe ($2BBB) overrides: airborne -> y++ (gravity) and the tick stalls; grounded -> y snaps &$F8. So a script is: [set vel] [run it N ticks] ... e.g. the $0A platform: vel Y=1, 14+15*3 ticks down, F0-flip, 60 up = the exact measured 60px patrol |
+| `$F0 nn` | 1 | **direction control** (FULLY decoded 2026-07-25, $2711): bit7 = set Y-dir ($FFC5 bit1) toward Mario (sign of objY-$C201); bit6 = set X-dir (bit0) toward Mario (obj x + (($FFCA&$70)>>2) vs $C202); bits3-2 = XOR-flip the dirs (>>2); bit5 = FORCE Y-dir := bit1 of nn; bit4 = FORCE X-dir := bit0. Pure direction -- never waits |
 | `$F1` | 0 | **spawn** a sub-object (init from physics tables) |
 | `$F2 nn` | 1 | set **acceleration** `$FFC7` = nn |
 | `$F3 nn` | 1 | **morph**: change object type `$FFC0`=nn → switch to that type's script; `$FF` = despawn |

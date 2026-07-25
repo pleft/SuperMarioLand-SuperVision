@@ -28,6 +28,21 @@ Newest entries at the top. Every entry should be traceable to ROM bytes/code.
 rendering/perf rounds, blocks/powerups, enemies, goal+bonus game, death/title,
 audio phase. See docs/22 + docs/23 and the memory index.)
 
+## 2026-07-25 (3) AI-VM SEMANTICS COMPLETE: states are countdowns, F0 is direction
+
+$2676 RE'd to the bottom: $FFC8 ("movement state") = a TICK COUNTDOWN paced by
+the $FFC9 divider; each tick applies the current velocity ($2879) and counts
+down; 0 -> next script byte. $FFC7 bit1 = gravity override via the $2BBB floor
+probe. $F0 = pure direction control (track-Mario per axis / XOR-flip / force),
+decoded bit-exact -- docs/12 updated. This makes every W2 enemy script
+mechanically portable: the $0A platform's script reproduces the MEASURED 60px
+patrol exactly (GB slot-y 80..140 in 2-1, 72..132 in 1-1 -- entry-y down 60,
+both machines; the port already matches).
+OPEN with the user: 2-1's upper door -- patrol top + plain jump seems short on
+BOTH machines by ~14px; awaiting their GB check (ridden peak screenshot).
+Honen's observed "dormancy" contradicts its loop-forever script -- next
+session verifies with a live nearby-Mario capture before porting the leap.
+
 ## 2026-07-25 (2) $F0 CORRECTED: a MATERIALIZING block, not a lift (user-caught)
 
 RULE 0 lesson repeated: I shipped the $F0 passage as a rising lift WITHOUT
