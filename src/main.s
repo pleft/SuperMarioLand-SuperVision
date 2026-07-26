@@ -384,6 +384,7 @@ probe_stripes:                   ; the full proven liturgy + stripes, FIXED-ROM
     ;     LCD bit AFTER the LCD regs; the REAL panel stays dark without bit3.
     lda #(SYSCTRL_NMI_EN | SYSCTRL_TIMER_IRQ | SYSCTRL_LCD | SYSCTRL_BANK0)
     sta SYS_CTRL
+    sta sys_sh
 .ifdef HWMARKER1
     stz lvl_ptr                  ; probe: hwtest8's exact proven-visible pattern --
     lda #$40                     ; stripe-fill VRAM from FIXED ROM code, then spin.
@@ -2561,6 +2562,7 @@ moth_tiles: .incbin "../build/gfx/moth.svt"
 .proc copy_overlay               ; bank 1 -> 8 pages from (lvl_ptr) to $1500
     lda #(1 << 5) | (SYSCTRL_NMI_EN | SYSCTRL_TIMER_IRQ | SYSCTRL_LCD)
     sta SYS_CTRL
+    sta sys_sh
 .endproc                         ; falls through
 .proc copy_win8                  ; 8 pages from (lvl_ptr) to the $1500 window
     lda #$15
@@ -9139,6 +9141,7 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
                                  ; prefix, byte-identical at this address in every bank.
     ora #(SYSCTRL_NMI_EN | SYSCTRL_TIMER_IRQ | SYSCTRL_LCD)
     sta SYS_CTRL
+    sta sys_sh
     lda #<level_hdr              ; header base: bank 0 = the linked address; banks 1+
     sta lvl_ptr                  ; keep theirs where bank 0 has the TITLE (the packer
     lda #>level_hdr              ; overlays it — the title runs only with bank 0 mapped)
@@ -9644,6 +9647,10 @@ hud_rp:      .res 1          ; HUD shadow changed -> flush to the ring
 vxph_ap:     .res 1          ; APPLIED HUD view: latched + repainted INSIDE the NMI
 vyp_ap:      .res 1          ; (register and pixels must change in the same instant)
 hud_go:      .res 1          ; hud_check verdict: NMI must latch + repaint
+sys_sh:      .res 1          ; SYS_CTRL shadow: the NMI rewrites it every frame
+                             ; (any write RESTARTS the LCD scan -> phase-locks
+                             ; the raster split to the NMI; GrenderG notes)
+tog:         .res 1          ; irq chain state: 0 = next fire enters playfield
 hf_col:      .res 1          ; NMI HUD-copy: view byte col / row counter / seam n1
 hf_row:      .res 1
 hf_n1:       .res 1
@@ -10094,52 +10101,71 @@ hf_n1:       .res 1
 ; NMI: per-frame tick (~61 Hz). Mirrors the GB VBlank ISR role. Also begins the
 ; raster split for a fixed HUD: XSCROLL = 0 for the top rows (status bar), and arm
 ; the timer to fire at scanline 16 where the IRQ switches to the playfield scroll.
-HUD_SPLIT_LINE = 16              ; timer reload = split scanline (IPeriod=256 cyc/scanline)
+HUD_SPLIT_LINE = 15              ; timer reload for scanline 16: REAL line time is
+T2_PLAYFIELD   = 138             ; 246 cyc vs the 256-cyc timer tick -> 16*246/256;
+                                 ; T2 = the visible field's remaining 144 lines.
+.segment "RCODE"
 .proc nmi
     pha
     phx
     inc frame_count
     lda #1
     sta frame_flag
-    ldx #0                       ; X = repaint verdict
-    lda hud_go                   ; view-byte crossing? latch the new HUD view and
-    beq @stable                  ; repaint IN THIS HANDLER: on the per-scanline core
-    stz hud_go                   ; the HUD rows' scroll is sampled in the first ~16
-    inx                          ; slices — register + pixels must both change here,
-    lda vxph                     ; before those slices, or the HUD flashes a byte
-    sta vxph_ap                  ; sideways for one frame.
+    lda hud_go                   ; view-byte crossing: latch + repaint FIRST (the
+    beq @stable                  ; scan is restarted below, so the HUD lines are
+    stz hud_go                   ; fetched only after both are done)
+    lda vxph
+    sta vxph_ap
     lda vyp
     sta vyp_ap
+    phy
+    jsr nmi_hud_copy
+    ply
 @stable:
     lda vyp_ap
     sta YSCROLL
     lda vxph_ap
     sta XSCROLL
-    lda #HUD_SPLIT_LINE           ; arm timer -> IRQ at scanline 16 (period = data * $100)
-    sta IRQ_TIMER                 ; (on repaint frames the IRQ lands late: <=3px shear
-    txa                           ;  on a few top playfield lines for one frame)
-    beq @out
-    jsr nmi_hud_copy             ; saves/restores Y + the scratch pairs itself
-@out:
+    lda sys_sh                   ; ANY SYS_CTRL write RESTARTS the LCD scan at the
+    sta SYS_CTRL                 ; top-left (GrenderG): the raster split phase-locks
+    lda #HUD_SPLIT_LINE          ; to this instant on real hardware
+    sta IRQ_TIMER
+    stz tog
     plx
     pla
     rti
 .endproc
 
-; IRQ (timer @ scanline 16): switch to the playfield's 1px-true scroll for the
-; rest of the frame. (Emulated by OUR patched potator core; on real hardware the
-; NMI isn't LCD-synced, so this line wanders — worst case a <=3px shear, v2 =
-; the SYS_CTRL restart trick pins it.)
+; The timer IRQ chain (docs/27 v2): line ~16 -> playfield view; end of the
+; visible field -> back to the HUD view, so the panel's SECOND field pass
+; re-scans rows 0..15 with the HUD values too; alternates until the next NMI.
 .proc irq
     pha
-    lda vyp                      ; the playfield's LIVE view (may lead the HUD's
-    sta YSCROLL                  ; latched one by a byte for a frame)
+    lda tog
+    bne @tohud
+    lda vyp                      ; enter the playfield: the live 1px-true view
+    sta YSCROLL
     lda vxp
     sta XSCROLL
+    lda #T2_PLAYFIELD
+    sta IRQ_TIMER
+    lda #1
+    sta tog
+    bra @ack
+@tohud:
+    lda vyp_ap                   ; field 2 begins: HUD rows unscrolled again
+    sta YSCROLL
+    lda vxph_ap
+    sta XSCROLL
+    lda #HUD_SPLIT_LINE
+    sta IRQ_TIMER
+    stz tog
+@ack:
     lda IRQ_TIMER_RST            ; read clears the timer IRQ
     pla
     rti
 .endproc
+.segment "CODE"
 
 ; ---------------------------------------------------------------------------
 ; read_input: read $2020 (active-low) and produce GB-layout held + pressed,
