@@ -12,6 +12,7 @@
 .import speedtab            ; horizontal walk speed table (px/frame)
 .import mario_poses          ; 6 poses x 4 tiles (metasprite tiles from ROM $4C37)
 .import mario_big_poses      ; 7 big-Mario poses x 4 tiles (stand,walkA,walkB,jump,skid,walkC,duck)
+.import __BOOT6_LOAD__       ; the boot blob's bank-6 load address (run at $1500)
 .import statusbar_tiles      ; 2x20 status-bar template (ROM $3F9C)
 
 ; ---------------------------------------------------------------------------
@@ -277,33 +278,141 @@ mus_base:    .res 2          ; current track's data base (per-track: LEVELS or F
 music2_data:                     ; 1-3 ending tracks (boss/rescue/reveal): FIXED-
     .incbin "../build/audio/music2.bin"  ; resident so they play with bank 2 mapped
 
+.if .defined(HWMA) .or .defined(HWMB) .or .defined(HWMC) .or .defined(HWMD)
+probe_stripes:                   ; the full proven liturgy + stripes, FIXED-ROM
+    lda #$A0                     ; only: reached = everything before it survived
+    sta LCD_XSIZE
+    lda #$A0
+    sta LCD_YSIZE
+    stz XSCROLL
+    stz YSCROLL
+    lda #$DF
+    sta SYS_CTRL
+    lda #$0F
+    sta LCD_DRIVE
+    lda #0                       ; hwtest3's order: silence sound right after
+    ldx #7                       ; SYS_CTRL (probe A arrives with garbage regs)
+:   sta $2010,x
+    dex
+    bpl :-
+    sta $201B
+    sta $201C
+    sta $2028
+    sta $2029
+    sta $202A
+    stz lvl_ptr
+    lda #$40
+    sta lvl_ptr+1
+    ldy #0
+    lda #$1B
+@pf:
+    sta (lvl_ptr),y
+    iny
+    bne @pf
+    inc lvl_ptr+1
+    ldx lvl_ptr+1
+    cpx #$60
+    bne @pf
+@ps: bra @ps
+.endif
+
 .proc reset
     sei
     cld                      ; 65C02: ensure binary mode
     ldx #$FF
     txs
-    lda #(6 << 5)            ; map BANK 6 (display/ints still off): the one-shot
-    sta SYS_CTRL             ; boot bulk runs from there -- FIXED is byte-starved
-    jsr boot6_init           ; ZP + WRAM clears, one-shot table builders
-
-    ; --- select ROM bank 0 + enable display/NMI BEFORE drawing, so chardata at
-    ;     $8000 is mapped while we blit (MAME needs this; Potator defaults to bank 0).
-    lda #(SYSCTRL_NMI_EN | SYSCTRL_TIMER_IRQ | SYSCTRL_BANK0)  ; NMI tick + timer IRQ (raster split)
-    sta SYS_CTRL
-
-    ; --- LCD setup ---
-    lda #$A0                 ; X size (160 px) — verify exact encoding in emulator
-    sta LCD_XSIZE
-    lda #VRAM_LINES          ; 160 scanlines
-    sta LCD_YSIZE
-    stz scroll_vis
+.ifdef HWMARKER0
+    lda #$A0                     ; probe 0: hwtest3's byte-exact BB liturgy inside
+    sta LCD_XSIZE                ; the REAL game image -- no window, no RAM exec.
+    lda #$A0                     ; Stripes = the image itself serves fine; the
+    sta LCD_YSIZE                ; killer is in the game's own boot path.
     stz XSCROLL
     stz YSCROLL
+    lda #$DF
+    sta SYS_CTRL
+    lda #$0F
+    sta LCD_DRIVE
+    lda #0
+    ldx #7
+:   sta $2010,x
+    dex
+    bpl :-
+    sta $201B
+    sta $201C
+    sta $2028
+    sta $2029
+    sta $202A
+    stz lvl_ptr
+    lda #$40
+    sta lvl_ptr+1
+    ldy #0
+    lda #$1B
+@m0f:
+    sta (lvl_ptr),y
+    iny
+    bne @m0f
+    inc lvl_ptr+1
+    ldx lvl_ptr+1
+    cpx #$60
+    bne @m0f
+@m0: bra @m0
+.endif
+    lda #(6 << 5)            ; map BANK 6 (display/ints off): the one-shot boot
+    sta SYS_CTRL             ; bulk is COPIED TO RAM and run there -- real hw
+    lda #<__BOOT6_LOAD__     ; proved long boot loops fetching through the cart
+    sta lvl_ptr              ; window die on marginal contacts; RAM execution
+    lda #>__BOOT6_LOAD__     ; is immune (the copy itself is short exposure)
+    sta lvl_ptr+1
+    jsr copy_win8            ; 8 pages -> $1500 (the overlay window, free at boot)
+.ifdef HWMA
+    jmp probe_stripes        ; probe A: window copy done, no RAM execution
+.endif
+    jsr $1500                ; = boot6_init, running from RAM
+.if .defined(HWMB) .or .defined(HWMC) .or .defined(HWMD)
+    jmp probe_stripes        ; probes B/C/D: boot6 truncated by the same flag
+.endif
+
+    ; --- bank 0 + NMI/IRQ + LCD ON. Commercial boots (Block Buster $DF) set the
+    ;     LCD bit AFTER the LCD regs; the REAL panel stays dark without bit3.
+    lda #(SYSCTRL_NMI_EN | SYSCTRL_TIMER_IRQ | SYSCTRL_LCD | SYSCTRL_BANK0)
+    sta SYS_CTRL
+.ifdef HWMARKER1
+    stz lvl_ptr                  ; probe: hwtest8's exact proven-visible pattern --
+    lda #$40                     ; stripe-fill VRAM from FIXED ROM code, then spin.
+    sta lvl_ptr+1                ; Stripes = the whole RAM-boot phase survived.
+    ldy #0
+    lda #$1B
+@m1f:
+    sta (lvl_ptr),y
+    iny
+    bne @m1f
+    inc lvl_ptr+1
+    ldx lvl_ptr+1
+    cpx #$60
+    bne @m1f
+@m1: bra @m1
+.endif
 
     jsr build_row48              ; dy*48 VRAM-stride tables
     jsr build_shtab              ; sub-pixel blit shift tables
                                  ; (p_shlo/p_shhi stay 0 forever -- the boot6 ZP
                                  ; clear already zeroed them)
+.ifdef HWMARKER2
+    stz lvl_ptr                  ; probe: stripes = the window-resident builders
+    lda #$40                     ; survived; drawn from FIXED ROM, then spin
+    sta lvl_ptr+1
+    ldy #0
+    lda #$1B
+@m2f:
+    sta (lvl_ptr),y
+    iny
+    bne @m2f
+    inc lvl_ptr+1
+    ldx lvl_ptr+1
+    cpx #$60
+    bne @m2f
+@m2: bra @m2
+.endif
     jsr clear_vram
     jsr title_screen             ; the SML title; waits for Start (Select = level select)
     jsr clear_vram
@@ -341,16 +450,29 @@ music2_data:                     ; 1-3 ending tracks (boss/rescue/reveal): FIXED
 .segment "BOOT6"                 ; ONE-SHOT boot bulk: runs with bank 6 mapped,
                                  ; interrupts/display off (called from reset)
 .proc boot6_init
+    lda #0                       ; --- silence the sound hardware FIRST (BB $D8A7
+    ldx #7                       ; liturgy): these regs hold GARBAGE at real power
+:   sta $2010,x                  ; -on; every commercial boot zeroes them before
+    dex                          ; doing anything else. $2010-$2017, noise, DMA.
+    bpl :-
+    sta $201B
+    sta $201C
+    sta $2028
+    sta $2029
+    sta $202A
+.ifdef HWMB
+    rts                          ; probe B: RAM exec + sound zeroing only
+.endif
     lda #0                       ; --- clear zero page ---
     tax
 :   sta $00,x
     inx
     bne :-
-    lda #<$0200                  ; --- clear WRAM $0200-$1FFF ---
-    sta ptr
-    lda #>$0200
+    lda #<$0200                  ; --- clear WRAM $0200..$14FF + $1D00..$1FFF
+    sta ptr                      ; (SKIPPING $1500-$1CFF: this very code runs
+    lda #>$0200                  ; there now) ---
     sta ptr+1
-    ldx #$1E                     ; $1E pages = $0200..$1FFF
+    ldx #$13                     ; $13 pages = $0200..$14FF
     lda #0
 @clr:
     ldy #0
@@ -360,12 +482,66 @@ music2_data:                     ; 1-3 ending tracks (boss/rescue/reveal): FIXED
     inc ptr+1
     dex
     bne @clr
+    lda #$1D                     ; $1D00..$1FFF (3 pages)
+    sta ptr+1
+    ldx #3
+    lda #0
+@clr2:
+    ldy #0
+:   sta (ptr),y
+    iny
+    bne :-
+    inc ptr+1
+    dex
+    bne @clr2
+.ifdef HWMC
+    rts                          ; probe C: + ZP/WRAM clears
+.endif
     jsr build_revpix             ; pixel-reverse lookup for horizontal sprite flip
     ldx #11                      ; stage the 1-3 kit's overlay-vector values: the
 :   lda l3vec_tab,x              ; table costs FIXED nothing here in bank 6
     sta l3vec_ram,x
     dex
     bpl :-
+.ifdef HWMD
+    rts                          ; probe D: + build_revpix and l3vec staging
+.endif
+    lda #$A0                     ; --- LCD setup, Block Buster's exact order ---
+    sta LCD_XSIZE                ; 160 px wide
+    lda #VRAM_LINES
+    sta LCD_YSIZE                ; 160 lines
+    stz scroll_vis
+    stz XSCROLL
+    stz YSCROLL
+    lda #$0F                     ; the drive/bias value every commercial boot
+    sta LCD_DRIVE                ; writes; Potator ignores it, the panel may not
+    ; --- BOOT SPLASH: stripes for ~2.5s. REAL-HW LAW (hwtest9, black-not-
+    ; blank): SYS_CTRL bit3 gates the VIDEO SUBSYSTEM -- VRAM writes are
+    ; LOST while it is clear. The bit must be ON BEFORE the fill. ---
+.ifndef NOSPLASH
+    lda #((6 << 5) | SYSCTRL_LCD)
+    sta SYS_CTRL
+    stz ptr
+    lda #$40
+    sta ptr+1
+    ldy #0
+    lda #$1B                     ; 4-shade stripe byte
+@sp: sta (ptr),y
+    iny
+    bne @sp
+    inc ptr+1
+    ldx ptr+1
+    cpx #$60
+    bne @sp
+    ldx #40                      ; ~2.5s busy delay (no interrupts yet):
+@d0: ldy #0                      ; 40 * 65536 inner iterations
+@d1: dec ptr
+    bne @d1
+    dey
+    bne @d1
+    dex
+    bne @d0
+.endif
     rts
 l3vec_tab:  .addr l3_spawn, l3_update, l3_token, l3_gift, l3_draw, l3_width
 .endproc
@@ -408,6 +584,12 @@ l3vec_tab:  .addr l3_spawn, l3_update, l3_token, l3_gift, l3_draw, l3_width
 .endproc
 .segment "CODE"
 
+.ifdef HWMARKER1
+HWMARK = 1
+.endif
+.ifdef HWMARKER2
+HWMARK = 1
+.endif
 main_loop:
     lda frame_flag
     beq main_loop
@@ -2380,7 +2562,7 @@ moth_tiles: .incbin "../build/gfx/moth.svt"
     sta lvl_ptr+1
 .endproc                         ; fall through
 .proc copy_overlay               ; bank 1 -> 8 pages from (lvl_ptr) to $1500
-    lda #(1 << 5) | (SYSCTRL_NMI_EN | SYSCTRL_TIMER_IRQ)
+    lda #(1 << 5) | (SYSCTRL_NMI_EN | SYSCTRL_TIMER_IRQ | SYSCTRL_LCD)
     sta SYS_CTRL
 .endproc                         ; falls through
 .proc copy_win8                  ; 8 pages from (lvl_ptr) to the $1500 window
@@ -3272,6 +3454,9 @@ moth_tiles: .incbin "../build/gfx/moth.svt"
 ; Structs $66F2/$66EE/$66F2: high (X=$7C1 = 2081Hz), low ($783 = 1049Hz), high;
 ; duty 2, vol 14, cut ~55ms by the length counter. SV: F = 59 / 118 / 59.
 .proc pause_dingdong
+.ifdef HWMARK
+    rts                          ; probe builds: body donated to the marker code
+.else
     lda pause_snd
     bne :+
     rts
@@ -3307,6 +3492,7 @@ moth_tiles: .incbin "../build/gfx/moth.svt"
     lda #$40
     sta CH2_VOLDUTY
     rts
+.endif
 .endproc
 
 mus_zero: .byte 0                ; mus_start seeds phrase ptrs here ("fetch next phrase")
@@ -3371,6 +3557,9 @@ music_data:
 ; game_over: blank screen + "GAME OVER" text, hold ~4s, then a full machine restart
 ; (the original shows GAME OVER then returns to the title; the port has no title yet).
 .proc game_over
+.ifdef HWMARK
+    jmp game_over                ; probe builds: body donated (never reached)
+.else
     lda #143                     ; trace: the strip rises WY 143 -> 64 at 1px/frame over the
     sta tmpH3                    ; FROZEN game screen, then holds ~256 frames, then exits
 @anim:
@@ -3430,6 +3619,7 @@ music_data:
     bne @t
     rts
 @txt: .byte $2C,$2C,$2C,$2C,$2C,$10,$0A,$16,$0E,$2C,$2C,$18,$1F,$0E,$1B,$2C,$2C  ; $1CD7
+.endif
 .endproc
 
 ; next_level: level complete — advance to the next level (GB State_08: $ffe4+1) and
@@ -8896,7 +9086,7 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     lda lvl_bank_tab,x           ; beside the title -- the smallest W1 level; 1-1 = bank
                                  ; 1). Safe mid-proc: load_level sits in the common
                                  ; prefix, byte-identical at this address in every bank.
-    ora #(SYSCTRL_NMI_EN | SYSCTRL_TIMER_IRQ)
+    ora #(SYSCTRL_NMI_EN | SYSCTRL_TIMER_IRQ | SYSCTRL_LCD)
     sta SYS_CTRL
     lda #<level_hdr              ; header base: bank 0 = the linked address; banks 1+
     sta lvl_ptr                  ; keep theirs where bank 0 has the TITLE (the packer

@@ -15,6 +15,8 @@ VRAM_FRAME_BYTES    = VRAM_STRIDE * VRAM_LINES   ; 7680 ($1E00) = 30 pages
 ; ---- I/O registers ($2000-$202F) ----
 LCD_XSIZE   = $2000      ; horizontal pixels (upper bits, 4-px align)
 LCD_YSIZE   = $2001      ; scanlines per frame
+LCD_DRIVE   = $2022      ; written $0F by every commercial boot (real-hw LCD
+                         ; drive/bias?); Potator ignores it entirely
 XSCROLL     = $2002      ; bits7:2 byte offset/line, bits1:0 pixel delay
 YSCROLL     = $2003      ; * $30 added to VRAM start
 
@@ -58,6 +60,11 @@ IRQ_STATUS  = $2027      ; bit1 DMA-audio done, bit0 timer expired
 SYSCTRL_NMI_EN    = $01  ; bit0: per-frame NMI enable
 SYSCTRL_TIMER_IRQ = $02  ; bit1: timer IRQ enable
 SYSCTRL_DMA_IRQ   = $04  ; bit2: DMA-audio IRQ enable
+SYSCTRL_LCD       = $08  ; bit3: LCD ENABLE -- REAL-HARDWARE ONLY discovery
+                         ; (2026-07-25, SuperPico hwtest bisection): without it
+                         ; the real Supervision's screen stays blank; Potator
+                         ; renders unconditionally and never revealed it.
+                         ; Every commercial boot sets it (Block Buster: $DF).
 SYSCTRL_PRESCALE  = $10  ; bit4: timer prescaler (period x0x4000 vs x0x100)
 SYSCTRL_BANK0     = $00  ; bits7:5 = bank << 5
 
