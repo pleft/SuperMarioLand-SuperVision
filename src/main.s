@@ -13,7 +13,13 @@
 .import mario_poses          ; 6 poses x 4 tiles (metasprite tiles from ROM $4C37)
 .import mario_big_poses      ; 7 big-Mario poses x 4 tiles (stand,walkA,walkB,jump,skid,walkC,duck)
 .import __BOOT6_LOAD__       ; the boot blob's bank-6 load address (run at $1500)
+.import __RCODE_LOAD__, __RCODE_RUN__  ; the resident RAM-code blob (docs/27)
 .import statusbar_tiles      ; 2x20 status-bar template (ROM $3F9C)
+
+; ring_next_*: advance a VRAM pointer one scanline (48 bytes) with the RING
+; wrap (docs/27): the LCD scan wraps at $4000+$1FE0, so every row-marching blit
+; must too, or a sprite straddling the seam writes into the echo bytes and is
+; lost. Subroutines, not macros: 7 call sites, FIXED is tight.
 
 ; ---------------------------------------------------------------------------
 .segment "ZEROPAGE"
@@ -128,7 +134,11 @@ mario_shrink: .res 1         ; >0 = big->small shrink animation (mirror of mario
 hurt_inv:    .res 1          ; post-hit mercy frames (no enemy damage while > 0)
 prev_vis:    .res 1          ; Mario appearance hash (facing^duck^big) at his last draw
 stream_pend: .res 1          ; margin columns still to stream after a shift (amortized 1/frame)
-scroll_vis:  .res 1          ; scroll value the line-16 IRQ latches (updated ONLY at frame start)
+; --- RING SCROLL view registers (docs/27; the rest of the ring state is in
+; BSS by row48): the framebuffer is the LCD's native 170-line ring. ---
+vxp:         .res 1          ; XSCROLL for the playfield rows (view byte*4 | subpixel)
+vxph:        .res 1          ; XSCROLL for the HUD rows (subpixel bits masked: no wobble)
+vyp:         .res 1          ; YSCROLL (view origin line)
 m_dirty:     .res 1          ; Mario needs erase+redraw this frame
 combo_t:     .res 1          ; stomp-combo window ($ff9c): 50 frames
 skid_t:      .res 1          ; turn-around brake ($c20d=1 state): 8f input-ignored freeze
@@ -494,6 +504,25 @@ probe_stripes:                   ; the full proven liturgy + stripes, FIXED-ROM
     inc ptr+1
     dex
     bne @clr2
+    lda #<__RCODE_LOAD__         ; --- install the always-resident RAM code at
+    sta ptr                      ; $1200 (ring helpers + hud_flush; docs/27):
+    lda #>__RCODE_LOAD__         ; copied from this same bank-6 window ---
+    sta ptr+1
+    lda #<__RCODE_RUN__
+    sta tmpL
+    lda #>__RCODE_RUN__
+    sta tmpH
+    ldx #3                       ; 3 pages ($0300 = the whole RCRAM area)
+@rc:
+    ldy #0
+:   lda (ptr),y
+    sta (tmpL),y
+    iny
+    bne :-
+    inc ptr+1
+    inc tmpH
+    dex
+    bne @rc
 .ifdef HWMC
     rts                          ; probe C: + ZP/WRAM clears
 .endif
@@ -510,7 +539,6 @@ probe_stripes:                   ; the full proven liturgy + stripes, FIXED-ROM
     sta LCD_XSIZE                ; 160 px wide
     lda #VRAM_LINES
     sta LCD_YSIZE                ; 160 lines
-    stz scroll_vis
     stz XSCROLL
     stz YSCROLL
     lda #$0F                     ; the drive/bias value every commercial boot
@@ -603,12 +631,11 @@ main_loop:
     ora pipe_phase               ; animations own their own drawing
     ora e_own
     beq :+
-    lda scroll_s
-    sta scroll_vis
+    jsr calc_view
     jmp @skiprender
-:   jsr scroll_apply             ; shift decision + DMA + fb_col0 + scroll_s, ALL here at
-    lda scroll_s                 ; frame start: pixels, coords and the scroll register mutate
-    sta scroll_vis               ; together, and the logic phase only ever sees coherent state
+:   jsr scroll_apply             ; shift decision + origin advance + fb_col0 + scroll_s,
+    jsr calc_view                ; ALL at frame start: coords and the view registers
+                                 ; mutate together; the logic phase sees coherent state
     stz stream_flag
     lda shift_px                 ; the linear DMA shift BLEEDS each line's right 8 bytes
     beq :+                       ; from the line below (fb_shift8): BLANK the bled tails
@@ -628,8 +655,9 @@ main_loop:
     lda hud_dirty
     beq :+
     stz hud_dirty
-    jsr draw_hud                 ; after the beam leaves rows 0-15: clean next frame
-:
+    jsr draw_hud                 ; digits -> the HUD shadow (sets hud_rp)
+:   jsr hud_flush                ; shadow -> ring when moved/changed + the seam echo
+
 @skiprender:
     lda pipe_phase              ; pipe sink/rise animation running? -> just animate
     beq @normal
@@ -1639,8 +1667,11 @@ no:
 @sffd:
     stz scroll_s
     stz prev_scroll_s
-    stz scroll_vis
-    stz XSCROLL
+    jsr calc_view                ; ring view at scroll_s=0; write the regs now,
+    lda vyp                      ; not at the next NMI: the scene draws this frame
+    sta YSCROLL
+    lda vxp
+    sta XSCROLL
     stz jump_state
     stz fall_v
     stz arc_idx
@@ -3677,8 +3708,11 @@ NUM_LEVELS = 6
 @sffd:
     stz scroll_s
     stz prev_scroll_s
-    stz scroll_vis
-    stz XSCROLL
+    jsr calc_view                ; ring view at scroll_s=0; write the regs now,
+    lda vyp                      ; not at the next NMI: the scene draws this frame
+    sta YSCROLL
+    lda vxp
+    sta XSCROLL
     stz jump_state
     stz fall_v
     stz arc_idx
@@ -3839,8 +3873,11 @@ NUM_LEVELS = 6
     stz scroll_s
     stz prev_scroll_s
     stz shift_px
-    stz scroll_vis
-    stz XSCROLL
+    jsr calc_view
+    lda vyp
+    sta YSCROLL
+    lda vxp
+    sta XSCROLL
     stz mario_facing
     stz h_idx
     lda #16                      ; drop in at the room's entry opening (top-left)
@@ -4181,16 +4218,18 @@ NUM_LEVELS = 6
 @r0:
     lda statusbar_tiles,x
     jsr get_tile_src
-    lda bg_col                   ; dcol = bg_col*2 (offset 0)
+    lda bg_col                   ; shadow cell = $1D00 + bg_row*320 + bg_col*2
     asl
-    sta dcol
-    lda bg_row                   ; dy = bg_row*8
-    asl
-    asl
-    asl
-    sta dy
-    jsr set_dst
-    jsr blit_tile
+    ldy bg_row                   ; (bg_row 0/1: +$140 via lo $40 + hi 1)
+    beq :+
+    clc
+    adc #$40
+:   sta cur_dst
+    lda bg_row
+    clc
+    adc #>HUDSHADOW
+    sta cur_dst+1
+    jsr blit_tile_hud
     inc bg_col
     lda bg_col
     cmp #20
@@ -4199,6 +4238,8 @@ NUM_LEVELS = 6
     lda bg_row
     cmp #2
     bne @rowloop
+    lda #1
+    sta hud_rp                   ; shadow changed -> hud_flush repaints
     rts
 .endproc
 
@@ -4214,18 +4255,22 @@ TIMER_RATE = 40                  ; frames per clock unit (SML's $da00 sub-counte
 .proc put_hud
     sta htmp                     ; save digit
     phx
-    txa
+    txa                          ; shadow cell = $1D00 + hud_row*320 + col*2
     asl
-    sta dcol                     ; dcol = col*2
+    ldy hud_row
+    beq :+
+    clc
+    adc #$40
+:   sta cur_dst
     lda hud_row
-    asl
-    asl
-    asl
-    sta dy                       ; dy = row*8
-    jsr set_dst
+    clc
+    adc #>HUDSHADOW
+    sta cur_dst+1
     lda htmp
     jsr get_tile_src
-    jsr blit_tile
+    jsr blit_tile_hud
+    lda #1
+    sta hud_rp
     plx
     rts
 .endproc
@@ -4405,13 +4450,8 @@ TIMER_RATE = 40                  ; frames per clock unit (SML's $da00 sub-counte
     sta (dst_ptr),y
     iny
     sta (dst_ptr),y
-    lda dst_ptr                  ; dst += stride
-    clc
-    adc #VRAM_STRIDE
-    sta dst_ptr
-    bcc :+
-    inc dst_ptr+1
-:   dex
+    jsr ring_next_dst            ; dst += stride, ring-wrapped (docs/27)
+    dex
     bne @row
     rts
 .endproc
@@ -4678,7 +4718,43 @@ PIN_X   = 64
     jsr flush_stream             ; a queued margin column from the PREVIOUS shift must
                                  ; be drawn before shifting again, or it strands as a
                                  ; stale band inside the visible area
-    jsr fb_shift8                ; shift framebuffer left 8 bytes (4 cols)
+    ; --- THE RING SHIFT (docs/27): advance the window origin 8 ring bytes.
+    ; No pixels move; stream_cols draws the 4 fresh columns into the seam. ---
+    lda ring_b
+    clc
+    adc #8
+    sta ring_b
+    bcc :+
+    inc ring_b+1
+:   lda ring_b+1                 ; wrap ring_b at $1FE0
+    cmp #>$1FE0
+    bcc @bok
+    bne @bwrap                   ; (can't happen: max $1FE7, but harmless)
+    lda ring_b
+    cmp #<$1FE0
+    bcc @bok
+@bwrap:
+    lda ring_b
+    sec
+    sbc #<$1FE0
+    sta ring_b
+    lda ring_b+1
+    sbc #>$1FE0
+    sta ring_b+1
+@bok:
+    lda ring_xb                  ; keep the (line, byte) pair in step for the
+    clc                          ; view registers: xb += 8, carry into ring_y
+    adc #8
+    cmp #48
+    bcc @xok
+    sbc #48                      ; (carry set from cmp)
+    inc ring_y
+    ldx ring_y
+    cpx #170
+    bne @xok
+    stz ring_y
+@xok:
+    sta ring_xb
     lda fb_col0                  ; fb_col0 += 4
     clc
     adc #4
@@ -4689,7 +4765,7 @@ PIN_X   = 64
     clc                          ;   prev_vx to match and streams the new columns AFTER
     adc #32                      ;   drawing Mario (see main_loop ordering note)
     sta shift_px
-    bra @loop                    ; recompute offset (now reduced by 32)
+    jmp @loop                    ; recompute offset (now reduced by 32)
 @setscroll:
     lda tmpL
 @apply:
@@ -4700,6 +4776,7 @@ PIN_X   = 64
 
 ; stream_cols: draw the 4 new right-margin columns (fb_col0+20..+23) into the
 ; off-screen VRAM byte columns 40,42,44,46 after a shift.
+.segment "RCODE"
 
 ; fb_shift8: shift the PLAYFIELD (scanlines 16..159) left 8 bytes via the VRAM DMA.
 ; The DMA does a clean linear copy (upperRam[i]=upperRam[i+8]); restricting it to the
@@ -4708,42 +4785,36 @@ PIN_X   = 64
 ; that bleed upward. Lines 16..159 ARE refilled every shift by stream_cols, so no creep.
 ; Two line-aligned chunks (DMA_LEN is x16-bytes, max 255 units): 80 lines + 64 lines.
 ; The DMA copy is ~free in emulated cycles -> no hitch. Cpu2vram=1 (dst hi bit6 set).
-.proc fb_shift8
-    ; REAL-HW LAW (docs/26, GrenderG notes + hwtest12): the VRAM DMA is
-    ; WRAM/ROM -> VRAM ONLY; a VRAM source reads garbage (Potator models a
-    ; universal copier). CPU copy instead: 144 lines x 40 visible bytes,
-    ; src = dst+8. The stale right-margin bytes are redrawn by stream_cols
-    ; right after, same as the old bleed. (hwtest12 button A = this, clean.)
-    lda #<$4300                  ; dst = line 16
-    sta ptr
-    lda #>$4300
-    sta ptr+1
-    lda #144
-    sta tmpL2                    ; line counter (tmpL/H = src pointer pair;
-@line:                           ; all free: scroll_apply recomputes after)
-    lda ptr
+; calc_view: view registers from the ring origin + scroll_s (docs/27).
+; view byte = origin + scroll_s/4 (carrying across the stride into the next
+; ring line); vxp = the playfield XSCROLL (byte*4 | 1px subpixel), vxph = the
+; HUD XSCROLL (subpixel masked: the HUD repaints at byte steps, and masking
+; the subpixel keeps it wobble-free), vyp = YSCROLL.
+.proc calc_view
+    lda scroll_s
+    lsr
+    lsr                          ; scroll bytes 0..8
     clc
-    adc #8
-    sta tmpL                     ; src = dst + 8 (same line, 8 bytes right)
-    lda ptr+1
-    adc #0
-    sta tmpH
-    ldy #0
-@b: lda (tmpL),y
-    sta (ptr),y
-    iny
-    cpy #40
-    bne @b
-    lda ptr
-    clc
-    adc #48
-    sta ptr
+    adc ring_xb
+    ldx ring_y
+    cmp #48
     bcc :+
-    inc ptr+1
-:   dec tmpL2
-    bne @line
+    sbc #48                      ; (carry set from cmp)
+    inx
+    cpx #170
+    bne :+
+    ldx #0
+:   stx vyp
+    asl
+    asl
+    sta vxph                     ; HUD view: subpixel 0
+    lda scroll_s
+    and #3
+    ora vxph
+    sta vxp                      ; playfield view: 1px-true
     rts
 .endproc
+.segment "CODE"
 
 ; ---------------------------------------------------------------------------
 ; draw_player: blit Mario's 16x16 standing metasprite (tiles $20,$21,$30,$31 -
@@ -9493,22 +9564,114 @@ wcyc: .byte 2, 5, 1              ; port pose ids for GB metasprites 1, 2, 3
     rts
 .endproc
 
-; set_dst: dst_ptr = $4000 + dy*48 + dcol.
+; set_dst: dst_ptr = $4000 + ((ring_b + dy*48 + dcol) mod $1FE0) — the window
+; cell (dy, dcol) mapped through the RING (docs/27). Sum < 2*$1FE0, so one
+; conditional subtract wraps. All playfield/HUD blits funnel through here.
 .proc set_dst
-    ldx dy                       ; dst = $4000 + dy*48 + dcol, via a 160-entry dy*48 table
-    lda row48_lo,x               ; (was a shift/add chain -- 10% of the worst frame)
+    ldx dy
+    lda row48_lo,x
     clc
     adc dcol
     sta dst_ptr
     lda row48_hi,x
-    adc #$40
+    adc #0
+    sta dst_ptr+1                ; dy*48 + dcol
+    lda dst_ptr
+    clc
+    adc ring_b
+    sta dst_ptr
+    lda dst_ptr+1
+    adc ring_b+1
+    sta dst_ptr+1                ; + window origin (may exceed the ring end)
+    cmp #>$1FE0
+    bcc @map
+    bne @wrap
+    lda dst_ptr
+    cmp #<$1FE0
+    bcc @map
+@wrap:
+    lda dst_ptr
+    sec
+    sbc #<$1FE0
+    sta dst_ptr
+    lda dst_ptr+1
+    sbc #>$1FE0
+    sta dst_ptr+1
+@map:
+    lda dst_ptr+1
+    clc
+    adc #$40                     ; VRAM base
     sta dst_ptr+1
     rts
 .endproc
+.segment "RCODE"
+
+.proc ring_next_cur              ; cur_dst += 48, ring-wrapped (docs/27)
+    lda cur_dst
+    clc
+    adc #VRAM_STRIDE
+    sta cur_dst
+    lda cur_dst+1
+    adc #0
+    sta cur_dst+1
+    cmp #$5F
+    bcc @ok
+    bne @wrap
+    lda cur_dst
+    cmp #$E0
+    bcc @ok
+@wrap:
+    lda cur_dst
+    sec
+    sbc #$E0
+    sta cur_dst
+    lda cur_dst+1
+    sbc #$1F
+    sta cur_dst+1
+@ok:
+    rts
+.endproc
+.segment "CODE"
+.segment "RCODE"
+
+.proc ring_next_dst              ; dst_ptr += 48, ring-wrapped (docs/27)
+    lda dst_ptr
+    clc
+    adc #VRAM_STRIDE
+    sta dst_ptr
+    lda dst_ptr+1
+    adc #0
+    sta dst_ptr+1
+    cmp #$5F
+    bcc @ok
+    bne @wrap
+    lda dst_ptr
+    cmp #$E0
+    bcc @ok
+@wrap:
+    lda dst_ptr
+    sec
+    sbc #$E0
+    sta dst_ptr
+    lda dst_ptr+1
+    sbc #$1F
+    sta dst_ptr+1
+@ok:
+    rts
+.endproc
+.segment "CODE"
 
 .segment "BSS"               ; dy -> dy*48 split tables, BUILT AT BOOT (they were
-row48_lo: .res 160           ; 320 bytes of ROM in the banked prefix = 320 bytes
-row48_hi: .res 160           ; paid in EVERY bank)
+row48_lo: .res 170           ; 340 bytes of ROM in the banked prefix = 340 bytes
+row48_hi: .res 170           ; paid in EVERY bank). 170 entries: the RING's lines.
+; RING SCROLL origin state (docs/27): the window origin as a ring byte offset
+; ($1FE0-wrapped) and as its (line, byte) split; a "shift" = origin += 8.
+ring_b:      .res 2
+ring_y:      .res 1
+ring_xb:     .res 1
+prev_vxph:   .res 1          ; hud_flush repaint-needed detection
+prev_vyp:    .res 1
+hud_rp:      .res 1          ; HUD shadow changed -> flush to the ring
 .segment "CODE"
 
 ; build_shtab: the sub-pixel shift/mask tables — for every byte b and subx k:
@@ -9661,23 +9824,19 @@ row48_hi: .res 160           ; paid in EVERY bank)
 ; shift just filled them with the next line's left edge (see fb_shift8). Blank
 ; reads as sky until the stream queue refills the 4 columns.
 .proc blank_margin
-    lda #<($4000 + 16*48 + 42)   ; only bytes 42..43 can scroll into view before the
-    sta cur_dst                  ; queue refills them (40-41 stream this same frame;
-    lda #>($4000 + 16*48 + 42)   ; 44-45 refill at shift+2 yet need scroll_s>16 =
-    sta cur_dst+1                ; ~10 frames; 46-47 likewise at shift+3 vs s>24)
+    lda #16                      ; only bytes 42..43 can scroll into view before the
+    sta dy                       ; queue refills them (40-41 stream this same frame;
+    lda #42                      ; 44-45 refill at shift+2 yet need scroll_s>16 =
+    sta dcol                     ; ~10 frames; 46-47 likewise at shift+3 vs s>24)
+    jsr set_dst                  ; ring-mapped (docs/27)
     ldx #144                     ; lines 16..159
 @l:
     lda #0
-    sta (cur_dst)
+    sta (dst_ptr)
     ldy #1
-    sta (cur_dst),y
-    lda cur_dst                  ; += stride
-    clc
-    adc #48
-    sta cur_dst
-    bcc :+
-    inc cur_dst+1
-:   dex
+    sta (dst_ptr),y
+    jsr ring_next_dst
+    dex
     bne @l
     rts
 .endproc
@@ -9698,7 +9857,7 @@ row48_hi: .res 160           ; paid in EVERY bank)
     bcc :+
     inc tmpH
 :   inx
-    cpx #160
+    cpx #170
     bne @l
     rts
 .endproc
@@ -9729,12 +9888,7 @@ row48_hi: .res 160           ; paid in EVERY bank)
     sta cur_src
     bcc :+
     inc cur_src+1
-:   lda cur_dst                  ; dst += stride
-    clc
-    adc #VRAM_STRIDE
-    sta cur_dst
-    bcc :+
-    inc cur_dst+1
+:   jsr ring_next_cur            ; dst += stride, ring-wrapped (docs/27)
 :   dex
     bne @row
     rts
@@ -9808,12 +9962,7 @@ row48_hi: .res 160           ; paid in EVERY bank)
     sta cur_src
     bcc :+
     inc cur_src+1
-:   lda cur_dst                  ; dst += stride
-    clc
-    adc #VRAM_STRIDE
-    sta cur_dst
-    bcc :+
-    inc cur_dst+1
+:   jsr ring_next_cur            ; dst += stride, ring-wrapped (docs/27)
 :   dec blit_row
     beq @out
     jmp @row
@@ -9958,12 +10107,7 @@ row48_hi: .res 160           ; paid in EVERY bank)
     sta cur_src
     bcc :+
     inc cur_src+1
-:   lda cur_dst                  ; dst += stride
-    clc
-    adc #VRAM_STRIDE
-    sta cur_dst
-    bcc :+
-    inc cur_dst+1
+:   jsr ring_next_cur            ; dst += stride, ring-wrapped (docs/27)
 :   dec blit_row
     beq @out
     jmp @row
@@ -9981,18 +10125,24 @@ HUD_SPLIT_LINE = 16              ; timer reload = split scanline (IPeriod=256 cy
     inc frame_count
     lda #1
     sta frame_flag
-    stz XSCROLL                  ; status-bar rows (0..15) render unscrolled
+    lda vyp                      ; RING view origin (docs/27); HUD rows get the
+    sta YSCROLL                  ; subpixel-masked XSCROLL (no wobble at 1px scroll)
+    lda vxph
+    sta XSCROLL
     lda #HUD_SPLIT_LINE           ; arm timer -> IRQ at scanline 16 (period = data * $100)
     sta IRQ_TIMER
     pla
     rti
 .endproc
 
-; IRQ (timer @ scanline 16): switch to the playfield scroll for the rest of the frame.
+; IRQ (timer @ scanline 16): switch to the playfield's 1px-true scroll for the
+; rest of the frame. (Emulated by OUR patched potator core; on real hardware the
+; NMI isn't LCD-synced, so this line wanders — worst case a <=3px shear, v2 =
+; the SYS_CTRL restart trick pins it.)
 .proc irq
     pha
-    lda scroll_vis
-    sta XSCROLL                  ; playfield rows (16..159) scroll smoothly
+    lda vxp
+    sta XSCROLL
     lda IRQ_TIMER_RST            ; read clears the timer IRQ
     pla
     rti
@@ -10102,9 +10252,43 @@ HUD_SPLIT_LINE = 16              ; timer reload = split scanline (IPeriod=256 cy
     sta cur_src
     bcc :+
     inc cur_src+1
-:   lda cur_dst                  ; dst += stride ($30)
+:   jsr ring_next_cur            ; dst += stride, ring-wrapped (docs/27)
+:   dex
+    bne @row
+    rts
+.endproc
+
+HUDSHADOW = $1D00                ; 16 rows x 40 bytes (stride 40), WRAM ($1D00-$1F7F).
+                                 ; The HUD lives here and hud_flush copies it into the
+                                 ; ring at the current view origin (docs/27): the ring
+                                 ; slides under the screen, so anything screen-fixed
+                                 ; must be repainted when the view origin moves a byte.
+.segment "RCODE"
+
+; blit_tile_hud: like blit_tile, but into the HUD SHADOW (stride 40, opaque).
+; cur_dst = shadow cell; src_ptr = tile.
+.proc blit_tile_hud
+    lda src_ptr
+    sta cur_src
+    lda src_ptr+1
+    sta cur_src+1
+    ldx #8
+@row:
+    ldy #0
+    lda (cur_src),y
+    sta (cur_dst),y
+    iny
+    lda (cur_src),y
+    sta (cur_dst),y
+    lda cur_src
     clc
-    adc #VRAM_STRIDE
+    adc #2
+    sta cur_src
+    bcc :+
+    inc cur_src+1
+:   lda cur_dst
+    clc
+    adc #40
     sta cur_dst
     bcc :+
     inc cur_dst+1
@@ -10112,55 +10296,113 @@ HUD_SPLIT_LINE = 16              ; timer reload = split scanline (IPeriod=256 cy
     bne @row
     rts
 .endproc
+.segment "CODE"
+.segment "RCODE"
+
+; hud_flush: if the HUD shadow changed or the view origin moved a byte, copy
+; the 640-byte shadow into ring rows 0..15 at the view position. Then refresh
+; the SEAM ECHO: bytes $5FE0-$5FFF mirror $4000-$401F so the seam scanline's
+; linear over-fetch shows exactly what the wrap shows (hwtest14's tick line).
+.proc hud_flush
+    lda hud_rp
+    bne @go
+    lda vxph
+    cmp prev_vxph
+    bne @go
+    lda vyp
+    cmp prev_vyp
+    bne @go
+    bra @echo
+@go:
+    lda vxph
+    sta prev_vxph
+    lda vyp
+    sta prev_vyp
+    stz hud_rp
+    lda #<HUDSHADOW
+    sta cur_src
+    lda #>HUDSHADOW
+    sta cur_src+1
+    lda vxph
+    lsr
+    lsr
+    sta tmpL3                    ; view byte col 0..47
+    ldx vyp                      ; ring line of screen row 0
+    lda #16
+    sta tmpH3                    ; row counter
+@row:
+    lda row48_lo,x
+    clc
+    adc tmpL3
+    sta cur_dst
+    lda row48_hi,x
+    adc #$40                     ; row48[x]+col <= 8159: never wraps AT THE START
+    sta cur_dst+1
+    cpx #169                     ; ...but the LAST ring line's 40-byte run can
+    bne @fast                    ; cross the seam mid-row
+    lda tmpL3
+    cmp #9
+    bcs @split
+@fast:
+    ldy #0
+@b: lda (cur_src),y
+    sta (cur_dst),y
+    iny
+    cpy #40
+    bne @b
+@next:
+    lda cur_src
+    clc
+    adc #40
+    sta cur_src
+    bcc :+
+    inc cur_src+1
+:   inx
+    cpx #170
+    bne :+
+    ldx #0
+:   dec tmpH3
+    bne @row
+@echo:
+    ldy #31
+:   lda $4000,y
+    sta $5FE0,y
+    dey
+    bpl :-
+    rts
+@split:                          ; seam row: n1 = 48-col bytes here, rest at $4000
+    lda #48
+    sec
+    sbc tmpL3
+    sta tmpL2                    ; n1 (8..39)
+    ldy #0
+@s1:
+    lda (cur_src),y
+    sta (cur_dst),y
+    iny
+    cpy tmpL2
+    bne @s1
+    stz cur_dst
+    lda #$40
+    sta cur_dst+1                ; wrap: continue at ring byte 0
+    lda cur_dst                  ; dst index continues via (dst - n1): use Y math
+    sec
+    sbc tmpL2
+    sta cur_dst                  ; cur_dst = $4000 - n1 so (cur_dst),y lands right
+    lda cur_dst+1
+    sbc #0
+    sta cur_dst+1
+@s2:
+    lda (cur_src),y
+    sta (cur_dst),y
+    iny
+    cpy #40
+    bne @s2
+    bra @next
+.endproc
+.segment "CODE"
 
 ; ---------------------------------------------------------------------------
-; draw_tilesheet: blit the first 16x16 = 256 tiles as a grid in the top-left
-; (128x128 px). Proves tile data + SV packing + the blit path with real graphics.
-.proc draw_tilesheet
-    lda #<chardata               ; src = tile 0
-    sta src_ptr
-    lda #>chardata
-    sta src_ptr+1
-    lda #<VRAM                   ; row_base = top-left of VRAM
-    sta row_base
-    lda #>VRAM
-    sta row_base+1
-    lda #16
-    sta trow_cnt
-@rowloop:
-    lda row_base                 ; dst_ptr = row_base
-    sta dst_ptr
-    lda row_base+1
-    sta dst_ptr+1
-    lda #16
-    sta tcol_cnt
-@colloop:
-    jsr blit_tile
-    lda src_ptr                  ; src_ptr += 16 (next tile)
-    clc
-    adc #16
-    sta src_ptr
-    bcc :+
-    inc src_ptr+1
-:   lda dst_ptr                  ; dst_ptr += 2 (next column = 8 px)
-    clc
-    adc #2
-    sta dst_ptr
-    bcc :+
-    inc dst_ptr+1
-:   dec tcol_cnt
-    bne @colloop
-    lda row_base                 ; row_base += 8*stride ($180) -> next tile-row
-    clc
-    adc #<(8 * VRAM_STRIDE)
-    sta row_base
-    lda row_base+1
-    adc #>(8 * VRAM_STRIDE)
-    sta row_base+1
-    dec trow_cnt
-    bne @rowloop
-    rts
-.endproc
 
 ; ---------------------------------------------------------------------------
 .segment "RODATA"
@@ -11110,8 +11352,11 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
     jsr mus_start                ; writes $dfe8=$12 in the bonus-entry setup)
     stz scroll_s                 ; the level end leaves XSCROLL=32 (sub-shift): the bonus
     stz prev_scroll_s            ; draws at fb cols 0-19, so the window must start at 0
-    stz scroll_vis
-    stz XSCROLL
+    jsr calc_view
+    lda vyp
+    sta YSCROLL
+    lda vxp
+    sta XSCROLL
     jsr clear_vram               ; blank the full framebuffer (incl. the HUD rows)
     stz b_row                    ; --- border: top row ---
     stz b_col
