@@ -4709,28 +4709,39 @@ PIN_X   = 64
 ; Two line-aligned chunks (DMA_LEN is x16-bytes, max 255 units): 80 lines + 64 lines.
 ; The DMA copy is ~free in emulated cycles -> no hitch. Cpu2vram=1 (dst hi bit6 set).
 .proc fb_shift8
-    lda #$08                     ; chunk 1: $4308 -> $4300 (lines 16..95, 3840 bytes)
-    sta DMA_SRC_LO
-    lda #$43
-    sta DMA_SRC_HI
-    stz DMA_DST_LO
-    lda #$43
-    sta DMA_DST_HI
-    lda #240                     ; 240 x 16 = 3840 bytes = 80 lines
-    sta DMA_LEN
-    lda #$80
-    sta DMA_CTRL
-    lda #$08                     ; chunk 2: $5208 -> $5200 (lines 96..159, 3072 bytes)
-    sta DMA_SRC_LO
-    lda #$52
-    sta DMA_SRC_HI
-    stz DMA_DST_LO
-    lda #$52
-    sta DMA_DST_HI
-    lda #192                     ; 192 x 16 = 3072 bytes = 64 lines
-    sta DMA_LEN
-    lda #$80
-    sta DMA_CTRL
+    ; REAL-HW LAW (docs/26, GrenderG notes + hwtest12): the VRAM DMA is
+    ; WRAM/ROM -> VRAM ONLY; a VRAM source reads garbage (Potator models a
+    ; universal copier). CPU copy instead: 144 lines x 40 visible bytes,
+    ; src = dst+8. The stale right-margin bytes are redrawn by stream_cols
+    ; right after, same as the old bleed. (hwtest12 button A = this, clean.)
+    lda #<$4300                  ; dst = line 16
+    sta ptr
+    lda #>$4300
+    sta ptr+1
+    lda #144
+    sta tmpL2                    ; line counter (tmpL/H = src pointer pair;
+@line:                           ; all free: scroll_apply recomputes after)
+    lda ptr
+    clc
+    adc #8
+    sta tmpL                     ; src = dst + 8 (same line, 8 bytes right)
+    lda ptr+1
+    adc #0
+    sta tmpH
+    ldy #0
+@b: lda (tmpL),y
+    sta (ptr),y
+    iny
+    cpy #40
+    bne @b
+    lda ptr
+    clc
+    adc #48
+    sta ptr
+    bcc :+
+    inc ptr+1
+:   dec tmpL2
+    bne @line
     rts
 .endproc
 
