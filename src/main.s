@@ -153,7 +153,6 @@ sfx_p:       .res 2          ; SFX stream pointer (0 hi = idle)
 sfx_wait:    .res 1          ; frames until the pending row applies
 sfx_used:    .res 1          ; channel mask the stream touched (for the end-silence)
 hud_row:     .res 1          ; put_hud target row (0 or 1)
-htmp:        .res 1          ; put_hud scratch (digit being blitted)
 rb_vx:       .res 1          ; restore_bg: VRAM pixel X of the region to repaint
 rb_y:        .res 1          ; restore_bg: VRAM pixel Y
 rb_cols:     .res 1          ; restore_bg: width in tiles
@@ -189,17 +188,16 @@ p_shhi:      .res 2          ; aligned BSS, boot-built; masks = M(shifted) per r
 cam_x:       .res 2          ; world scroll in PIXELS (level pixels scrolled off the left)
 fb_col0:     .res 2          ; world column resident at VRAM byte-col 0 (left of framebuffer)
 scroll_s:    .res 1          ; current XSCROLL value (0..28, multiple of 4 = byte-aligned)
-prev_scroll_s: .res 1        ; last applied scroll_s (redraw status bar only when it changes)
 mario_vx:    .res 1          ; Mario VRAM pixel X = spr_x + scroll_s (so he draws pinned)
 prev_vx:     .res 1          ; last drawn mario_vx (for restore_bg)
 wcol:        .res 2          ; draw_column input: world column to draw
 dbcol:       .res 1          ; draw_column input: dest VRAM byte column
-strk:        .res 1          ; scroll streaming loop counter
 shift_px:    .res 1          ; pixels the framebuffer shifted this frame (0 or 32 per DMA shift)
 stream_flag: .res 1          ; stream_one drew a margin column this frame (margin sprites redraw)
 water_on:   .res 1           ; 1-3: animate the $5D shore tiles (GB $d014)
 w_i:        .res 1           ; l3_water: fb column / map row cursors
 w_row:      .res 1
+htmp:       .res 1           ; put_hud scratch (digit being blitted)
 stream_x0:  .res 1           ; fb-x span [x0,x1) rewritten this frame by stream/blank
 stream_x1:  .res 1           ; (valid only while stream_flag=1)
 ; --- music sequencer state (two channel blocks, stride 12, X = 0/12) ---
@@ -629,7 +627,7 @@ main_loop:
     beq :+
     stz hud_dirty
     jsr draw_hud                 ; digits -> the HUD shadow (sets hud_rp)
-:   jsr hud_flush                ; shadow -> ring when moved/changed + the seam echo
+:   jsr hud_check                ; repaint verdict for the NMI + the seam echo
 
 @skiprender:
     lda pipe_phase              ; pipe sink/rise animation running? -> just animate
@@ -1639,7 +1637,6 @@ no:
     bra @sff
 @sffd:
     stz scroll_s
-    stz prev_scroll_s
     jsr apply_view               ; ring view at scroll_s=0, regs + latches now
     stz jump_state
     stz fall_v
@@ -3676,7 +3673,6 @@ NUM_LEVELS = 6
     bra @sff
 @sffd:
     stz scroll_s
-    stz prev_scroll_s
     jsr apply_view               ; ring view at scroll_s=0, regs + latches now
     stz jump_state
     stz fall_v
@@ -3836,7 +3832,6 @@ NUM_LEVELS = 6
     stz fb_col0
     stz fb_col0+1
     stz scroll_s
-    stz prev_scroll_s
     stz shift_px
     jsr apply_view
     stz mario_facing
@@ -3889,7 +3884,6 @@ NUM_LEVELS = 6
     lda cam_x
     and #7
     sta scroll_s
-    stz prev_scroll_s
     stz shift_px
     stz jump_state               ; reappear inside the pipe, then rise out (pipe_animate)
     stz fall_v
@@ -9647,8 +9641,12 @@ ring_xb:     .res 1
 prev_vxph:   .res 1          ; hud_flush repaint-needed detection
 prev_vyp:    .res 1
 hud_rp:      .res 1          ; HUD shadow changed -> flush to the ring
-vxph_ap:     .res 1          ; APPLIED HUD view (latched by hud_flush ONLY: the
-vyp_ap:      .res 1          ; NMI must never scroll the HUD ahead of its repaint)
+vxph_ap:     .res 1          ; APPLIED HUD view: latched + repainted INSIDE the NMI
+vyp_ap:      .res 1          ; (register and pixels must change in the same instant)
+hud_go:      .res 1          ; hud_check verdict: NMI must latch + repaint
+hf_col:      .res 1          ; NMI HUD-copy: view byte col / row counter / seam n1
+hf_row:      .res 1
+hf_n1:       .res 1
 .segment "CODE"
 
 ; build_shtab: the sub-pixel shift/mask tables — for every byte b and subx k:
@@ -10099,15 +10097,31 @@ vyp_ap:      .res 1          ; NMI must never scroll the HUD ahead of its repain
 HUD_SPLIT_LINE = 16              ; timer reload = split scanline (IPeriod=256 cyc/scanline)
 .proc nmi
     pha
+    phx
     inc frame_count
     lda #1
     sta frame_flag
-    lda vyp_ap                   ; RING view origin (docs/27), the hud_flush-LATCHED
-    sta YSCROLL                  ; values: the register and the repaint move as one
-    lda vxph_ap                  ; (else the HUD flashes 4px on view-byte crossings)
+    ldx #0                       ; X = repaint verdict
+    lda hud_go                   ; view-byte crossing? latch the new HUD view and
+    beq @stable                  ; repaint IN THIS HANDLER: on the per-scanline core
+    stz hud_go                   ; the HUD rows' scroll is sampled in the first ~16
+    inx                          ; slices — register + pixels must both change here,
+    lda vxph                     ; before those slices, or the HUD flashes a byte
+    sta vxph_ap                  ; sideways for one frame.
+    lda vyp
+    sta vyp_ap
+@stable:
+    lda vyp_ap
+    sta YSCROLL
+    lda vxph_ap
     sta XSCROLL
     lda #HUD_SPLIT_LINE           ; arm timer -> IRQ at scanline 16 (period = data * $100)
-    sta IRQ_TIMER
+    sta IRQ_TIMER                 ; (on repaint frames the IRQ lands late: <=3px shear
+    txa                           ;  on a few top playfield lines for one frame)
+    beq @out
+    jsr nmi_hud_copy             ; saves/restores Y + the scratch pairs itself
+@out:
+    plx
     pla
     rti
 .endproc
@@ -10278,72 +10292,28 @@ HUDSHADOW = $1D00                ; 16 rows x 40 bytes (stride 40), WRAM ($1D00-$
 .segment "CODE"
 .segment "RCODE"
 
-; hud_flush: if the HUD shadow changed or the view origin moved a byte, copy
-; the 640-byte shadow into ring rows 0..15 at the view position. Then refresh
-; the SEAM ECHO: bytes $5FE0-$5FFF mirror $4000-$401F so the seam scanline's
-; linear over-fetch shows exactly what the wrap shows (hwtest14's tick line).
-.proc hud_flush
+; hud_check (main loop): decide whether the HUD needs a repaint (shadow dirty
+; or the view origin moved a byte) -> hud_go for the NMI, which latches the
+; view and repaints ATOMICALLY (see nmi). Also refreshes the SEAM ECHO:
+; $5FE0-$5FFF mirror $4000-$401F so the seam scanline's linear over-fetch
+; shows exactly what the wrap shows (hwtest14's tick line).
+.proc hud_check
     lda hud_rp
-    bne @go
+    bne @need
     lda vxph
     cmp prev_vxph
-    bne @go
+    bne @need
     lda vyp
     cmp prev_vyp
-    bne @go
-    bra @echo
-@go:
+    beq @echo
+@need:
+    stz hud_rp
     lda vxph
     sta prev_vxph
-    sta vxph_ap                  ; latch: the repaint below matches these
     lda vyp
     sta prev_vyp
-    sta vyp_ap
-    stz hud_rp
-    lda #<HUDSHADOW
-    sta cur_src
-    lda #>HUDSHADOW
-    sta cur_src+1
-    lda vxph
-    lsr
-    lsr
-    sta tmpL3                    ; view byte col 0..47
-    ldx vyp                      ; ring line of screen row 0
-    lda #16
-    sta tmpH3                    ; row counter
-@row:
-    lda row48_lo,x
-    clc
-    adc tmpL3
-    sta cur_dst
-    lda row48_hi,x
-    adc #$40                     ; row48[x]+col <= 8159: never wraps AT THE START
-    sta cur_dst+1
-    cpx #169                     ; ...but the LAST ring line's 40-byte run can
-    bne @fast                    ; cross the seam mid-row
-    lda tmpL3
-    cmp #9
-    bcs @split
-@fast:
-    ldy #0
-@b: lda (cur_src),y
-    sta (cur_dst),y
-    iny
-    cpy #40
-    bne @b
-@next:
-    lda cur_src
-    clc
-    adc #40
-    sta cur_src
-    bcc :+
-    inc cur_src+1
-:   inx
-    cpx #170
-    bne :+
-    ldx #0
-:   dec tmpH3
-    bne @row
+    lda #1
+    sta hud_go
 @echo:
     ldy #31
 :   lda $4000,y
@@ -10351,31 +10321,101 @@ HUDSHADOW = $1D00                ; 16 rows x 40 bytes (stride 40), WRAM ($1D00-$
     dey
     bpl :-
     rts
+.endproc
+
+; nmi_hud_copy (NMI context!): 640-byte shadow -> ring at the LATCHED view.
+; Pointers = tmpL3/H3 (src) + tmpL2/H2 (dst): the NMI SAVES AND RESTORES all
+; four around the call — the interrupted mainline may be using them mid-blit.
+; X/Y saved by the caller too.
+.proc nmi_hud_copy
+    phy
+    lda tmpL2                    ; the mainline may be mid-blit in these
+    pha
+    lda tmpH2
+    pha
+    lda tmpL3
+    pha
+    lda tmpH3
+    pha
+    jsr @copy
+    pla
+    sta tmpH3
+    pla
+    sta tmpL3
+    pla
+    sta tmpH2
+    pla
+    sta tmpL2
+    ply
+    rts
+@copy:
+    lda #<HUDSHADOW
+    sta tmpL3
+    lda #>HUDSHADOW
+    sta tmpH3
+    lda vxph_ap
+    lsr
+    lsr
+    sta hf_col                   ; view byte col 0..47
+    ldx vyp_ap                   ; ring line of screen row 0
+    lda #16
+    sta hf_row
+@row:
+    lda row48_lo,x
+    clc
+    adc hf_col
+    sta tmpL2
+    lda row48_hi,x
+    adc #$40                     ; start <= 8159: never wraps AT THE START...
+    sta tmpH2
+    cpx #169                     ; ...but the LAST ring line's run can cross
+    bne @fast                    ; the seam mid-row
+    lda hf_col
+    cmp #9
+    bcs @split
+@fast:
+    ldy #0
+@b: lda (tmpL3),y
+    sta (tmpL2),y
+    iny
+    cpy #40
+    bne @b
+@next:
+    lda tmpL3
+    clc
+    adc #40
+    sta tmpL3
+    bcc :+
+    inc tmpH3
+:   inx
+    cpx #170
+    bne :+
+    ldx #0
+:   dec hf_row
+    bne @row
+    rts
 @split:                          ; seam row: n1 = 48-col bytes here, rest at $4000
     lda #48
     sec
-    sbc tmpL3
-    sta tmpL2                    ; n1 (8..39)
+    sbc hf_col
+    sta hf_n1
     ldy #0
 @s1:
-    lda (cur_src),y
-    sta (cur_dst),y
+    lda (tmpL3),y
+    sta (tmpL2),y
     iny
-    cpy tmpL2
+    cpy hf_n1
     bne @s1
-    stz cur_dst
-    lda #$40
-    sta cur_dst+1                ; wrap: continue at ring byte 0
-    lda cur_dst                  ; dst index continues via (dst - n1): use Y math
+    lda #0                       ; dst = $4000 - n1 so (dst),y continues right
     sec
-    sbc tmpL2
-    sta cur_dst                  ; cur_dst = $4000 - n1 so (cur_dst),y lands right
-    lda cur_dst+1
+    sbc hf_n1
+    sta tmpL2
+    lda #$40
     sbc #0
-    sta cur_dst+1
+    sta tmpH2
 @s2:
-    lda (cur_src),y
-    sta (cur_dst),y
+    lda (tmpL3),y
+    sta (tmpL2),y
     iny
     cpy #40
     bne @s2
@@ -11332,7 +11372,6 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
     lda #MUS_BONUS               ; the bonus tune replaces the goal fanfare ($0F84
     jsr mus_start                ; writes $dfe8=$12 in the bonus-entry setup)
     stz scroll_s                 ; the level end leaves XSCROLL=32 (sub-shift): the bonus
-    stz prev_scroll_s            ; draws at fb cols 0-19, so the window must start at 0
     jsr apply_view
     jsr clear_vram               ; blank the full framebuffer (incl. the HUD rows)
     stz b_row                    ; --- border: top row ---
