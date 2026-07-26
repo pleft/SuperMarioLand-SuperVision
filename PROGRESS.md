@@ -1302,3 +1302,31 @@ Fixes from user testing of the first cut:
   * $2a/$2c/$c0 block contents (star / superball / multi-coin) are stubbed as mushroom.
   * Other items / object types, and enemies, still to do (enemies remain LAST per the user).
   * Time-up death, damage-shrink, game-over at 0 lives, 1-up heart — all TODO.
+
+## REAL HARDWARE + RING SCROLL — the big day (2026-07-26)
+The port runs on a real Supervision via the user's SuperPico cart, and the
+scroll architecture was rebuilt around the LCD's true nature. docs/26 + docs/27.
+- **Boot**: the "1-in-5 lottery" was power+procedure, not code. Law: the RP2040
+  must serve BEFORE the 65C02 fetches — flash, then hot-insert into the running
+  unit (or USB pre-power). Boot liturgy: silence sound/DMA regs first (power-on
+  garbage wedges the machine), SYS_CTRL bit3 before any VRAM write, $2022=$0F.
+  Splash + 2.5s delay removed once boots became reliable. UF2s are size-verified
+  (283648 = 128K image) after a stale-make shipped Block Buster as "SML9".
+- **Probe methodology**: M0/MA-MD/M1/M2 bisect builds (stripes from FIXED after
+  each boot stage) proved every stage real-hw clean; hwtest12 (DMA dissection)
+  + GrenderG notes convicted the VRAM->VRAM DMA (WRAM/ROM->VRAM only — Potator's
+  copier is fiction); hwtest14 proved the $1FE0 scan ring on silicon.
+- **Ring scroll (docs/27)**: the framebuffer is the LCD's native 170-line ring;
+  the shift is `origin += 8` — no copying, no hitch, true 1px scroll. HUD lives
+  in a WRAM shadow, repainted inside the NMI (atomic with the scroll register);
+  seam echo $5FE0<-$4000. Helpers in RCODE, a boot-installed RAM blob at $1200.
+- **Raster-split v2 lesson**: restarting the LCD scan at 61Hz (SYS_CTRL write
+  per NMI) phase-locks the split but is PANEL-HOSTILE (banding + pale, sml17
+  unplayable) — reverted. Real HW keeps a <=3px HUD wobble for now; the drift-
+  free field-locked timer chain design is written up in docs/27 for v3.
+- **Emulator truth**: the user's RetroArch potator core is OUR patched build
+  (per-scanline scroll capture; now + scan-restart modeling + 246-cyc lines).
+  RetroArch.app is an INTEL build under Rosetta: the core must be compiled
+  -arch x86_64. svrun (headless potator driver) does scripted runs + frame
+  dumps + per-frame HUD diffs — how the HUD fixes were actually verified.
+- Current builds: sml18.sv / SUPERPICO-SML18.uf2 (emulator-confirmed).
