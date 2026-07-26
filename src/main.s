@@ -543,33 +543,6 @@ probe_stripes:                   ; the full proven liturgy + stripes, FIXED-ROM
     stz YSCROLL
     lda #$0F                     ; the drive/bias value every commercial boot
     sta LCD_DRIVE                ; writes; Potator ignores it, the panel may not
-    ; --- BOOT SPLASH: stripes for ~2.5s. REAL-HW LAW (hwtest9, black-not-
-    ; blank): SYS_CTRL bit3 gates the VIDEO SUBSYSTEM -- VRAM writes are
-    ; LOST while it is clear. The bit must be ON BEFORE the fill. ---
-.ifndef NOSPLASH
-    lda #((6 << 5) | SYSCTRL_LCD)
-    sta SYS_CTRL
-    stz ptr
-    lda #$40
-    sta ptr+1
-    ldy #0
-    lda #$1B                     ; 4-shade stripe byte
-@sp: sta (ptr),y
-    iny
-    bne @sp
-    inc ptr+1
-    ldx ptr+1
-    cpx #$60
-    bne @sp
-    ldx #40                      ; ~2.5s busy delay (no interrupts yet):
-@d0: ldy #0                      ; 40 * 65536 inner iterations
-@d1: dec ptr
-    bne @d1
-    dey
-    bne @d1
-    dex
-    bne @d0
-.endif
     rts
 l3vec_tab:  .addr l3_spawn, l3_update, l3_token, l3_gift, l3_draw, l3_width
 .endproc
@@ -1667,11 +1640,7 @@ no:
 @sffd:
     stz scroll_s
     stz prev_scroll_s
-    jsr calc_view                ; ring view at scroll_s=0; write the regs now,
-    lda vyp                      ; not at the next NMI: the scene draws this frame
-    sta YSCROLL
-    lda vxp
-    sta XSCROLL
+    jsr apply_view               ; ring view at scroll_s=0, regs + latches now
     stz jump_state
     stz fall_v
     stz arc_idx
@@ -3708,11 +3677,7 @@ NUM_LEVELS = 6
 @sffd:
     stz scroll_s
     stz prev_scroll_s
-    jsr calc_view                ; ring view at scroll_s=0; write the regs now,
-    lda vyp                      ; not at the next NMI: the scene draws this frame
-    sta YSCROLL
-    lda vxp
-    sta XSCROLL
+    jsr apply_view               ; ring view at scroll_s=0, regs + latches now
     stz jump_state
     stz fall_v
     stz arc_idx
@@ -3873,11 +3838,7 @@ NUM_LEVELS = 6
     stz scroll_s
     stz prev_scroll_s
     stz shift_px
-    jsr calc_view
-    lda vyp
-    sta YSCROLL
-    lda vxp
-    sta XSCROLL
+    jsr apply_view
     stz mario_facing
     stz h_idx
     lda #16                      ; drop in at the room's entry opening (top-left)
@@ -4812,6 +4773,20 @@ PIN_X   = 64
     and #3
     ora vxph
     sta vxp                      ; playfield view: 1px-true
+    rts
+.endproc
+
+; apply_view: scene entry — recompute the view AND make it live NOW (regs +
+; the hud_flush latches), so the scene's first frame is coherent.
+.proc apply_view
+    jsr calc_view
+    lda vxph
+    sta vxph_ap
+    lda vyp
+    sta vyp_ap
+    sta YSCROLL
+    lda vxp
+    sta XSCROLL
     rts
 .endproc
 .segment "CODE"
@@ -9672,6 +9647,8 @@ ring_xb:     .res 1
 prev_vxph:   .res 1          ; hud_flush repaint-needed detection
 prev_vyp:    .res 1
 hud_rp:      .res 1          ; HUD shadow changed -> flush to the ring
+vxph_ap:     .res 1          ; APPLIED HUD view (latched by hud_flush ONLY: the
+vyp_ap:      .res 1          ; NMI must never scroll the HUD ahead of its repaint)
 .segment "CODE"
 
 ; build_shtab: the sub-pixel shift/mask tables — for every byte b and subx k:
@@ -10125,9 +10102,9 @@ HUD_SPLIT_LINE = 16              ; timer reload = split scanline (IPeriod=256 cy
     inc frame_count
     lda #1
     sta frame_flag
-    lda vyp                      ; RING view origin (docs/27); HUD rows get the
-    sta YSCROLL                  ; subpixel-masked XSCROLL (no wobble at 1px scroll)
-    lda vxph
+    lda vyp_ap                   ; RING view origin (docs/27), the hud_flush-LATCHED
+    sta YSCROLL                  ; values: the register and the repaint move as one
+    lda vxph_ap                  ; (else the HUD flashes 4px on view-byte crossings)
     sta XSCROLL
     lda #HUD_SPLIT_LINE           ; arm timer -> IRQ at scanline 16 (period = data * $100)
     sta IRQ_TIMER
@@ -10141,6 +10118,8 @@ HUD_SPLIT_LINE = 16              ; timer reload = split scanline (IPeriod=256 cy
 ; the SYS_CTRL restart trick pins it.)
 .proc irq
     pha
+    lda vyp                      ; the playfield's LIVE view (may lead the HUD's
+    sta YSCROLL                  ; latched one by a byte for a frame)
     lda vxp
     sta XSCROLL
     lda IRQ_TIMER_RST            ; read clears the timer IRQ
@@ -10316,8 +10295,10 @@ HUDSHADOW = $1D00                ; 16 rows x 40 bytes (stride 40), WRAM ($1D00-$
 @go:
     lda vxph
     sta prev_vxph
+    sta vxph_ap                  ; latch: the repaint below matches these
     lda vyp
     sta prev_vyp
+    sta vyp_ap
     stz hud_rp
     lda #<HUDSHADOW
     sta cur_src
@@ -11352,11 +11333,7 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
     jsr mus_start                ; writes $dfe8=$12 in the bonus-entry setup)
     stz scroll_s                 ; the level end leaves XSCROLL=32 (sub-shift): the bonus
     stz prev_scroll_s            ; draws at fb cols 0-19, so the window must start at 0
-    jsr calc_view
-    lda vyp
-    sta YSCROLL
-    lda vxp
-    sta XSCROLL
+    jsr apply_view
     jsr clear_vram               ; blank the full framebuffer (incl. the HUD rows)
     stz b_row                    ; --- border: top row ---
     stz b_col
