@@ -50,3 +50,23 @@ hitch) entirely. Verified facts it stands on:
 
 Deleted: fb_shift8 (both the illegal-DMA and CPU variants), draw_tilesheet
 (unreferenced dev tool). The 1141 bytes it freed paid for everything.
+
+## v2 restart-trick verdict (2026-07-26, REAL PANEL): DO NOT SHIP
+
+Restarting the LCD scan every NMI (61 Hz) is ELECTRICALLY hostile to the
+panel: the second field pass gets truncated at a different line each frame
+(thick scanline banding) and the LCD's AC drive loses balance (pale, washed
+out image). sml17 was unplayable on hardware. REVERTED to the no-restart
+split: the HUD shows a <=3px subpixel wobble on real hardware (the NMI
+free-runs against the scan, so HUD lines usually latch the playfield's
+subpixel bits). The emulator (patched core v2) is exact for the no-restart
+game: restart_slice resets to 0 each frame and only moves on SYS_CTRL
+writes (level loads).
+
+The CORRECT future fix (designed, not yet built): ONE restart per level
+load to define scan phase, then a self-correcting timer-IRQ chain locked
+to the field period (615 ticks = exactly 4 fields; per-field slots at
+line 16 / line ~120 (repaint window) / field end) — zero further restarts,
+zero drift (CPU and LCD share the crystal). Needs the emulator core to
+render at real field boundaries to stay truthful. A full session's work;
+until then the wobble is the accepted cosmetic.
