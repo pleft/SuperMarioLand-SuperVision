@@ -22,12 +22,19 @@ OBJ_BAT    = 27
 OBJ_BULL   = 28
 OBJ_GSQ    = 29
 OBJ_GCORP  = 30
+OBJ_HONEN  = 31                  ; $10: the leaping fishbone (script $36D1)
+OBJ_LEAP   = 32                  ; $24: the Mario-homing hopper (script $37EB)
+OBJ_HCORP  = 33                  ; their ball/stomp corpses (dead-flip hop+fall)
+OBJ_LCORP  = 34
 SUU_TA  = $92
 ROCK_TL = $DD
 GAO_TL  = $A4
 GAO_SQA = $B9
 FIRE_T  = $E2
 GIFT_T  = $E6
+; PORT tile ids (the packer's compact slice; GB sources in pack_banks.py):
+LEAP_TA = $A4                    ; 16x16 quad: TL,TR,BL,BR; frame B = +4
+HON_TA  = $AC                    ; 8x16: top,bottom; frame B = +2
 
 .segment "W2C"
 
@@ -40,7 +47,7 @@ init:                            ; $1500: bind our vector table
     rts
 
 vec_tab:
-    .addr w2_spawn, w2_update, l3_token, w2_gift, w2_draw, l3_width
+    .addr w2_spawn, w2_update, w2_token, w2_gift, w2_draw, w2_width
 
 .proc w2_gift                    ; content $F0 (GB $18C0, READ this time): the
     jmp mark_used                ; hidden cell MATERIALIZES as a solid block (GB
@@ -54,11 +61,34 @@ vec_tab:
     lda #OBJ_SUU
     bra @go
 :   cmp #$0C
-    bne @consume
+    bne :+
     lda #OBJ_ROCK
+    bra @go
+:   cmp #$10
+    bne :+
+    lda #OBJ_HONEN
+    bra @go
+:   cmp #$24
+    bne @consume
+    lda #OBJ_LEAP
+    jsr obj_alloc_typed
+    bcs @full
+    stz o_pdr,x
+    jsr spawn_tabx
+    lda spawn_tab+2,y
+    sta o_y,x
+    stz o_vx,x
+    sta o_vy,x
+    stz o_tmr,x
+    stz o_st,x
+    jsr aim_leap                 ; the script aims BEFORE the first hop (F0 $60)
+    clc
+    rts
 @go:
     jsr obj_alloc_typed
     bcs @full                    ; pool full: C=1 -> the spawner retries
+    stz o_pdr,x                  ; fresh slot: NOTHING to erase (a stale "was
+                                 ; drawn" flag ghost-restored map tiles)
     jsr spawn_tabx               ; world x = fire + 192 + x_off*4 (the GB rule)
     lda spawn_tab+2,y
     sta o_y,x
@@ -85,7 +115,9 @@ vec_tab:
     rts
 .endproc
 w2_updtab:
-    .word upd_gift-1, upd_suu-1, upd_rock-1
+    .word w2_rts-1, upd_suu-1, upd_rock-1
+    .word w2_rts-1, w2_rts-1, w2_rts-1, w2_rts-1, w2_rts-1, w2_rts-1
+    .word upd_honen-1, upd_leap-1, upd_wcorp-1, upd_wcorp-1
 
 .proc w2_draw                    ; A = o_type (engine convention), X = slot
     sec
@@ -99,13 +131,424 @@ w2_updtab:
     rts
 .endproc
 w2_drwtab:
-    .word draw_gift-1, draw_suu-1, draw_rock-1
+    .word w2_rts-1, draw_suu-1, draw_rock-1
+    .word w2_rts-1, w2_rts-1, w2_rts-1, w2_rts-1, w2_rts-1, w2_rts-1
+    .word draw_honen-1, draw_leap-1, draw_hcorp-1, draw_lcorp-1
+
+w2_rts:
+    rts
+
+; ---------------------------------------------------------------------------
+; The MUDA LEAP (script $36D1/$37EB under the decoded AI-VM, docs/12): a
+; symmetric ~111px arc from the spawn line. UP: 52f at 2px + 7f at 1px + 3f
+; hang; DOWN mirrored, clamped at the base line (o_vy); then ~36f rest.
+; arc_step: X = slot. tmpH3 = this frame's |dy| (the leaper moves x by it).
+; On a phase transition tmpL2 = the NEW phase; else tmpL2 = $FF.
+.proc arc_step
+    lda #$FF
+    sta tmpL2
+    stz tmpH3
+    lda o_st,x
+    bne @notup
+    lda o_tmr,x                  ; UP
+    cmp #52
+    bcs :+
+    lda #2
+    bra @up
+:   cmp #59
+    bcs :+
+    lda #1
+    bra @up
+:   cmp #62
+    bcc @tick                    ; hang (dy 0)
+    lda #1                       ; -> DOWN
+    sta o_st,x
+    sta tmpL2
+    stz o_tmr,x
+    rts
+@up:
+    sta tmpH3
+    eor #$FF                     ; o_y -= dy
+    ina
+    clc
+    adc o_y,x
+    sta o_y,x
+    bra @tick
+@notup:
+    cmp #2
+    beq @rest
+    lda o_tmr,x                  ; DOWN
+    cmp #3
+    bcc @tick                    ; hang
+    cmp #10
+    bcs :+
+    lda #1
+    bra @dn
+:   lda #2
+@dn:
+    sta tmpH3
+    clc
+    adc o_y,x
+    sta o_y,x
+    cmp o_vy,x                   ; the base line clamps the fall
+    bcc @tick
+    lda o_vy,x
+    sta o_y,x
+    lda #2                       ; -> REST
+    sta o_st,x
+    sta tmpL2
+    stz o_tmr,x
+    stz tmpH3
+    rts
+@rest:
+    lda o_tmr,x
+    cmp #36
+    bcc @tick
+    stz o_st,x                   ; -> UP again
+    stz o_tmr,x
+    stz tmpL2
+    rts
+@tick:
+    inc o_tmr,x
+    rts
+.endproc
+
+.proc foe_frame                  ; X = slot -> A = 0/1 (the ~15f wing flap)
+    lda o_tmr,x
+    lsr
+    lsr
+    lsr
+    lsr
+    and #1
+    rts
+.endproc
+
+.proc aim_leap                   ; o_hp = +1 if Mario is right of slot X, else -1
+    lda cam_x
+    clc
+    adc spr_x
+    sta tmpH2                    ; mario world x (16-bit)
+    lda cam_x+1
+    adc #0
+    cmp o_xh,x
+    bcc @left
+    bne @right
+    lda tmpH2
+    cmp o_xl,x
+    bcs @right
+@left:
+    lda #$FF
+    bra :+
+@right:
+    lda #1
+:   sta o_hp,x                   ; (o_hp is free for kit foes; o_pdr is the
+    rts                          ;  ENGINE'S was-drawn flag -- hands off)
+.endproc
+
+; foe contact: star -> corpse+points at the victim; stomp side -> corpse +
+; Mario's fixed bounce + combo-chained points; side -> hurt. A = value code.
+.proc w2_foe
+    jsr l3_box
+    bcs :+
+    rts
+:   ldx oi
+    lda mario_starT
+    bne @kill
+    jsr l3_above
+    bcc @stomp
+    jmp hurt_mario
+@stomp:
+    jsr foe_code                 ; class code from the type, BEFORE the morph
+    pha                          ; (a tmp would die under mario_dx's scratch)
+    jsr foe_corpse
+    lda #1                       ; the fixed stomp bounce (RE $08C7)
+    sta jump_state
+    lda #14
+    sta arc_idx
+    stz fall_v
+    stz ride
+    pla
+    jmp award_stomp
+@kill:
+    jsr foe_code
+    pha
+    jsr foe_corpse
+    ldx oi
+    jsr victim_xy
+    lda o_y,x
+    sta tmpH3
+    pla
+    jmp award_kill_at
+.endproc
+
+.proc foe_code                   ; X = slot -> A = value code (honen 100, leap 400)
+    lda o_type,x
+    cmp #OBJ_LEAP
+    beq :+
+    lda #$01
+    rts
+:   lda #$04
+    rts
+.endproc
+
+.proc foe_corpse                 ; slot X's foe -> its dead-flip corpse
+    ldx oi
+    lda #1                       ; thrown away along Mario's facing
+    ldy mario_facing
+    beq :+
+    lda #$FF
+:   sta o_vx,x
+    lda o_type,x
+    cmp #OBJ_LEAP
+    beq @l
+    lda #OBJ_HCORP
+    bra :+
+@l: lda #OBJ_LCORP
+:   sta o_type,x
+    stz o_st,x
+    stz o_tmr,x
+    rts
+.endproc
+
+.proc upd_honen
+    jsr l3_cull
+    bcc :+
+    rts
+:   jsr arc_step
+    lda #$01                     ; class 0 = 100
+    jmp w2_foe
+.endproc
+
+.proc upd_leap
+    jsr l3_cull
+    bcc :+
+    rts
+:   jsr arc_step
+    lda tmpL2                    ; phase transition?
+    cmp #1
+    bne :+
+    jsr aim_leap                 ; the dive: re-home + the plunge chirp
+    lda #SFX_DFF8_04             ; (script $37EB: F9 $04 at the F0 $62)
+    jsr sfx_play
+    ldx oi
+    bra @move
+:   cmp #0
+    bne @move
+    jsr aim_leap                 ; leaving the rest: aim the hop at Mario
+    ldx oi
+@move:
+    lda tmpH3                    ; x follows the arc speed (the VM moves both
+    beq @done                    ; axes at the script velocity), homing dir
+    ldy o_hp,x
+    bmi @ml
+    clc
+    adc o_xl,x
+    sta o_xl,x
+    bcc @done
+    inc o_xh,x
+    bra @done
+@ml:
+    sta tmpH2                    ; x -= |dy|
+    lda o_xl,x
+    sec
+    sbc tmpH2
+    sta o_xl,x
+    bcs @done
+    dec o_xh,x
+@done:
+    jmp w2_foe
+.endproc
+
+; the dead-flip corpse: the star-kill capture's 23 deltas, then +2/f off-screen
+.proc upd_wcorp
+    lda o_st,x
+    cmp #23
+    bcs @fall
+    tay
+    lda w2c_dy,y
+    clc
+    adc o_y,x
+    sta o_y,x
+    lda o_vx,x                   ; sideways drift only during the arc
+    bmi @ml
+    lda o_xl,x
+    clc
+    adc #1
+    sta o_xl,x
+    bcc :+
+    inc o_xh,x
+    bra :+
+@ml:
+    lda o_xl,x
+    sec
+    sbc #1
+    sta o_xl,x
+    bcs :+
+    dec o_xh,x
+:   inc o_st,x
+    bra @clip
+@fall:
+    lda o_y,x
+    clc
+    adc #2
+    sta o_y,x
+@clip:
+    lda o_y,x
+    cmp #160
+    bcc :+
+    stz o_type,x                 ; off the bottom -> gone
+:   rts
+.endproc
+
+w2c_dy:                          ; kill_flip's captured trajectory, verbatim
+    .byte $FF,$FF,$FF,$FF,$FF,$00,$FF,$00,$FF,$00,$00,$00,$00
+    .byte $01,$00,$01,$00,$01,$01,$01,$01,$01,$01
+
+; pair16: 8x16 column at o_y — top tile A, bottom tile tmpL2
+.proc pair16
+    sta tmpH3
+    ldx oi
+    lda o_y,x
+    sta dy
+    lda spr_col
+    sta dcol
+    ldx tmpH3
+    jsr draw_quad
+    ldx oi
+    lda o_y,x
+    clc
+    adc #8
+    sta dy
+    lda spr_col
+    sta dcol
+    ldx tmpL2
+    jmp draw_quad
+.endproc
+
+; quad16: 16x16 at o_y — top-row TL tile A, bottom-row TL tile tmpL2
+.proc quad16
+    sta tmpH3
+    ldx oi
+    lda o_y,x
+    sta dy
+    lda spr_col
+    sta dcol
+    ldx tmpH3
+    jsr draw_quad
+    ldx oi
+    lda o_y,x
+    sta dy
+    lda spr_col
+    ina
+    ina
+    sta dcol
+    ldx tmpH3
+    inx
+    jsr draw_quad
+    ldx oi
+    lda o_y,x
+    clc
+    adc #8
+    sta dy
+    lda spr_col
+    sta dcol
+    ldx tmpL2
+    jsr draw_quad
+    ldx oi
+    lda o_y,x
+    clc
+    adc #8
+    sta dy
+    lda spr_col
+    ina
+    ina
+    sta dcol
+    ldx tmpL2
+    inx
+    jmp draw_quad
+.endproc
+
+.proc draw_honen                 ; 8x16 fishbone, flap frame
+    ldx oi
+    jsr foe_frame
+    asl
+    clc
+    adc #HON_TA+1
+    sta tmpL2                    ; bottom
+    dea
+    jmp pair16
+.endproc
+
+.proc draw_leap                  ; 16x16 hopper, flap frame
+    ldx oi
+    jsr foe_frame
+    asl
+    asl
+    clc
+    adc #LEAP_TA+2
+    sta tmpL2                    ; bottom row TL
+    dea
+    dea
+    jmp quad16
+.endproc
+
+.proc draw_hcorp                 ; the bones upside-down: rows swapped
+    lda #HON_TA
+    sta tmpL2
+    lda #HON_TA+1
+    jmp pair16
+.endproc
+
+.proc draw_lcorp                 ; the hopper upside-down: rows swapped
+    lda #LEAP_TA
+    sta tmpL2
+    lda #LEAP_TA+2
+    jmp quad16
+.endproc
+
+.proc w2_token                   ; anim tokens (mirrors the draw choices)
+    lda o_type,x
+    cmp #OBJ_SUU
+    bne :+
+    jmp suu_frame
+:   cmp #OBJ_HONEN
+    beq @flap
+    cmp #OBJ_LEAP
+    beq @flap
+    lda #0                       ; gift/rock/corpses: position-only redraws
+    rts
+@flap:
+    jmp foe_frame
+.endproc
+
+.proc w2_width                   ; erase widths (W2 roster only)
+    cpy #OBJ_SUU
+    beq @w82
+    cpy #OBJ_HONEN
+    beq @w82
+    cpy #OBJ_HCORP
+    beq @w82
+    cpy #OBJ_GIFT
+    bne :+
+    lda #2
+    rts
+:   cpy #OBJ_ROCK
+    bne @w83
+    lda #3                       ; rock: 16 wide
+    rts
+@w83:
+    lda #$83                     ; leaper/lcorp: 16 wide + tall
+    rts
+@w82:
+    lda #$82                     ; suu/honen/hcorp: 8 wide, 16 tall
+    rts
+.endproc
 
 ; --- the shared kit bodies (source-identical with the 1-3 kit) ---
 .include "kit_sh1.inc"           ; l3_cull, l3_box, upd_suu, upd_rock
 .include "kit_sh2.inc"           ; l3_hurt
 .include "kit_sh3.inc"           ; l3_xoff
-.include "kit_sh4.inc"           ; upd_gift, l3_gift (the RISING LIFT)
+; (kit_sh4 rising-lift: DEAD in W2 -- $F0 materializes, no object spawns)
 .include "kit_sh5.inc"           ; suu_frame, draw_suu, draw_rock, l3_pair, l3_one
-.include "kit_sh6.inc"           ; draw_gift
-.include "kit_sh7.inc"           ; l3_width, l3_token
+; (kit_sh6 draw_gift: dead too)
+; (kit_sh7 l3_width/l3_token replaced by the W2-native w2_width/w2_token)

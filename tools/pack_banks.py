@@ -145,13 +145,21 @@ def main():
             # per-world quad tiles $A0-$DC: ship only the slice current enemies
             # use. THIS iteration's W2 kit (suu/rock/lift) draws COMMON tiles
             # only -> no slice; when Honen/the leaper land, set their range.
-            OVL_LO, OVL_HI = 0, 0               # tile ids (inclusive), 0,0 = none
-            if OVL_HI > OVL_LO:
-                sl = w2_ovl1[(OVL_LO-0xA0)*16:(OVL_HI-0xA0+1)*16]
-                quad_base = addr - OVL_LO*16
-                addr += len(sl)
-            else:
-                sl = b""
+            # COMPACT slice: only the tiles the W2 kit draws, remapped to the
+            # contiguous PORT ids $A4-$AF (ids are port-internal; w2code.s's
+            # LEAP_TA/HON_TA must match this order):
+            #   $A4-$A7 leaper frame A (GB A4,A5,B4,B5)
+            #   $A8-$AB leaper frame B (GB A6,A7,B6,B7)
+            #   $AC/$AD honen frame A top/bottom (GB C0,D0)
+            #   $AE/$AF honen frame B top/bottom (GB C1,D1)
+            W2_TILES = [0xA4,0xA5,0xB4,0xB5, 0xA6,0xA7,0xB6,0xB7,
+                        0xC0,0xD0, 0xC1,0xD1]
+            OVL_LO = 0xA4
+            sl = b"".join(w2_ovl1[(t-0xA0)*16:(t-0xA0+1)*16] for t in W2_TILES)
+            assert len(sl) == len(W2_TILES)*16
+            quad_base = addr - OVL_LO*16
+            addr += len(sl)
+            if False:
                 quad_base = chardata            # $A0-$DC unused by this build
             w2blob = open("build/w2code.bin", "rb").read()
             assert len(w2blob) <= 0x800, "w2code blob exceeds the $1500 window"

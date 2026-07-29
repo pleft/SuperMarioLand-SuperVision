@@ -5036,6 +5036,10 @@ OBJ_BAT    = 27                  ; $08: moai flyer (32x16): bobs, launches 2 sho
 OBJ_BULL   = 28                  ; $1E: the flyer's shot (16x8): 1px/f horizontal
 OBJ_GSQ    = 29                  ; $40: stomped Gao (flat pair ~48f, then the corpse)
 OBJ_GCORP  = 30                  ; $41: Gao corpse: kill_flip-style hop + fall
+OBJ_HONEN  = 31                  ; W2 kit: the leaping fishbone ($10)
+OBJ_LEAP   = 32                  ; W2 kit: the Mario-homing hopper ($24)
+OBJ_HCORP  = 33                  ; their dead-flip corpses (kit-drawn)
+OBJ_LCORP  = 34
                                  ; the screen (GB type $0D; slot capture: rise 7px, fall to
                                  ; +2px/f, 1px/f sideways drift away from the killer)
 FLY_TL     = $A0                 ; 16x16 metasprite, frame A: A0 A1 / B0 B1
@@ -7543,6 +7547,11 @@ title_tiles:                     ; the used tiles, SV-packed
     beq :+
     cmp #OBJ_SUU                 ; the pipe flower dies to the ball while POKING
     beq :+                       ; OUT (user-proven + wiki; upward variety = 100)
+    cmp #OBJ_HONEN               ; the W2 leapers die to the ball too
+    bcc @nj
+    cmp #OBJ_LEAP+1
+    bcc :+
+@nj:
     jmp @next
 :   ldy oi                       ; dx = |ball - enemy| (16-bit)
     lda o_xl,y
@@ -7609,6 +7618,10 @@ title_tiles:                     ; the used tiles, SV-packed
     ldx oi
     stz o_type,x                 ; the ball expires against it
     rts
+:   cmp #OBJ_HONEN
+    bcc :+
+    jsr rc_ball_kit              ; W2 kit foes: corpse + points (RCODE)
+    bra @ballgone
 :   cmp #OBJ_BUNBUN
     bne :+
     lda #$08                     ; bunbun 800
@@ -10327,6 +10340,31 @@ HUDSHADOW = $1D00                ; 16 rows x 40 bytes (stride 40), WRAM ($1D00-$
 ; Pointers = tmpL3/H3 (src) + tmpL2/H2 (dst): the NMI SAVES AND RESTORES all
 ; four around the call — the interrupted mainline may be using them mid-blit.
 ; X/Y saved by the caller too.
+.proc rc_ball_kit                ; ball vs a W2 kit foe (X = victim slot):
+    lda #1                       ; corpse thrown along Mario's facing
+    ldy mario_facing
+    beq :+
+    lda #$FF
+:   sta o_vx,x
+    lda o_type,x
+    cmp #OBJ_LEAP
+    beq @l
+    lda #OBJ_HCORP
+    ldy #$01                     ; honen class 0 = 100
+    bra @go
+@l: lda #OBJ_LCORP
+    ldy #$04                     ; leaper class 1 = 400
+@go:
+    sta o_type,x
+    stz o_st,x
+    stz o_tmr,x
+    jsr victim_xy
+    lda o_y,x
+    sta tmpH3
+    tya
+    jmp award_kill_at            ; the +points tag rises from the victim
+.endproc
+
 .proc nmi_hud_copy
     phy
     lda tmpL2                    ; the mainline may be mid-blit in these

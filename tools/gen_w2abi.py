@@ -10,6 +10,12 @@ Usage: gen_w2abi.py <dbgfile> <out.inc>
 import re, sys
 
 NEED = [
+    "mario_facing",
+    "fall_v",
+    "arc_idx",
+    "jump_state",
+    "victim_xy",
+    "award_stomp",
     # the vector block + the level binding
     "ovl_vec", "hdr_buf", "cur_level",
     # object slots (SoA)

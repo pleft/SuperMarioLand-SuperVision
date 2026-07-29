@@ -421,3 +421,27 @@ queued for the 128K era. +6/+8 reproduces every OBSERVED GB outcome:
 corner-hole drop (port: walking + landing; GB: landing), bowl-shaft descent,
 open 1-block holes swallow, full-height-wall slots bridge. Known deviation:
 ledge hangs 10px right / 8px left vs the GB's 15/3.
+
+## PORT: W2 Honen $10 + the leaper $24 — DONE, sim-verified [2026-07-29]
+Both from their DECODED scripts ($36D1/$37EB) under the validated AI-VM:
+- **Honen**: symmetric ~111px leap from the spawn line (UP 52f@2px + 7f@1 +
+  3f hang; DOWN mirrored, clamped at the base = o_vy; ~36f rest), x fixed,
+  ~15f wing-flap ($42/$43 -> port frames). Class 0 = 100.
+- **Leaper**: same arc, x moves at the arc speed toward Mario (the VM drives
+  both axes at the script velocity), re-aimed at hop start + dive (script's
+  F0 $60/$62), dive plays $dff8=$04 (SFX_DFF8_04). Aims BEFORE the first hop
+  (script order) — spawn runs aim_leap. Class 1 = 400.
+- Corpses = kit types 33/34 (the kill_flip capture's 23 dy steps + 2px/f off,
+  drift 1px/f along Mario's facing; drawn rows-swapped as the flip look).
+  Ball kills route ball_hits -> rc_ball_kit (RCODE).
+- Tiles: the packer ships a COMPACT 12-tile slice remapped to port ids
+  $A4-$AF (leaper A/B quads, honen A/B pairs) — the full GB $A4-$D1 range
+  didn't fit bank 3 (pack_banks W2_TILES).
+- LESSONS (harness-verified): o_pdr is the ENGINE's was-drawn flag — the
+  first leaper cut stored its aim there and ghost-erased map tiles; kit
+  spawns must stz o_pdr (fresh slot = nothing to erase); mario_dx scratches
+  tmpH2 — w2_foe derives the value code from o_type at award time instead.
+- Unit tests (svharness, clean slot table): arc trace exact; homing dive/hop
+  aim; stomp -> corpse + 100/400 credited; descending fish hurts; a riser
+  under Mario foot-stomps (the GB positional rule, faithful).
+- Bank 5 is at 96 bytes free — the next W2 code must earn its bytes.
