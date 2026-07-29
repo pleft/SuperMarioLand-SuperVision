@@ -1330,3 +1330,22 @@ scroll architecture was rebuilt around the LCD's true nature. docs/26 + docs/27.
   -arch x86_64. svrun (headless potator driver) does scripted runs + frame
   dumps + per-frame HUD diffs — how the HUD fixes were actually verified.
 - Current builds: sml18.sv / SUPERPICO-SML18.uf2 (emulator-confirmed).
+
+## W2 ENEMIES: Honen + Yurarin Boo (2026-07-29)
+2-1's roster lives: 19 Honens leap their decoded-script arcs out of the water
+pits; the seahorses bob vertically, face Mario, and shoot the big ball at each
+dive. First shipped as a "Mario-homing hopper" — the user caught it; the fix
+decoded three AI-VM laws that now govern all future enemy ports (docs/12):
+velocity bytes are NIBBLE PAIRS (hi=Y, lo=X px/tick — vel $20 cannot move
+sideways); F0's track-Mario bits set FACING only; F1 takes an OPERAND (the
+child type — "F1, 23" spawns ball type $23 = one common fireball tile $E2,
+sign-aimed once, x 1px/f + y half rate). decode_ai_scripts.py fixed (F1
+arity); all 28 scripts re-decoded clean — Gao's fire = child $1B, 2-2
+Yurarin $16 spawns $17 (next up).
+Port infra: kit corpses (types 33/34, the kill_flip capture), rc_ball_kit +
+pair16/quad16/x_step in RCODE, compact 12-tile overlay slice at port ids
+$A4-$AF. Engine landmines documented: o_pdr is the erase flag (kit spawns
+must clear it), mario_dx scratches tmpH2. Harness unit tests: exact arcs,
+stomp 100/400 credited, descending-fish hurt, riser foot-stomp, Boo
+vertical-only + ball flight signs/speeds. Builds: sml19 (hopper, obsolete),
+sml20 (Yurarin Boo correct). Banks: bank3 tightest, bank5 160B free.

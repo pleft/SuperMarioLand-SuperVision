@@ -8,7 +8,7 @@ bytes from AIScriptPtrTable @ $349E. Opcodes (see docs/12-enemies.md):
   $00-$DF        : set velocity ($FFC1), mark active
   $E0-$EF        : set movement-state ($FFC8 = low nibble)
   $F0 nn         : facing / track player
-  $F1            : spawn sub-object
+  $F1 nn         : spawn sub-object of TYPE nn (InitAccel_24D6 reads $D003 as the child type)
   $F2 nn         : set acceleration ($FFC7)
   $F3 nn         : change object type ($FFC0 -> new script; $FF = despawn)
   $F4 nn         : set $FFC9
@@ -25,7 +25,7 @@ NUM_TYPES = 99   # PhysicsParamTable $3375..$349E = 99*3 bytes, AIScriptPtrTable
 
 # opcode -> (mnemonic, operand_bytes)
 OPS = {
-    0xF0: ("face/track", 1), 0xF1: ("spawn", 0), 0xF2: ("set_accel", 1),
+    0xF0: ("face/track", 1), 0xF1: ("spawn_child", 1), 0xF2: ("set_accel", 1),
     0xF3: ("morph_type", 1), 0xF4: ("set_ffc9", 1), 0xF5: ("cond", 1),
     0xF6: ("jump_pc", 1), 0xF8: ("set_param", 1), 0xFF: ("loop", 0),
     0xF9: ("SOUND dff8", 1), 0xFA: ("SOUND dfe0", 1),   # VM handlers at $2820/$282C
