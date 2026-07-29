@@ -23,9 +23,11 @@ OBJ_BULL   = 28
 OBJ_GSQ    = 29
 OBJ_GCORP  = 30
 OBJ_HONEN  = 31                  ; $10: the leaping fishbone (script $36D1)
-OBJ_LEAP   = 32                  ; $24: the Mario-homing hopper (script $37EB)
+OBJ_LEAP   = 32                  ; $24: YURARIN BOO -- vertical bob + shoots (script $37EB)
 OBJ_HCORP  = 33                  ; their ball/stomp corpses (dead-flip hop+fall)
 OBJ_LCORP  = 34
+OBJ_WBALL  = 35                  ; Yurarin Boo's shot: tile $E2 (the common
+                                 ; fireball), aimed at Mario once at launch
 SUU_TA  = $92
 ROCK_TL = $DD
 GAO_TL  = $A4
@@ -71,18 +73,10 @@ vec_tab:
 :   cmp #$24
     bne @consume
     lda #OBJ_LEAP
-    jsr obj_alloc_typed
-    bcs @full
-    stz o_pdr,x
-    jsr spawn_tabx
-    lda spawn_tab+2,y
-    sta o_y,x
-    stz o_vx,x
-    sta o_vy,x
-    stz o_tmr,x
-    stz o_st,x
-    jsr aim_leap                 ; the script aims BEFORE the first hop (F0 $60)
-    clc
+    jsr @go                      ; common body, then the pre-hop aim (F0 $60:
+    bcs @full                    ; the script faces Mario before the first rise)
+    jsr aim_leap
+    clc                          ; consumed (aim's cmp may leave C set)
     rts
 @go:
     jsr obj_alloc_typed
@@ -106,7 +100,10 @@ vec_tab:
     lda o_type,x
     sec
     sbc #OBJ_GIFT
-    asl
+    cmp #9                       ; 25-30 never exist in W2: collapse the gap
+    bcc :+
+    sbc #6
+:   asl
     tay
     lda w2_updtab+1,y
     pha
@@ -116,13 +113,15 @@ vec_tab:
 .endproc
 w2_updtab:
     .word w2_rts-1, upd_suu-1, upd_rock-1
-    .word w2_rts-1, w2_rts-1, w2_rts-1, w2_rts-1, w2_rts-1, w2_rts-1
-    .word upd_honen-1, upd_leap-1, upd_wcorp-1, upd_wcorp-1
+    .word upd_honen-1, upd_leap-1, upd_wcorp-1, upd_wcorp-1, upd_wball-1
 
 .proc w2_draw                    ; A = o_type (engine convention), X = slot
     sec
     sbc #OBJ_GIFT
-    asl
+    cmp #9
+    bcc :+
+    sbc #6
+:   asl
     tay
     lda w2_drwtab+1,y
     pha
@@ -132,8 +131,7 @@ w2_updtab:
 .endproc
 w2_drwtab:
     .word w2_rts-1, draw_suu-1, draw_rock-1
-    .word w2_rts-1, w2_rts-1, w2_rts-1, w2_rts-1, w2_rts-1, w2_rts-1
-    .word draw_honen-1, draw_leap-1, draw_hcorp-1, draw_lcorp-1
+    .word draw_honen-1, draw_leap-1, draw_hcorp-1, draw_lcorp-1, draw_wball-1
 
 w2_rts:
     rts
@@ -319,44 +317,101 @@ w2_rts:
     jmp w2_foe
 .endproc
 
-.proc upd_leap
-    jsr l3_cull
-    bcc :+
-    rts
-:   jsr arc_step
+.proc upd_leap                   ; YURARIN BOO: the mover's velocity low nibble
+    jsr l3_cull                  ; is 0 -> NO x movement ever (GB $2879 masks
+    bcc :+                       ; $0F for x); F0's track-Mario bit sets FACING
+    rts                          ; only. It bobs the script arc and SHOOTS at
+:   jsr arc_step                 ; the dive (F9 $04 + F1 -> child type $23).
     lda tmpL2                    ; phase transition?
     cmp #1
     bne :+
-    jsr aim_leap                 ; the dive: re-home + the plunge chirp
-    lda #SFX_DFF8_04             ; (script $37EB: F9 $04 at the F0 $62)
+    jsr aim_leap                 ; face Mario for the dive...
+    lda #SFX_DFF8_04
     jsr sfx_play
     ldx oi
-    bra @move
+    jsr spawn_wball              ; ...and launch the ball
+    bra @foe
 :   cmp #0
-    bne @move
-    jsr aim_leap                 ; leaving the rest: aim the hop at Mario
+    bne @foe
+    jsr aim_leap                 ; face the new hop
     ldx oi
-@move:
-    lda tmpH3                    ; x follows the arc speed (the VM moves both
-    beq @done                    ; axes at the script velocity), homing dir
-    ldy o_hp,x
-    bmi @ml
-    clc
-    adc o_xl,x
-    sta o_xl,x
-    bcc @done
-    inc o_xh,x
-    bra @done
-@ml:
-    sta tmpH2                    ; x -= |dy|
-    lda o_xl,x
-    sec
-    sbc tmpH2
-    sta o_xl,x
-    bcs @done
-    dec o_xh,x
-@done:
+@foe:
     jmp w2_foe
+.endproc
+
+.proc spawn_wball                ; child type $23: single-aimed slow ball
+    lda #OBJ_WBALL
+    jsr obj_alloc_typed
+    bcs @full                    ; pool full: the shot fizzles
+    stz o_pdr,x
+    ldy oi                       ; from the shooter's mouth
+    lda o_xl,y
+    sta o_xl,x
+    lda o_xh,y
+    sta o_xh,x
+    lda o_y,y
+    clc
+    adc #4
+    sta o_y,x
+    lda o_hp,y                   ; x-dir = the shooter's facing (F0 $C0 aims
+    sta o_vx,x                   ; both axes at Mario at init)
+    lda spr_y                    ; y-dir = toward Mario's height
+    cmp o_y,x
+    bcs :+
+    lda #$FF
+    bra :++
+:   lda #1
+:   sta o_hp,x
+    stz o_tmr,x
+    stz o_st,x
+@full:
+    ldx oi
+    rts
+.endproc
+
+; the ball: x 1px/f, y 1px every OTHER frame (script vel $12 nibbles at
+; divider 1 = half tick rate), no gravity; ANY contact hurts (a projectile).
+.proc upd_wball
+    inc o_tmr,x
+    lda o_vx,x
+    jsr x_step
+
+    lda o_tmr,x
+    and #1
+    beq @clip
+    lda o_y,x
+    clc
+    adc o_hp,x
+    sta o_y,x
+@clip:
+    lda o_y,x
+    cmp #16
+    bcc @gone
+    cmp #152
+    bcs @gone
+    jsr l3_cull                  ; camera passed it
+    bcc :+
+    rts
+:   lda o_tmr,x                  ; ~4s lifetime (GB: 165 ticks at half rate)
+    beq @gone
+    jsr l3_box                   ; a projectile: any touch hurts
+    bcs @hit
+    rts
+@hit:
+    jmp hurt_mario
+@gone:
+    stz o_type,x
+    rts
+.endproc
+
+.proc draw_wball                 ; one 8x8: the common fireball tile
+    ldx oi
+    lda o_y,x
+    sta dy
+    lda spr_col
+    sta dcol
+    ldx #FIRE_T
+    jmp draw_quad
 .endproc
 
 ; the dead-flip corpse: the star-kill capture's 23 deltas, then +2/f off-screen
@@ -370,22 +425,8 @@ w2_rts:
     adc o_y,x
     sta o_y,x
     lda o_vx,x                   ; sideways drift only during the arc
-    bmi @ml
-    lda o_xl,x
-    clc
-    adc #1
-    sta o_xl,x
-    bcc :+
-    inc o_xh,x
-    bra :+
-@ml:
-    lda o_xl,x
-    sec
-    sbc #1
-    sta o_xl,x
-    bcs :+
-    dec o_xh,x
-:   inc o_st,x
+    jsr x_step
+    inc o_st,x
     bra @clip
 @fall:
     lda o_y,x
@@ -404,69 +445,7 @@ w2c_dy:                          ; kill_flip's captured trajectory, verbatim
     .byte $FF,$FF,$FF,$FF,$FF,$00,$FF,$00,$FF,$00,$00,$00,$00
     .byte $01,$00,$01,$00,$01,$01,$01,$01,$01,$01
 
-; pair16: 8x16 column at o_y — top tile A, bottom tile tmpL2
-.proc pair16
-    sta tmpH3
-    ldx oi
-    lda o_y,x
-    sta dy
-    lda spr_col
-    sta dcol
-    ldx tmpH3
-    jsr draw_quad
-    ldx oi
-    lda o_y,x
-    clc
-    adc #8
-    sta dy
-    lda spr_col
-    sta dcol
-    ldx tmpL2
-    jmp draw_quad
-.endproc
-
-; quad16: 16x16 at o_y — top-row TL tile A, bottom-row TL tile tmpL2
-.proc quad16
-    sta tmpH3
-    ldx oi
-    lda o_y,x
-    sta dy
-    lda spr_col
-    sta dcol
-    ldx tmpH3
-    jsr draw_quad
-    ldx oi
-    lda o_y,x
-    sta dy
-    lda spr_col
-    ina
-    ina
-    sta dcol
-    ldx tmpH3
-    inx
-    jsr draw_quad
-    ldx oi
-    lda o_y,x
-    clc
-    adc #8
-    sta dy
-    lda spr_col
-    sta dcol
-    ldx tmpL2
-    jsr draw_quad
-    ldx oi
-    lda o_y,x
-    clc
-    adc #8
-    sta dy
-    lda spr_col
-    ina
-    ina
-    sta dcol
-    ldx tmpL2
-    inx
-    jmp draw_quad
-.endproc
+; (pair16/quad16 live in the engine's RCODE now -- shared, RAM-resident)
 
 .proc draw_honen                 ; 8x16 fishbone, flap frame
     ldx oi
@@ -533,8 +512,12 @@ w2c_dy:                          ; kill_flip's captured trajectory, verbatim
     lda #2
     rts
 :   cpy #OBJ_ROCK
-    bne @w83
+    bne :+
     lda #3                       ; rock: 16 wide
+    rts
+:   cpy #OBJ_WBALL
+    bne @w83
+    lda #2                       ; the ball: one tile
     rts
 @w83:
     lda #$83                     ; leaper/lcorp: 16 wide + tall

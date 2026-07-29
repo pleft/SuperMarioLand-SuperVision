@@ -10340,6 +10340,89 @@ HUDSHADOW = $1D00                ; 16 rows x 40 bytes (stride 40), WRAM ($1D00-$
 ; Pointers = tmpL3/H3 (src) + tmpL2/H2 (dst): the NMI SAVES AND RESTORES all
 ; four around the call — the interrupted mainline may be using them mid-blit.
 ; X/Y saved by the caller too.
+.proc x_step                     ; slot X: 16-bit x += A (A = +1 or -1 only)
+    bmi @m
+    lda o_xl,x
+    ina
+    sta o_xl,x
+    bne :+
+    inc o_xh,x
+:   rts
+@m:
+    lda o_xl,x
+    sec
+    sbc #1
+    sta o_xl,x
+    bcs :+
+    dec o_xh,x
+:   rts
+.endproc
+
+; pair16/quad16: shared kit metasprite drawers (an 8x16 column / a 16x16
+; quad at o_y). Top tile(s) = A, bottom = tmpL2. RAM-resident for the same
+; reason as the rest of RCODE: the banks are full.
+.proc pair16
+    sta tmpH3
+    ldx oi
+    lda o_y,x
+    sta dy
+    lda spr_col
+    sta dcol
+    ldx tmpH3
+    jsr draw_quad
+    ldx oi
+    lda o_y,x
+    clc
+    adc #8
+    sta dy
+    lda spr_col
+    sta dcol
+    ldx tmpL2
+    jmp draw_quad
+.endproc
+
+.proc quad16
+    sta tmpH3
+    ldx oi
+    lda o_y,x
+    sta dy
+    lda spr_col
+    sta dcol
+    ldx tmpH3
+    jsr draw_quad
+    ldx oi
+    lda o_y,x
+    sta dy
+    lda spr_col
+    ina
+    ina
+    sta dcol
+    ldx tmpH3
+    inx
+    jsr draw_quad
+    ldx oi
+    lda o_y,x
+    clc
+    adc #8
+    sta dy
+    lda spr_col
+    sta dcol
+    ldx tmpL2
+    jsr draw_quad
+    ldx oi
+    lda o_y,x
+    clc
+    adc #8
+    sta dy
+    lda spr_col
+    ina
+    ina
+    sta dcol
+    ldx tmpL2
+    inx
+    jmp draw_quad
+.endproc
+
 .proc rc_ball_kit                ; ball vs a W2 kit foe (X = victim slot):
     lda #1                       ; corpse thrown along Mario's facing
     ldy mario_facing

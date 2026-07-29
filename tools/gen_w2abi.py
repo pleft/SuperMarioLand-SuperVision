@@ -10,6 +10,9 @@ Usage: gen_w2abi.py <dbgfile> <out.inc>
 import re, sys
 
 NEED = [
+    "x_step",
+    "quad16",
+    "pair16",
     "mario_facing",
     "fall_v",
     "arc_idx",

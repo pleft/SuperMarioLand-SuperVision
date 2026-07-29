@@ -445,3 +445,24 @@ Both from their DECODED scripts ($36D1/$37EB) under the validated AI-VM:
   aim; stomp -> corpse + 100/400 credited; descending fish hurts; a riser
   under Mario foot-stomps (the GB positional rule, faithful).
 - Bank 5 is at 96 bytes free — the next W2 code must earn its bytes.
+
+## FIX: $24 is YURARIN BOO, not a hopper (user-caught) [2026-07-29]
+The user: "it just moves vertically and shoots a big ball." Root cause of my
+mis-port: the mover ($2879) applies the VELOCITY LOW NIBBLE to X — vel $20 has
+X speed 0, so the F0 track-Mario bit only sets FACING. And F1 DOES take an
+operand (the child TYPE: InitAccel_24D6 reads $D003) — the decoder's "23
+velocity" after F1 is really "spawn type $23" = THE BALL:
+- $23 script: param $45 (= single tile $E2, the common fireball — the OAM
+  param rows are a BYTE STREAM: bit7-set bytes are tiles, others are
+  position/attr flags; NOT strict pairs), F0 $C0 (aim BOTH dir signs at Mario
+  once), FFC9=1 (half tick rate), vel $12 -> x 1px/f, y 0.5px/f, ~4s life,
+  no gravity, no re-aim (flies past Mario).
+- Port: $24 = vertical bob (unchanged arc) + facing-only aim + the shot at
+  each dive (SFX_DFF8_04 + OBJ_WBALL=35: sign-aimed, x 1/f + y every other
+  frame, hurts on any contact, culls at y<16/y>152 / camera-pass / ~4s).
+- pair16/quad16/x_step moved to engine RCODE (banks full; RCRAM had room).
+- decoder TODO: mark F1 as 1-operand; re-decode all 28 scripts for other
+  F1 children (the fly/boss chains may hide more).
+Verified (harness): Boo x constant through full cycles; ball spawns at the
+dive from the mouth, correct signs/speeds toward Mario; honen stomp
+regression 100 pts intact.
