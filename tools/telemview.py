@@ -61,7 +61,7 @@ def main():
             except ValueError:
                 proto_bad += 1
                 continue
-            seq = m[1]
+            seq = m[2]           # header at $1F81+ ($1F80 = the trap byte)
             if seq == last_seq:
                 dup += 1
                 continue
@@ -71,22 +71,22 @@ def main():
             frames += 1
             ok = True
             # Per-field failure breakdown -- which byte actually tears?
-            if m[0] != 0xA5:
+            if m[1] != 0xA5:
                 fails["magic"] += 1
             if m[0x7F] != seq:
                 fails["commit"] += 1
                 if prev and m[0x7F] == prev[0x7F]:
                     fails["commit_stale"] += 1
-            if m[7] != (seq ^ 0xFF):
+            if m[8] != (seq ^ 0xFF):
                 fails["xor"] += 1
-                if prev and m[7] == prev[7]:
+                if prev and m[8] == prev[8]:
                     fails["xor_stale"] += 1
-            if m[0] != 0xA5 or m[0x7F] != seq or m[7] != (seq ^ 0xFF):
+            if m[1] != 0xA5 or m[0x7F] != seq or m[8] != (seq ^ 0xFF):
                 proto_bad += 1
                 ok = False
             # CKSUM at $1FFE: mod-256 sum of header + ramp. A frame that
             # fails it is torn (missed/early-sampled bytes) -> drop it.
-            ck = (sum(m[0:8]) + sum(m[0x10:0x40])) & 0xFF
+            ck = (sum(m[1:9]) + sum(m[0x10:0x40])) & 0xFF
             if ck != m[0x7E]:
                 if ok:
                     fails["ck_only"] += 1
@@ -99,7 +99,7 @@ def main():
             ramp_bad += bad
             if not ok:
                 continue                     # torn frame: keep the last good one
-            x, y = m[5], m[6]
+            x, y = m[6], m[7]
             now = time.time()
             if now - t0 >= 1.0:
                 fps = (frames - fps_mark) / (now - t0)

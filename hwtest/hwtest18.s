@@ -117,27 +117,31 @@ nmi:
     sta dy
 @ydone:
 
-    stz ck                       ; --- the mailbox, CKSUM then COMMIT last ---
+    ; --- the mailbox, CKSUM then COMMIT last. $1F80 is NEVER written: as
+    ; the window base (low7=0) it catches bus-transition aliases in the
+    ; snooper (HW-measured: ~50% of frames tore there) -- a trap byte,
+    ; excluded from the protocol. Header starts at $1F81.
+    stz ck
     lda #$A5
-    sta $1F80
-    jsr addck
-    lda seq
     sta $1F81
     jsr addck
     lda seq
     sta $1F82
     jsr addck
-    stz $1F83
+    lda seq
+    sta $1F83
+    jsr addck
     stz $1F84
+    stz $1F85
     lda bx
-    sta $1F85
+    sta $1F86
     jsr addck
     lda by
-    sta $1F86
+    sta $1F87
     jsr addck
     lda seq
     eor #$FF
-    sta $1F87
+    sta $1F88
     jsr addck
     ldx #0
 :   txa

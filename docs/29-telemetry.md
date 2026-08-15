@@ -13,12 +13,12 @@ Layout (v1):
 
 | addr  | name   | content |
 |-------|--------|---------|
-| $1F80 | MAGIC  | $A5, rewritten first every frame |
+| $1F80 | TRAP   | NEVER written: the window-base (low7=0) catches bus-transition aliases in the snooper (HW-measured); excluded from CKSUM |
 | $1F81 | SEQ    | frame counter |
 | $1F82 | VXP    | scroll fine x |
 | $1F83 | VXPH   | scroll page x |
 | $1F84 | VYP    | scroll y |
-| $1F85+| payload| producer-defined display list |
+| $1F81+| header+payload | MAGIC $A5, SEQ, VXP, VXPH, VYP, then the display list |
 | $1FFE | CKSUM  | mod-256 sum of header+payload — the viewer DROPS torn frames |
 | $1FFF | COMMIT | = SEQ, written LAST — triggers the ship |
 
