@@ -1376,3 +1376,24 @@ two-phase PIO sampling (+168ns/+424ns per #RD rise, hand-assembled program)
 zero serve-loop impact. docs/29 has the whole autopsy series.
 Next: the game writes its real display list (scroll, HUD, object table)
 and the Mac redraws the level from the repo's own map/tile data.
+
+## DEVKIT PHASE 3: GENERIC MIRROR + THE OVERLAY (2026-08-15, cont.)
+User's real goal: mirror ANY game's screen on the Mac, NO emulator/
+reconstruction. Since VRAM data never crosses the cart bus (only its write
+address) and registers are write-only bar $2020 (all HW-proven, docs/28),
+the console must export its OWN VRAM: patch the game's NMI to copy VRAM
+slices into the WRAM mailbox via visible writes. Built tools/patch_telem.py
++ telem_stub.s (107B position-independent exporter), VALIDATED end-to-end in
+the emulator (mailbox == real VRAM, 256 slices). WALL: real ROMs pack the
+fixed bank ($C000-$FFFF, the only always-mapped region) solid -- Block
+Buster 2B free, our game 10B -- so in-place injection is impossible; the
+Pico must OVERLAY the stub by overwriting never-fetched (dead) bytes in its
+writable served rom[] image. Built the overlay firmware: core1 serve stays
+byte-identical (any per-fetch work breaks boot -- HW-confirmed), a PIO
+fetch-capture SM feeds a coverage map on core0, and after a learn window
+apply_overlay() drops the stub in the longest dead fixed-bank run + repoints
+NMI. apply_overlay transform unit-tested on real Block Buster. HW VALIDATION
+UNRESOLVED (stopped tired): BB wouldn't boot even on plain stock firmware
+this session -- likely a board/hot-insert state issue, to re-baseline next
+time. Practical win: `picotool load -x FILE.uf2 -f` is now the reliable
+flash path (no BOOTSEL button). Full autopsy docs/28-30.
