@@ -1349,3 +1349,22 @@ must clear it), mario_dx scratches tmpH2. Harness unit tests: exact arcs,
 stomp 100/400 credited, descending-fish hurt, riser foot-stomp, Boo
 vertical-only + ball flight signs/speeds. Builds: sml19 (hopper, obsolete),
 sml20 (Yurarin Boo correct). Banks: bank3 tightest, bank5 160B free.
+
+## THE CART-BUS SNOOP + THE DEVKIT'S FIRST PIPELINE (2026-08-15)
+Side-quest: can the SuperPico watch the console's memory traffic and mirror
+the screen on a Mac (later GameShell)? Four probe rounds (hwtest15-17 +
+BUSDIAG firmware v1-v4, serve loop untouched on core 1, poller + USB CDC on
+core 0) mapped the bus on real hardware: the schematic routes NO #WR to the
+Pico (GPIO28 = #RD, cart-read-only decoded), yet everything needed leaks
+anyway — WRAM writes show ADDRESS+DATA (prefix a16:a15:a14=110), absolute
+WRAM reads too, and EVERY write in the whole address space broadcasts its
+address; VRAM data, zero-page reads and register reads stay invisible (VRAM
+lives on the ASIC's internal video bus). Even NMI stack pushes are watchable.
+Boot-crash telltale: #RD never low + looping garbage writes at $19xxx.
+Phase 2 (docs/29) built the same day: display-list telemetry — mailbox
+$1F80-$1FFF (free above HUDSHADOW), full snapshot per frame, COMMIT byte
+last; SUPERPICO_TELEM firmware ships 128-byte snapshots as hex lines;
+tools/telemview.py renders + measures capture corruption via hwtest18's
+48-byte ramp. Emulator-verified end to end; hardware verdict pending.
+Next: the game writes its real display list (scroll, HUD, object table)
+and the Mac redraws the level from the repo's own map/tile data.
