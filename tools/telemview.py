@@ -30,7 +30,7 @@ def open_dev():
 
 def main():
     f = open_dev()
-    frames = ramp_bad = proto_bad = dup = 0
+    frames = ramp_bad = proto_bad = dup = valid = 0
     last_seq = None
     t0 = time.time()
     fps_mark, fps = 0, 0.0
@@ -68,8 +68,16 @@ def main():
             if m[0] != 0xA5 or m[0x7F] != seq or m[7] != (seq ^ 0xFF):
                 proto_bad += 1
                 ok = False
+            # CKSUM at $1FFE: mod-256 sum of header + ramp. A frame that
+            # fails it is torn (missed/early-sampled bytes) -> drop it.
+            ck = (sum(m[0:8]) + sum(m[0x10:0x40])) & 0xFF
+            if ck != m[0x7E]:
+                ok = False
+            valid += ok
             bad = sum(1 for i in range(48) if m[0x10 + i] != ((seq + i) & 0xFF))
             ramp_bad += bad
+            if not ok:
+                continue                     # torn frame: keep the last good one
             x, y = m[5], m[6]
             now = time.time()
             if now - t0 >= 1.0:
@@ -77,10 +85,11 @@ def main():
                 fps_mark, t0 = frames, now
             bar = ["-"] * 40
             bar[min(x // 4, 39)] = "#"
+            pct = 100.0 * valid / frames if frames else 0.0
             sys.stdout.write(
                 f"\rseq={seq:02x} x={x:3d} y={y:3d} [{''.join(bar)}] "
-                f"{fps:5.1f}fps frames={frames} rampbad={ramp_bad} "
-                f"proto={proto_bad} dup={dup} {'OK ' if ok else 'BAD'}")
+                f"{fps:5.1f}fps valid={pct:5.1f}% frames={frames} "
+                f"rampbad={ramp_bad} proto={proto_bad} dup={dup}   ")
             sys.stdout.flush()
 
 if __name__ == "__main__":

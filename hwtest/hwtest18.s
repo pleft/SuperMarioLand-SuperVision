@@ -21,6 +21,7 @@ by:   .res 1
 dx:   .res 1                     ; $01 or $FF
 dy:   .res 1
 pidx: .res 1                     ; previous dot byte index in row 80
+ck:   .res 1                     ; running payload checksum (mod-256 sum)
 
 .segment "CODE"
 
@@ -116,28 +117,39 @@ nmi:
     sta dy
 @ydone:
 
-    lda #$A5                     ; --- the mailbox, COMMIT last ---
+    stz ck                       ; --- the mailbox, CKSUM then COMMIT last ---
+    lda #$A5
     sta $1F80
+    jsr addck
     lda seq
     sta $1F81
+    jsr addck
+    lda seq
     sta $1F82
+    jsr addck
     stz $1F83
     stz $1F84
     lda bx
     sta $1F85
+    jsr addck
     lda by
     sta $1F86
+    jsr addck
     lda seq
     eor #$FF
     sta $1F87
+    jsr addck
     ldx #0
 :   txa
     clc
     adc seq
     sta $1F90,x
+    jsr addck
     inx
     cpx #48
     bne :-
+    lda ck
+    sta $1FFE                    ; CKSUM = mod-256 sum of the summed bytes
 
     lda #$55                     ; dot: restore previous byte on row 80,
     ldx pidx                     ; paint the new one black
@@ -159,6 +171,12 @@ nmi:
 
 irq:
     rti
+
+addck:                           ; ck += A (plain mod-256 sum)
+    clc
+    adc ck
+    sta ck
+    rts
 
 .segment "VECTORS"
     .addr nmi, reset, irq
