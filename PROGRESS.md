@@ -1366,5 +1366,13 @@ $1F80-$1FFF (free above HUDSHADOW), full snapshot per frame, COMMIT byte
 last; SUPERPICO_TELEM firmware ships 128-byte snapshots as hex lines;
 tools/telemview.py renders + measures capture corruption via hwtest18's
 48-byte ramp. Emulator-verified end to end; hardware verdict pending.
+The link then earned its stripes the hard way: six distinct capture
+failure modes hit and killed on real hardware (retained-operand early
+samples, USB-IRQ gaps, transition aliases -> the $1F80 trap byte + phantom
+commits, poll/CPU crystal beat-lock, end-of-cycle '245-vs-direct skew, and
+the 65C02 abs,X dummy-read serving frame-old data). Final form: edge-locked
+two-phase PIO sampling (+168ns/+424ns per #RD rise, hand-assembled program)
++ checksummed full-snapshot frames = 61 fps, valid=100.0%, rampbad=0,
+zero serve-loop impact. docs/29 has the whole autopsy series.
 Next: the game writes its real display list (scroll, HUD, object table)
 and the Mac redraws the level from the repo's own map/tile data.

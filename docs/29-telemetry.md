@@ -45,6 +45,37 @@ capture corruption before the real game goes on the wire. It also draws a
 black dot at column x on VRAM row 80 — console dot and viewer box must move
 together.
 
+## Capture: edge-locked two-phase PIO sampling (FINAL — 100% valid on HW)
+
+Free-running polling CANNOT capture this bus reliably; every failure mode
+below was hit and measured on hardware (2026-08-15, TELEM v1→v5):
+
+1. A 65C02 write cycle carries the RETAINED previous fetch byte (the $1F
+   operand) for its first half — slow polling read seq=$1F forever.
+2. USB IRQs on the polling core eclipse whole write cycles.
+3. Bus-transition aliases (address bits mid-flip) hit single-sample window
+   states: they clobbered the window-base byte $1F80 (hence the TRAP byte)
+   and fired phantom COMMITs.
+4. The poll loop and the console crystal BEAT-LOCK: fixed instructions in
+   the NMI writer get systematically favorable/unfavorable phases (accSeq
+   33% vs accCommit 85%, with minute-scale jumps as the beat drifts).
+5. End-of-cycle skew: direct-wired data lines flip to the next fetch byte
+   before the '245-buffered address lines let go — pair-filtered polling
+   accepted mailbox bytes containing OPCODES (9d/ad/bd).
+6. `sta abs,X` inserts a DUMMY READ (same address, OLD data) in the same
+   #RD-high period as the write — single edge-locked samples captured all
+   48 ramp bytes one frame stale (ck_only=100%).
+
+The fix for all six: PIO (buscap.pio, hand-assembled into buscap_pio.h —
+pioasm won't configure under CMake 4.4). On each #RD rising edge push TWO
+samples: +168 ns (mid cycle 1) and +424 ns (mid cycle 2). Plain-abs writes:
+A hits the write, B lands after #RD fell and self-rejects at the window
+check. Indexed writes: A hits the dummy, B hits the write and overwrites
+it. #RD stays low across back-to-back fetches, so events are only ~21k/s —
+huge FIFO headroom. PIO reads pins passively: ZERO impact on the serve
+loop. Measured: valid=100.0%, rampbad=0, 61 fps lossless, dup only at
+connect time.
+
 ## Firmware: SUPERPICO_TELEM (build/Superpico/code/main_telem.c)
 
 Core 1 = the untouched serve loop. Core 0 = USB CDC + a tight poller:
