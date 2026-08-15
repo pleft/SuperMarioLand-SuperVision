@@ -39,7 +39,15 @@ matches and reports over USB every second.
 | VRAM write ($4000-$5FFF) | yes     | **no** | address broadcast every write |
 | VRAM read                | yes     | **no** | |
 | write to unmapped ($3111)| yes     | no   | write-ADDRESS broadcast covers ALL space |
-| ASIC register read ($2026)| no     | no   | joypad/timer reads are invisible |
+| ASIC register read       | yes     | no   | address broadcast; data = open-bus $20 (CORRECTED — the v4 marker used low14 $0026 instead of $2026; the ring showed A=1a026/D=20 all along) |
+
+**Register readback (hwtest19 + REGPROBE, real HW, 2026-08-15): ALL ASIC
+registers are WRITE-ONLY** — reads return the open-bus ghost $20 (the last
+fetched operand byte) — EXCEPT $2020 (joypad), which reads real button
+state. Potator models every register as readable: fiction; anything
+readback-based works in the emulator and breaks on hardware. $2xxx
+addresses have low14 = $2xxx — a $2xxx marker with low14 $0xxx matches
+nothing (the v4 bug).
 
 - Non-cart cycles present the CPU address as `a16:a15:a14 = 110` + the raw
   low 14 bits (a WRAM write to $0066 shows $18066 on the cart bus).
