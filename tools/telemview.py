@@ -31,6 +31,9 @@ def open_dev():
 def main():
     f = open_dev()
     frames = ramp_bad = proto_bad = dup = valid = 0
+    last_m = None
+    from collections import defaultdict
+    fails = defaultdict(int)
     last_seq = None
     t0 = time.time()
     fps_mark, fps = 0, 0.0
@@ -62,9 +65,22 @@ def main():
             if seq == last_seq:
                 dup += 1
                 continue
+            prev = last_m
+            last_m = m
             last_seq = seq
             frames += 1
             ok = True
+            # Per-field failure breakdown -- which byte actually tears?
+            if m[0] != 0xA5:
+                fails["magic"] += 1
+            if m[0x7F] != seq:
+                fails["commit"] += 1
+                if prev and m[0x7F] == prev[0x7F]:
+                    fails["commit_stale"] += 1
+            if m[7] != (seq ^ 0xFF):
+                fails["xor"] += 1
+                if prev and m[7] == prev[7]:
+                    fails["xor_stale"] += 1
             if m[0] != 0xA5 or m[0x7F] != seq or m[7] != (seq ^ 0xFF):
                 proto_bad += 1
                 ok = False
@@ -72,8 +88,13 @@ def main():
             # fails it is torn (missed/early-sampled bytes) -> drop it.
             ck = (sum(m[0:8]) + sum(m[0x10:0x40])) & 0xFF
             if ck != m[0x7E]:
+                if ok:
+                    fails["ck_only"] += 1
                 ok = False
             valid += ok
+            if frames % 305 == 0:
+                print("\rfails: " + " ".join(f"{k}={v}" for k, v in
+                                             sorted(fails.items())) + " " * 8)
             bad = sum(1 for i in range(48) if m[0x10 + i] != ((seq + i) & 0xFF))
             ramp_bad += bad
             if not ok:
