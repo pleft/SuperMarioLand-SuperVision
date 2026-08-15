@@ -73,6 +73,7 @@ def main():
             # Per-field failure breakdown -- which byte actually tears?
             if m[1] != 0xA5:
                 fails["magic"] += 1
+                fails[f"magic_val_{m[1]:02x}"] += 1
             if m[0x7F] != seq:
                 fails["commit"] += 1
                 if prev and m[0x7F] == prev[0x7F]:
