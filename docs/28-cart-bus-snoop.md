@@ -49,6 +49,15 @@ readback-based works in the emulator and breaks on hardware. $2xxx
 addresses have low14 = $2xxx — a $2xxx marker with low14 $0xxx matches
 nothing (the v4 bug).
 
+**Register writes are ADDRESS-ONLY on the cart bus (BUSDIAG5, real HW):**
+`sta $2002` broadcasts the address, never the data — scroll values cannot
+be sniffed from reg writes NOR read back. Ways to a game's scroll state:
+(a) the game's RAM shadow variable — ALL WRAM writes (zp included) are
+data-visible, so tracking the variable's writes gives its value; finding
+WHICH variable is a one-time per-game config (~30 games exist), or (b) for
+abs-mode `lda var / sta $2002` sequences, pair the visible WRAM read with
+the following reg-write event.
+
 - Non-cart cycles present the CPU address as `a16:a15:a14 = 110` + the raw
   low 14 bits (a WRAM write to $0066 shows $18066 on the cart bus).
 - VRAM is NOT on the external CPU bus (it hangs off the ASIC's video bus);
