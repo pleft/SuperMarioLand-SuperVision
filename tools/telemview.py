@@ -13,6 +13,8 @@ here as a ramp error. Stdlib only.
 import sys, glob, termios, time
 
 def open_dev():
+    if len(sys.argv) > 2 and sys.argv[1] == "--replay":
+        return open(sys.argv[2], "rb")          # offline parser test
     if len(sys.argv) > 1:
         path = sys.argv[1]
     else:
@@ -29,8 +31,10 @@ def open_dev():
     return f
 
 def main():
+    replay = len(sys.argv) > 2 and sys.argv[1] == "--replay"
     f = open_dev()
     frames = ramp_bad = proto_bad = dup = valid = 0
+    raw_f = malformed = other_lines = 0
     last_m = None
     from collections import defaultdict
     fails = defaultdict(int)
@@ -41,6 +45,11 @@ def main():
     while True:
         chunk = f.read(4096)
         if not chunk:
+            if replay:
+                print(f"\nreplay done: F={raw_f} malformed={malformed} "
+                      f"dup={dup} frames={frames} valid={valid} "
+                      f"fails={dict(fails)}")
+                return
             time.sleep(0.005)
             continue
         buf += chunk
@@ -48,18 +57,28 @@ def main():
             line, buf = buf.split(b"\n", 1)
             line = line.decode("ascii", "replace").strip()
             if line.startswith("#"):
-                print("\r" + line + " " * 20)
+                print(f"\r{line}  [rx: F={raw_f} malformed={malformed} "
+                      f"dup={dup} frames={frames}]" + " " * 8)
                 continue
             if not line.startswith("F "):
+                if line:
+                    other_lines += 1
+                    if other_lines <= 3:
+                        print(f"\rnon-F line: {line[:60]!r}" + " " * 8)
                 continue
+            raw_f += 1
             parts = line.split()
             if len(parts) != 3 or len(parts[2]) != 256:
-                proto_bad += 1
+                malformed += 1
+                if malformed <= 3:
+                    print(f"\rmalformed F line ({len(parts)} fields, "
+                          f"payload {len(parts[2]) if len(parts) > 2 else 0}): "
+                          f"{line[:60]!r}" + " " * 8)
                 continue
             try:
                 m = bytes.fromhex(parts[2])
             except ValueError:
-                proto_bad += 1
+                malformed += 1
                 continue
             seq = m[2]           # header at $1F81+ ($1F80 = the trap byte)
             if seq == last_seq:
