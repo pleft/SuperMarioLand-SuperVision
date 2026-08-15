@@ -30,9 +30,21 @@ def open_dev():
     print(f"listening on {path}")
     return f
 
+REGPROBE = [                     # hwtest19 payload layout ($1F90+)
+    ("$2002 (wrote $11)", 0x10), ("$2003 (wrote $07)", 0x11),
+    ("$2000 (boot $A0)", 0x12), ("$2001 (boot $A0)", 0x13),
+    ("$2026 (boot $DF)", 0x14), ("$2022 (boot $0F)", 0x15),
+    ("$2020 JOYPAD", 0x16), ("$2024", 0x17), ("$2025", 0x18),
+    ("$2027", 0x19), ("$2008 (wrote $5A)", 0x1A), ("$2009 (wrote $A5)", 0x1B),
+]
+
 def main():
+    regs_mode = "--regs" in sys.argv
+    if regs_mode:
+        sys.argv = [a for a in sys.argv if a != "--regs"]
     replay = len(sys.argv) > 2 and sys.argv[1] == "--replay"
     f = open_dev()
+    last_payload = None
     frames = ramp_bad = proto_bad = dup = valid = 0
     raw_f = malformed = other_lines = 0
     last_m = None
@@ -115,10 +127,20 @@ def main():
             if frames % 305 == 0:
                 print("\rfails: " + " ".join(f"{k}={v}" for k, v in
                                              sorted(fails.items())) + " " * 8)
-            bad = sum(1 for i in range(48) if m[0x10 + i] != ((seq + i) & 0xFF))
-            ramp_bad += bad
+            if not regs_mode:
+                bad = sum(1 for i in range(48)
+                          if m[0x10 + i] != ((seq + i) & 0xFF))
+                ramp_bad += bad
             if not ok:
                 continue                     # torn frame: keep the last good one
+            if regs_mode:
+                payload = m[0x10:0x1C]
+                if payload != last_payload:
+                    last_payload = payload
+                    print("\r--- register readbacks (open bus reads as $20):"
+                          + " " * 20)
+                    for name, off in REGPROBE:
+                        print(f"    {name:20s} -> {m[off]:02x}")
             x, y = m[6], m[7]
             now = time.time()
             if now - t0 >= 1.0:
