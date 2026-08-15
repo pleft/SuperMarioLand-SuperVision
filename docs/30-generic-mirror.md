@@ -38,20 +38,34 @@ refs), so there is nowhere to add always-resident code. In-place injection
 only works for ROMs that happen to have a big fixed-bank gap (homebrew, our
 test ROM). patch_telem.py detects this and exits 2 with the free-run map.
 
-## Required next step: Pico-side fetch-overlay (phase 3b)
+## Pico-side fetch-overlay (phase 3b) — BUILT, pending HW validation
 
-The cart IS the Pico, so it can serve stub bytes for a chosen CPU address
-window WITHOUT using ROM free space:
-- Overlay a 3-byte trampoline (`jmp stub`) at the original NMI entry; serve
-  the 107-byte stub body at a fixed-bank address the game NEVER fetches.
-- Find that dead window empirically: the Pico already sees every fetch —
-  observe the game for a few seconds, pick a never-touched fixed-bank run
-  (e.g. one-time RESET/init code, dead after boot; enable the overlay only
-  post-boot). No ROM growth, no free-space requirement.
-- The stub still needs the mailbox WRAM free ($1F80-$1FFF); the Pico can
-  verify the game never writes there (it sees all WRAM writes) and, if it
-  does, relocate the mailbox to another observed-dead WRAM window.
-This is the generic path; it also reuses the PIO capture + protocol wholesale.
+The cart IS the Pico and its served ROM lives in WRITABLE RAM (rom[]), so it
+overlays the exporter WITHOUT any ROM free space — it overwrites bytes the
+game never FETCHES. Firmware = main_telem.c (target SUPERPICO_TELEM):
+
+- **Coverage learn:** core 1's serve loop marks a coverage bit per cart
+  address it serves, AFTER driving data (uses inter-fetch slack, not the
+  read window; one gated test, zero cost once off). ~6 s covers boot+attract.
+- **Overlay (once, core 0):** `apply_overlay()` finds the longest never-
+  fetched run in the fixed bank [n-0x4000, n-6); if >= 107 it drops the
+  stub blob there, patches the blob's `jmp ORIG_NMI` operand (last 2 bytes)
+  to the game's real NMI target, and repoints the NMI vector at the stub.
+  All live edits to rom[]; dead bytes are never read so core 1 never serves
+  a half-written stub. Reports over USB: `# OVERLAY: ... stub@$xxxx : ACTIVE`.
+- **Key enabler:** telem_stub.s is POSITION-INDEPENDENT (only absolute refs
+  are fixed WRAM/VRAM/reg addrs; loops use relative branches; sole address-
+  dependent byte-pair is the final jmp operand). So the firmware carries it
+  as a fixed 107-byte blob (telem_stub_blob.h, assembled once w/ ORIG_NMI=0)
+  — no on-Pico assembler.
+- The stub still needs mailbox WRAM $1F80-$1FFF free; the Pico sees all WRAM
+  writes so it CAN verify/relocate, not yet wired.
+- `apply_overlay` transform unit-tested bit-exact on the real Block Buster
+  image (Python mirror). The runtime bits (coverage accuracy, is-the-window-
+  truly-dead, serve timing under live edit) are the hardware test.
+
+Reuses the PIO capture + protocol wholesale — once overlaid, the exporter's
+mailbox writes ship exactly as our own game's would.
 
 ## Remaining build items
 - Phase 3b overlay firmware (dead-window finder + fetch substitution).
