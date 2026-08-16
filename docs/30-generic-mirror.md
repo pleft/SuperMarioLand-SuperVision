@@ -133,6 +133,43 @@ origin. Only the HW-gated learn-mode (finding the addresses live) remains
 before scroll works on a real console; until then the renderer draws at origin
 (0,0) = raw framebuffer (a $A5 stub / no scrollhunt).
 
+## First HW run (2026-08-16): overlay coverage-safety failure + fixes
+
+Block Buster booted THROUGH the Pico to its title/attract screens (boot
+lottery is beatable) and the overlay applied -- but the game then cycled
+logo<->title, was DEAD to input (START did nothing), and shipped ZERO frames.
+Diagnosis (a real, important failure mode of the fetch-overlay):
+
+- "Never fetched during learn" != "never executed." The learn phase only saw
+  ATTRACT (logo/title); the game's START/input-handler code was never fetched,
+  so apply_overlay marked it dead and dropped the 107B stub right on top of it.
+  Attract kept working (that code was fetched, intact); START was now stub
+  bytes -> input dead -> can't reach gameplay.
+- NMI is OFF during attract on this game, so even the intact stub never ran ->
+  no export. Double bind: can't export in attract, can't start to reach
+  gameplay where NMI is live.
+
+Three firmware fixes (main_telem.c; the Pico tree is gitignored, RULE 5):
+1. **Clock anchored to first cart fetch**, not Pico boot -- the Pico is
+   powered SECONDS before the console, so a boot-anchored learn window elapsed
+   with EMPTY coverage and apply_overlay treated the whole fixed bank as dead,
+   dropping the stub at $C000 OVER game code. (This alone likely explains prior
+   "overlay won't boot" nights.)
+2. **Refuse to apply on empty/sparse coverage** (guard) -- belt-and-braces
+   against #1.
+3. **Self-triggered apply, not a fixed timer**: apply ONLY once fixed-bank
+   coverage exceeds attract levels (FB_MIN=6000, vs ~1.5K attract-only) AND has
+   plateaued (STABLE_SECS=4). So the user just PLAYS the game (menus + into
+   gameplay); the stub then lands only on bytes unfetched across everything
+   played, preserving live code, and NMI is live in gameplay to drive export.
+   Residual risk: code paths never exercised during play could still be
+   overwritten -- inherent to the fetch-overlay; mitigated by playing the
+   screens you want mirrored before it triggers.
+
+Next HW run is now zero-fuss for the user: flash, boot the game, PLAY it a bit;
+the log shows `# LEARN: ... keep playing` then `# OVERLAY: ... ACTIVE` and
+frames start. No timing/keystrokes.
+
 ## Remaining build items
 - Firmware learn-mode (WRAM-write snoop + per-frame-once candidate reduction)
   to feed scrollhunt -- the only remaining piece of the scroll story, HW-gated.
