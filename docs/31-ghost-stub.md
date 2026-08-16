@@ -79,6 +79,36 @@ handler), restore returns rom[] byte-identical.
 - Expected output: 32-byte slice/frame → full 160×160 refresh ~4.2 s
   (progressive live mirror); slice size tunable later against the NMI budget.
 
+## The boot lottery -- ROOT CAUSE + the deterministic fix (2026-08-16)
+
+Repeated HW runs exposed the real blocker: a **power-on race**. On cold power
+the 65C02 leaves reset in ~ms; the Pico needs ~5-15 ms to boot + serve, so the
+CPU's first fetch hits a dead bus, runs garbage, and falls into a tight WRAM
+loop that never touches the cart again -- **unreachable** (soft-reset can't
+help: the deep NOP-sled + vector-redirect only works once the CPU is fetching
+ROM; a pure WRAM loop is invisible to us). Confirmed the SuperPico has NO
+reset/power line in firmware (zwenergy main.c: only A0-16, D0-7, #RD; BOM =
+Pico + 3x74LVC245, no switch), so firmware alone cannot win the race.
+
+THE FIX (cart-connector pin 21). kevtris pinout: pin 21 "power ground" is the
+console's power-enable -- the SV powers up only when it's grounded ("will not
+power up without a cartridge"). The SuperPico ties it to GND (hence always-on).
+Gate it with GPIO25 (Pico onboard-LED pad, the one accessible spare pin):
+
+  Pico boots -> GPIO25 holds pin 21 OPEN (console OFF) -> core1 serves ->
+  GPIO25 grounds pin 21 (console ON) -> 65C02 resets onto a LIVE bus.
+
+Deterministic boot, every power-up, no reseat, and NO wire into the SV (it's
+all on the cartridge connector). Firmware done (main_telem.c: PWR_OFF before
+init, PWR_ON after serve; plus a 'p' USB command for clean power-cycles).
+
+Wiring (all on the SuperPico / cart connector):
+- Interrupt the SuperPico's existing pin-21 -> GND connection.
+- Wiring A (default build): GPIO25 -> gate of an N-MOSFET low-side switch,
+  drain->pin21, source->GND, 10k gate pulldown. HIGH = ON.
+- Wiring B (build -D PWR_DIRECT, ONLY if pin 21 is <~10 mA): GPIO25 -> pin 21
+  directly, literally one wire. Measure the pin-21->GND current first.
+
 ## HW run script
 
 1. Flash SUPERPICO-ALIEN-GHOST.uf2, boot the console, **play the game**.
