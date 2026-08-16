@@ -67,9 +67,57 @@ game never FETCHES. Firmware = main_telem.c (target SUPERPICO_TELEM):
 Reuses the PIO capture + protocol wholesale — once overlaid, the exporter's
 mailbox writes ship exactly as our own game's would.
 
+## Mac 160x160 renderer (tools/svrender.py + telemview --render) — DONE
+
+`svrender.render_vram(vram, xscroll, yscroll)` decodes the 8 KB VRAM to a
+160x160 image via the hardware-confirmed layout: 4 px/byte with bits1:0 =
+leftmost pixel, 48-byte line stride, ring wrap at 8160, origin =
+XSCROLL//4 + YSCROLL*48 (low 2 XSCROLL bits = 1px sub-byte delay). Stdlib
+only (zlib PNG, no deps). `telemview.py --render OUT.png [--green] [--scale N]`
+decodes the generic telem_stub protocol (slice id m[3], 32 payload bytes
+m[5..36], CKSUM=sum(payload)+SEQ+JOYPAD), drops torn frames, accumulates the
+256 slices, and repaints OUT.png at ~4 Hz with a decoded-joypad status line.
+
+VALIDATED end-to-end offline (zero hardware): synthesize the exact F-lines
+telem_stub would emit for the test_game ramp VRAM (incl. a torn frame) ->
+feed to telemview --render -> output PNG is BYTE-IDENTICAL to a direct
+render, torn frame correctly dropped (valid=256/257). Geometry + scroll
+invariants unit-checked (pixel decode, stride, ring, XSCROLL 1px/4=1byte,
+YSCROLL=+48). Live command once the board boots the overlay firmware:
+`python3 tools/telemview.py /dev/cu.usbmodemXXXX --render screen.png --green`.
+
+## Scroll-shadow-var auto-detection (tools/scrollhunt.py) — ALGORITHM DONE
+
+Registers are write-only on the bus (docs/28), so the value written to
+$2002/$2003 never appears — but EVERY WRAM write is data-visible, INCLUDING
+zero page, and games hold the camera in a WRAM shadow var they write every
+frame. And $2020 (joypad) is readable. So scrollhunt finds the scroll var by
+correlation: rank WRAM addresses by how well their per-frame value-DELTA
+tracks the D-pad (X-var delta <-> Left/Right, Y-var <-> Up/Down), after a
+sane-step filter (median |delta| <= 8 px) that rejects RNG/violent vars.
+
+`hunt()` returns the X and Y addresses + a signed correlation (sign = the
+game's scroll-direction convention) + a ranked candidate table. VALIDATED
+offline (`scrollhunt.py --selftest`): a scripted-D-pad synthetic trace with a
+zero-page camera ($00C5/$00C6) buried among decoys (per-frame timer, anim
+0..3 counter, LCG RNG, rare coin count) -> X identified $00C5 corr +0.998,
+Y $00C6 +1.000, ALL decoys rejected (timer/anim ~0, RNG filtered as
+insane-step). Capture format: `F <frame> <joy>` / `W <addr> <val>` lines.
+
+Firmware learn-mode needed to feed it (spec, HW-gated): snoop WRAM writes the
+same way the mailbox is captured, but the raw volume (thousands of writes/
+frame) can't ship at line rate. On-Pico reduction: per WRAM address track
+(last_val, writes_this_frame); a scroll var is written ~ONCE per frame, so
+ship only addresses whose per-frame write-count is ~1 with a small running
+delta -- collapses to a handful of candidates. Frame boundary = the $2002
+register-write ADDRESS event (visible) or NMI stack push. One-time, ~300
+frames while the user wiggles the D-pad. Then bake the found address into the
+runtime stub (it reads the var on-CPU -- zp or abs -- and exports scrollX/Y
+in the mailbox alongside JOYPAD) and telemview --render passes them to
+render_vram. Until wired, the renderer draws at origin (0,0) = raw framebuffer.
+
 ## Remaining build items
-- Phase 3b overlay firmware (dead-window finder + fetch substitution).
-- Scroll-shadow-var identification per game (~30 games; one-time, or auto:
-  the var whose value the game copies to $2002/$2003 each frame).
-- Mac 160x160 renderer: mailbox VRAM slices + scroll -> pixels via the LCD
-  scan rules (docs/27). Currently telemview is text-only.
+- Firmware learn-mode (WRAM-write snoop + per-frame-once candidate reduction)
+  to feed scrollhunt; then runtime stub scroll-export + telemview scroll wire.
+- Phase 3b overlay firmware HW validation (dead-window finder + fetch
+  substitution) — built + unit-tested; blocked on the SuperPico boot lottery.

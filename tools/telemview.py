@@ -30,6 +30,81 @@ def open_dev():
     print(f"listening on {path}")
     return f
 
+def run_render(f, out_path, scale, palette, replay):
+    """Generic-mirror mode: decode telem_stub.s frames, accumulate the 8 KB
+    VRAM, and write a live PNG. Mailbox map (m[0] = $1F80):
+      m[1]=MAGIC $A5  m[2]=SEQ  m[3]=slice id  m[4]=JOYPAD
+      m[5..36] = 32 VRAM bytes at $4000 + slice*32
+      m[0x7E]=CKSUM (sum of 32 payload + SEQ + JOYPAD)  m[0x7F]=COMMIT=slice
+    """
+    import svrender as sv
+    vram = bytearray(sv.VRAM_BYTES)
+    seen = [False] * 256                 # which 32-byte slices we have
+    frames = valid = dup = malformed = 0
+    last_seq = None
+    last_write = 0
+    t0 = time.time()
+    fps_mark, fps = 0, 0.0
+    buf = b""
+    JOY = "RLDU BA SEL STA".split()      # $2020 bits 0..7, active-LOW
+    while True:
+        chunk = f.read(4096)
+        if not chunk:
+            if replay:
+                sv.write_png(out_path, sv.render_vram(vram, palette=palette), scale)
+                filled = sum(seen)
+                print(f"\nreplay done: frames={frames} valid={valid} "
+                      f"slices={filled}/256 -> wrote {out_path}")
+                return
+            time.sleep(0.005)
+            continue
+        buf += chunk
+        while b"\n" in buf:
+            line, buf = buf.split(b"\n", 1)
+            line = line.decode("ascii", "replace").strip()
+            if line.startswith("#"):
+                print(f"\r{line}" + " " * 8)
+                continue
+            if not line.startswith("F "):
+                continue
+            parts = line.split()
+            if len(parts) != 3 or len(parts[2]) != 256:
+                malformed += 1
+                continue
+            try:
+                m = bytes.fromhex(parts[2])
+            except ValueError:
+                malformed += 1
+                continue
+            seq = m[2]
+            if seq == last_seq:
+                dup += 1
+                continue
+            last_seq = seq
+            frames += 1
+            slice_id = m[3]
+            ck = (sum(m[5:37]) + m[2] + m[4]) & 0xFF
+            if m[1] != 0xA5 or m[0x7F] != slice_id or ck != m[0x7E]:
+                continue                 # torn/incomplete frame -> drop
+            valid += 1
+            vram[slice_id * 32: slice_id * 32 + 32] = m[5:37]
+            seen[slice_id] = True
+            now = time.time()
+            if now - t0 >= 1.0:
+                fps = (frames - fps_mark) / (now - t0)
+                fps_mark, t0 = frames, now
+            if now - last_write >= 0.25:     # ~4 Hz repaint
+                last_write = now
+                sv.write_png(out_path, sv.render_vram(vram, palette=palette), scale)
+            joy = m[4]
+            btn = " ".join(n for i, n in enumerate(JOY) if not (joy >> i) & 1)
+            filled = sum(seen)
+            sys.stdout.write(
+                f"\rslices={filled:3d}/256 seq={seq:02x} joy=[{btn:14s}] "
+                f"{fps:5.1f}fps valid={valid}/{frames} -> {out_path}   ")
+            sys.stdout.flush()
+
+
 REGPROBE = [                     # hwtest19 payload layout ($1F90+)
     ("$2002 (wrote $11)", 0x10), ("$2003 (wrote $07)", 0x11),
     ("$2000 (boot $A0)", 0x12), ("$2001 (boot $A0)", 0x13),
@@ -39,6 +114,21 @@ REGPROBE = [                     # hwtest19 payload layout ($1F90+)
 ]
 
 def main():
+    # --render OUT.png [--scale N] [--green]: generic-mirror pixel viewer.
+    if "--render" in sys.argv:
+        import svrender as sv
+        i = sys.argv.index("--render")
+        out = sys.argv[i + 1]
+        scale = 3
+        if "--scale" in sys.argv:
+            scale = int(sys.argv[sys.argv.index("--scale") + 1])
+        palette = sv.GREEN if "--green" in sys.argv else sv.GREY
+        drop = {"--render", out, "--scale", str(scale), "--green"}
+        sys.argv = [a for a in sys.argv if a not in drop]
+        replay = len(sys.argv) > 2 and sys.argv[1] == "--replay"
+        f = open_dev()
+        run_render(f, out, scale, palette, replay)
+        return
     regs_mode = "--regs" in sys.argv
     if regs_mode:
         sys.argv = [a for a in sys.argv if a != "--regs"]
