@@ -29,7 +29,7 @@ NEED = [
     # world state
     "cam_x", "spr_x", "spr_y", "mario_big", "frame_count", "oi",
     # drawing
-    "draw_quad", "dcol", "dy", "spr_subx", "do_flip",
+    "draw_quad", "draw_tile_yflip", "dcol", "dy", "spr_subx", "do_flip",
     # combat / scoring
     "award_kill_at", "tmpL2", "tmpH2", "tmpH3", "tmpL", "tmpH",
     # sfx

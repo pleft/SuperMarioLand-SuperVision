@@ -394,7 +394,7 @@ w2_rts:
     rts
 :   lda o_tmr,x                  ; ~4s lifetime (GB: 165 ticks at half rate)
     beq @gone
-    jsr l3_box                   ; a projectile: any touch hurts
+    jsr wball_box                ; a projectile: any touch hurts (tight 8px box)
     bcs @hit
     rts
 @hit:
@@ -407,11 +407,41 @@ w2_rts:
 .proc draw_wball                 ; one 8x8: the common fireball tile
     ldx oi
     lda o_y,x
-    sta dy
-    lda spr_col
-    sta dcol
+    clc
+    adc #8                       ; o_y is the 16px-box top; the 8px ball sits +8
+    sta dy                       ; (matches the engine's erase at o_ndy=o_y+8 --
+    lda spr_col                  ;  without this the ball is drawn in the top half
+    sta dcol                     ;  and the bottom-half erase never clears it -> trail)
     ldx #FIRE_T
     jmp draw_quad
+.endproc
+
+; Tight AABB for the 8px ball vs Mario -- l3_box (kit, +/-14 tall) is sized for
+; the full-16px kit enemies and hits ~8px above/below this projectile. The ball's
+; visual box is o_y+8..o_y+16; overlap with Mario's 16px box (spr_y..+16) is
+; o_y-8 < spr_y < o_y+16, i.e. |spr_y - (o_y+4)| < 12. X within 9 (8px ball).
+.proc wball_box                  ; C=1 -> touching
+    jsr mario_dx
+    lda tmpH3
+    bne @no
+    lda tmpL3
+    cmp #9
+    bcs @no
+    lda spr_y
+    sec
+    sbc o_y,x
+    sec
+    sbc #4
+    bpl :+
+    eor #$FF
+    ina
+:   cmp #12
+    bcs @no
+    sec
+    rts
+@no:
+    clc
+    rts
 .endproc
 
 ; the dead-flip corpse: the star-kill capture's 23 deltas, then +2/f off-screen
@@ -472,17 +502,40 @@ w2c_dy:                          ; kill_flip's captured trajectory, verbatim
 .endproc
 
 .proc draw_hcorp                 ; the bones upside-down: rows swapped
-    lda #HON_TA
-    sta tmpL2
-    lda #HON_TA+1
+    lda #HON_TA                  ; TODO: same latent Y-flip bug as draw_lcorp had
+    sta tmpL2                    ; (tiles upright, not mirrored) -- fix when bank 3
+    lda #HON_TA+1                ; has room; user hasn't hit the Honen death yet.
     jmp pair16
 .endproc
 
-.proc draw_lcorp                 ; the hopper upside-down: rows swapped
-    lda #LEAP_TA
-    sta tmpL2
-    lda #LEAP_TA+2
-    jmp quad16
+; Dead-flip corpse = a true VERTICAL flip (the GB OAM Y-flip attr): the tile rows
+; swap AND each 8x8 tile is blitted bottom-up (draw_tile_yflip). The old row-swap
+; alone left every tile upright -> scrambled corpse. Table-driven to stay compact
+; (bank 3 is tight). Order = the flip: TL<-BL, TR<-BR, BL<-TL, BR<-TR.
+.proc draw_lcorp                 ; 16x16 seahorse (Yurarin Boo), upside-down
+    stz do_flip
+    ldy #0
+@l:
+    ldx oi
+    lda o_y,x
+    clc
+    adc lc_dy,y
+    sta dy
+    lda spr_col
+    clc
+    adc lc_dc,y
+    sta dcol
+    ldx lc_t,y
+    phy
+    jsr draw_tile_yflip
+    ply
+    iny
+    cpy #4
+    bne @l
+    rts
+lc_dy: .byte 0, 0, 8, 8
+lc_dc: .byte 0, 2, 0, 2
+lc_t:  .byte LEAP_TA+2, LEAP_TA+3, LEAP_TA, LEAP_TA+1
 .endproc
 
 .proc w2_token                   ; anim tokens (mirrors the draw choices)
