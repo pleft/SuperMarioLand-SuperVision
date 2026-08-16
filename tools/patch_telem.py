@@ -32,7 +32,7 @@ def ff_runs(buf):
         runs.append((start, cur))
     return sorted(runs, key=lambda r: -r[1])
 
-def assemble(cpu_addr, orig_nmi, tmp):
+def assemble(cpu_addr, orig_nmi, tmp, scrollx=None, scrolly=None):
     inc = os.path.join(tmp, "orig_nmi.inc")
     open(inc, "w").write("ORIG_NMI = $%04X\n" % orig_nmi)
     cfg = os.path.join(tmp, "stub.cfg")
@@ -41,15 +41,36 @@ def assemble(cpu_addr, orig_nmi, tmp):
         "SEGMENTS { STUB: load STUB type ro; }\n" % cpu_addr)
     o = os.path.join(tmp, "stub.o")
     b = os.path.join(tmp, "stub.bin")
-    subprocess.run(["ca65", "--cpu", "65c02", "-I", tmp, "-I", HERE,
-                    STUB_SRC, "-o", o], check=True)
+    cmd = ["ca65", "--cpu", "65c02", "-I", tmp, "-I", HERE]
+    if scrollx is not None or scrolly is not None:
+        cmd += ["-D", "WITH_SCROLL"]        # MAGIC $A6 + scroll export
+        if scrollx is not None:
+            cmd += ["-D", "SCROLLX_ADDR=$%04X" % scrollx]
+        if scrolly is not None:
+            cmd += ["-D", "SCROLLY_ADDR=$%04X" % scrolly]
+    cmd += [STUB_SRC, "-o", o]
+    subprocess.run(cmd, check=True)
     subprocess.run(["ld65", "-C", cfg, o, "-o", b], check=True)
     return open(b, "rb").read()
 
 def main():
-    if len(sys.argv) != 3:
-        sys.exit("usage: patch_telem.py IN.sv OUT.sv")
-    src, dst = sys.argv[1], sys.argv[2]
+    # positional IN OUT + optional --scrollx/--scrolly $ADDR (from scrollhunt.py)
+    argv = sys.argv[1:]
+    scrollx = scrolly = None
+    pos = []
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a == "--scrollx":
+            scrollx = int(argv[i + 1].lstrip("$"), 16); i += 2
+        elif a == "--scrolly":
+            scrolly = int(argv[i + 1].lstrip("$"), 16); i += 2
+        else:
+            pos.append(a); i += 1
+    if len(pos) != 2:
+        sys.exit("usage: patch_telem.py IN.sv OUT.sv [--scrollx $ADDR] [--scrolly $ADDR]\n"
+                 "  scroll addrs (from tools/scrollhunt.py) bake scroll export into the stub.")
+    src, dst = pos
     rom = bytearray(open(src, "rb").read())
     n = len(rom)
     if n < 0x8000 or (n & (n - 1)):
@@ -59,7 +80,7 @@ def main():
 
     fixed_base_file = n - 0x4000            # CPU $C000 -> this file offset
     with tempfile.TemporaryDirectory() as tmp:
-        stub = assemble(0xC000, nmi, tmp)   # length is address-independent
+        stub = assemble(0xC000, nmi, tmp, scrollx, scrolly)  # length is address-independent
         L = len(stub)
         print(f"stub is {L} bytes")
 
@@ -81,7 +102,7 @@ def main():
 
         off = big[0]
         cpu = 0xC000 + off
-        stub = assemble(cpu, nmi, tmp)      # reassemble at the real address
+        stub = assemble(cpu, nmi, tmp, scrollx, scrolly)  # reassemble at the real address
         rom[fixed_base_file + off: fixed_base_file + off + L] = stub
         rom[n - 6] = cpu & 0xFF             # repoint NMI vector -> stub
         rom[n - 5] = cpu >> 8

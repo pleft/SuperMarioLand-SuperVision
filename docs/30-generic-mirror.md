@@ -111,13 +111,30 @@ frame) can't ship at line rate. On-Pico reduction: per WRAM address track
 ship only addresses whose per-frame write-count is ~1 with a small running
 delta -- collapses to a handful of candidates. Frame boundary = the $2002
 register-write ADDRESS event (visible) or NMI stack push. One-time, ~300
-frames while the user wiggles the D-pad. Then bake the found address into the
-runtime stub (it reads the var on-CPU -- zp or abs -- and exports scrollX/Y
-in the mailbox alongside JOYPAD) and telemview --render passes them to
-render_vram. Until wired, the renderer draws at origin (0,0) = raw framebuffer.
+frames while the user wiggles the D-pad.
+
+## Runtime scroll export (telem_stub.s WITH_SCROLL) — DONE
+
+Once scrollhunt gives the addresses, `patch_telem.py --scrollx $ADDR
+--scrolly $ADDR` bakes them into the stub: telem_stub.s gained a `.ifdef
+WITH_SCROLL` block that reads the shadow vars on-CPU (zp OR abs -- ca65 picks
+the mode) into mailbox $1FA5/$1FA6 and folds them into the checksum, and sets
+MAGIC $A6 so telemview knows the format. Without WITH_SCROLL it assembles
+BYTE-IDENTICAL to the validated 107-byte overlay blob (verified by
+gen_telem_blob.py; MAGIC $A5) so the fetch-overlay path is untouched.
+telemview --render decodes $A6, extracts SCROLL-X/Y, and passes them to
+render_vram (which already scrolls).
+
+VALIDATED three ways: (1) base stub byte-identical to committed blob; (2) both
+stubs executed on a real 65C02 (py65) -- $A5 leaves scroll 0, $A6 reads
+SCROLL-X/Y from WRAM $80/$81 ($37/$9C) and the checksum matches; (3) telemview
+--render on synthesized $A6 frames == direct render at that scroll, and !=
+origin. Only the HW-gated learn-mode (finding the addresses live) remains
+before scroll works on a real console; until then the renderer draws at origin
+(0,0) = raw framebuffer (a $A5 stub / no scrollhunt).
 
 ## Remaining build items
 - Firmware learn-mode (WRAM-write snoop + per-frame-once candidate reduction)
-  to feed scrollhunt; then runtime stub scroll-export + telemview scroll wire.
+  to feed scrollhunt -- the only remaining piece of the scroll story, HW-gated.
 - Phase 3b overlay firmware HW validation (dead-window finder + fetch
   substitution) — built + unit-tested; blocked on the SuperPico boot lottery.

@@ -33,14 +33,19 @@ def open_dev():
 def run_render(f, out_path, scale, palette, replay):
     """Generic-mirror mode: decode telem_stub.s frames, accumulate the 8 KB
     VRAM, and write a live PNG. Mailbox map (m[0] = $1F80):
-      m[1]=MAGIC $A5  m[2]=SEQ  m[3]=slice id  m[4]=JOYPAD
+      m[1]=MAGIC  m[2]=SEQ  m[3]=slice id  m[4]=JOYPAD
       m[5..36] = 32 VRAM bytes at $4000 + slice*32
-      m[0x7E]=CKSUM (sum of 32 payload + SEQ + JOYPAD)  m[0x7F]=COMMIT=slice
+      m[37]=SCROLL-X  m[38]=SCROLL-Y  ($A6 frames only)
+      m[0x7E]=CKSUM  m[0x7F]=COMMIT=slice
+    MAGIC $A5 = no scroll (CKSUM = sum(payload)+SEQ+JOYPAD); $A6 = scroll
+    exported (CKSUM also folds in SCROLL-X + SCROLL-Y), from a stub built
+    WITH_SCROLL after scrollhunt.py found the shadow-var addresses.
     """
     import svrender as sv
     vram = bytearray(sv.VRAM_BYTES)
     seen = [False] * 256                 # which 32-byte slices we have
     frames = valid = dup = malformed = 0
+    xs = ys = 0                          # latest scroll ($A6 frames only)
     last_seq = None
     last_write = 0
     t0 = time.time()
@@ -51,7 +56,7 @@ def run_render(f, out_path, scale, palette, replay):
         chunk = f.read(4096)
         if not chunk:
             if replay:
-                sv.write_png(out_path, sv.render_vram(vram, palette=palette), scale)
+                sv.write_png(out_path, sv.render_vram(vram, xs, ys, palette), scale)
                 filled = sum(seen)
                 print(f"\nreplay done: frames={frames} valid={valid} "
                       f"slices={filled}/256 -> wrote {out_path}")
@@ -83,9 +88,18 @@ def run_render(f, out_path, scale, palette, replay):
             last_seq = seq
             frames += 1
             slice_id = m[3]
-            ck = (sum(m[5:37]) + m[2] + m[4]) & 0xFF
-            if m[1] != 0xA5 or m[0x7F] != slice_id or ck != m[0x7E]:
+            # MAGIC selects format: $A5 = no scroll, $A6 = scroll at m[37]/m[38]
+            # (folded into the checksum).
+            if m[1] == 0xA6:
+                ck = (sum(m[5:37]) + m[2] + m[4] + m[37] + m[38]) & 0xFF
+            elif m[1] == 0xA5:
+                ck = (sum(m[5:37]) + m[2] + m[4]) & 0xFF
+            else:
+                continue                 # bad magic
+            if m[0x7F] != slice_id or ck != m[0x7E]:
                 continue                 # torn/incomplete frame -> drop
+            if m[1] == 0xA6:
+                xs, ys = m[37], m[38]
             valid += 1
             vram[slice_id * 32: slice_id * 32 + 32] = m[5:37]
             seen[slice_id] = True
@@ -95,7 +109,7 @@ def run_render(f, out_path, scale, palette, replay):
                 fps_mark, t0 = frames, now
             if now - last_write >= 0.25:     # ~4 Hz repaint
                 last_write = now
-                sv.write_png(out_path, sv.render_vram(vram, palette=palette), scale)
+                sv.write_png(out_path, sv.render_vram(vram, xs, ys, palette), scale)
             joy = m[4]
             btn = " ".join(n for i, n in enumerate(JOY) if not (joy >> i) & 1)
             filled = sum(seen)
