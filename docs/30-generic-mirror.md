@@ -170,6 +170,35 @@ Next HW run is now zero-fuss for the user: flash, boot the game, PLAY it a bit;
 the log shows `# LEARN: ... keep playing` then `# OVERLAY: ... ACTIVE` and
 frames start. No timing/keystrokes.
 
+## THE WALL (2026-08-16, HW-proven): packed ROMs have NO dead window
+
+Alien, played into a level, fetched `fixed-touched=16384/16378` -- 100% of its
+fixed bank (every byte, code AND data tables read via #RD). Result:
+`NO DEAD WINDOW >= 107 bytes : FAILED`. There is nowhere to hide the exporter.
+
+This is a HARD, inherent limit of the fetch-overlay, not a bug:
+- Partial coverage (attract only, Block Buster) -> finds a "dead" run that is
+  really unvisited LIVE code -> stub corrupts it (broke the START handler).
+- Full coverage (Alien) -> correctly finds ZERO dead space -> can't place the
+  stub at all.
+There is no safe middle: a commercial game uses ~all of its always-mapped
+fixed bank ($C000-$FFFF), so neither the in-place patcher nor the fetch-overlay
+(both need free fixed-bank bytes) can inject a resident NMI exporter.
+
+Directions for a fresh attempt (none free of cost; decide before building):
+1. Grow the ROM +1 bank for the exporter BODY, steal only a ~12-byte
+   bank-switch trampoline from the fixed bank placed over bytes classified as
+   GRAPHICS DATA (cosmetic tile glitch, game keeps running) -- needs a
+   code-vs-data classifier from the access pattern (contiguous sequential
+   reads = likely data copy; can't be told from #RD alone, so risky).
+2. NMI-handler HOOK: overwrite the game's existing NMI handler entry with a
+   jump to an added-bank stub that runs the stolen instructions then continues
+   -- game-specific, fiddly, still steals a few fixed-bank bytes.
+3. Reconsider the strategy entirely (temporal per-fetch overlay is barred by
+   the BOOT LAW: the serve loop must stay byte-identical, no per-fetch branch).
+The Mac side (renderer, scroll detect, protocol) is DONE and correct; the
+blocker is purely getting CPU-executed exporter code resident on a packed ROM.
+
 ## Remaining build items
 - Firmware learn-mode (WRAM-write snoop + per-frame-once candidate reduction)
   to feed scrollhunt -- the only remaining piece of the scroll story, HW-gated.
