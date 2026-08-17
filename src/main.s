@@ -11758,8 +11758,8 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
 @rows:
     lda tmpH3
     sta b_row
-    lda #10
-    sta b_col
+    lda #9                       ; the CENTRED climb (spr_x=76) erases tile cols
+    sta b_col                    ; 9..11 -- repaint from 9 (was 10, the x=80 era)
     stz b_i
 @cols:
     lda #$2D
