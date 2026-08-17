@@ -90,6 +90,7 @@
 
 ; --- ROCK $0C: hangs 174f, then falls 1px/f THROUGH terrain; gone at y>=168.
 ; Spiky: any contact hurts; star/ball have no effect ($3186: 00 00 FF 00 00) ---
+.ifndef YUR22                    ; 2-2 has no spiky ball -- reclaim the bytes
 .proc upd_rock
     lda o_tmr,x
     cmp #174
@@ -113,3 +114,4 @@
 @no:
     rts
 .endproc
+.endif

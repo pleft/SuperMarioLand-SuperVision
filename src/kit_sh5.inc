@@ -54,6 +54,7 @@
     rts
 .endproc
 
+.ifndef YUR22
 .proc draw_rock
     lda #ROCK_TL
     sta tmpL3
@@ -61,6 +62,7 @@
     sta tmpH3
     jmp l3_pair
 .endproc
+.endif
 
 .proc l3_pair                    ; tmpL3/tmpH3 = left/right tiles, at o_y+8
     ldx oi

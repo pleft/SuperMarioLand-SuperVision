@@ -84,6 +84,7 @@ vec_tab:
     bne :+
     lda #OBJ_SUU
     bra @go
+.ifndef YUR22                    ; 2-2 spawns no rock/honen (types nop'd there)
 :   cmp #$0C
     bne :+
     lda #OBJ_ROCK
@@ -92,6 +93,7 @@ vec_tab:
     bne :+
     lda #OBJ_HONEN
     bra @go
+.endif
 :   cmp #$24
     bne @consume
     lda #OBJ_LEAP
@@ -134,10 +136,13 @@ vec_tab:
     rts
 .endproc
 w2_updtab:
+.ifdef YUR22
+    .word w2_rts-1, upd_suu-1, w2_nop-1
+    .word w2_nop-1, upd_leap-1, w2_nop-1, w2_nop-1, upd_wball-1
+    .word upd_mek-1, upd_mhead-1, upd_msq-1, upd_mcorp-1
+.else
     .word w2_rts-1, upd_suu-1, upd_rock-1
     .word upd_honen-1, upd_leap-1, w2_nop-1, w2_nop-1, upd_wball-1
-.ifdef YUR22
-    .word upd_mek-1, upd_mhead-1, upd_msq-1, upd_mcorp-1
 .endif
 
 .proc w2_draw                    ; A = o_type (engine convention), X = slot
@@ -155,10 +160,13 @@ w2_updtab:
     rts
 .endproc
 w2_drwtab:
+.ifdef YUR22
+    .word w2_rts-1, draw_suu-1, w2_nop-1
+    .word w2_nop-1, draw_leap-1, w2_nop-1, w2_nop-1, draw_wball-1
+    .word draw_mek-1, draw_mhead-1, draw_msq-1, draw_mcorp-1
+.else
     .word w2_rts-1, draw_suu-1, draw_rock-1
     .word draw_honen-1, draw_leap-1, w2_nop-1, w2_nop-1, draw_wball-1
-.ifdef YUR22
-    .word draw_mek-1, draw_mhead-1, draw_msq-1, draw_mcorp-1
 .endif
 
 w2_rts:
@@ -327,6 +335,7 @@ w2_rts:
     rts
 .endproc
 
+.ifndef YUR22                    ; 2-2 has no Honen -- reclaim the bytes
 .proc upd_honen
     jsr l3_cull
     bcc :+
@@ -335,6 +344,7 @@ w2_rts:
     lda #$01                     ; class 0 = 100
     jmp w2_foe
 .endproc
+.endif
 
 .proc upd_leap                   ; YURARIN BOO: the mover's velocity low nibble
     jsr l3_cull                  ; is 0 -> NO x movement ever (GB $2879 masks
@@ -441,6 +451,7 @@ w2_rts:
 
 ; (pair16/quad16 live in the engine's RCODE now -- shared, RAM-resident)
 
+.ifndef YUR22
 .proc draw_honen                 ; 8x16 fishbone, flap frame
     ldx oi
     jsr foe_frame
@@ -451,6 +462,7 @@ w2_rts:
     dea
     jmp pair16
 .endproc
+.endif
 
 .proc draw_leap
     lda #LEAP_TA
@@ -592,14 +604,52 @@ w2_nop: rts                      ; dead dispatch rows (corpse types unused)
     rts
 :   lda o_st,x
     bne @hold
-    lda o_tmr,x                  ; SWIM ~120f at 1px/3f
+    lda o_tmr,x                  ; WALK 162f at 1px/3f (GB morph timestamps)
     inc o_tmr,x
-    cmp #120
+    cmp #162
     bcs @fire
     dec o_vy,x
     bne @coll
     lda #3
     sta o_vy,x
+    ; phys-$07 LEDGE TURN (user-confirmed on GB: walks to the platform edge
+    ; and turns back): probe the map tile under the LEADING foot; open -> flip.
+    lda o_hp,x
+    bmi @pl
+    lda #14                      ; leading edge, facing right
+    bra @ps
+@pl:
+    lda #1                       ; facing left
+@ps:
+    clc
+    adc o_xl,x
+    sta tmpL2
+    lda o_xh,x
+    adc #0
+    lsr
+    ror tmpL2
+    lsr
+    ror tmpL2
+    lsr
+    ror tmpL2                    ; /8 -> world tile column
+    sta feet_col+1
+    lda tmpL2
+    sta feet_col
+    lda o_y,x                    ; standing on row o_y/8 (on-top rule)
+    lsr
+    lsr
+    lsr
+    sta mrow
+    jsr read_solid
+    ldx oi                       ; (read_map_tile clobbers X; ldx also clobbers
+    lsr                          ;  the flags -- re-test A: solid=1 -> C)
+    bcs @step
+    lda o_hp,x                   ; ledge: turn around
+    eor #$FF
+    ina
+    sta o_hp,x
+    bra @coll
+@step:
     lda o_hp,x
     jsr x_step
     bra @coll
@@ -611,7 +661,7 @@ w2_nop: rts                      ; dead dispatch rows (corpse types unused)
 @hold:
     lda o_tmr,x
     inc o_tmr,x
-    cmp #120
+    cmp #121
     bcc @coll
     stz o_st,x
     stz o_tmr,x
@@ -645,46 +695,46 @@ mek_award:                       ; +100 tag at the victim, slot X
     sec
     sbc #8
     sta o_y,x
-    lda o_hp,y                   ; thrown along the parent's facing
-    sta o_hp,x
-    stz o_tmr,x
+    jsr aim_leap                 ; the throw aims AT MARIO (user-confirmed GB),
+    stz o_tmr,x                  ; not along the walk facing
+    stz o_st,x                   ; segment index
 @full:
     ldx oi
     rts
 .endproc
 
-.proc upd_mhead                  ; the thrown head: out-and-back ~120f loop
-    lda o_tmr,x                  ; (capture: rise 38px at 1px/f, glide out
-    inc o_tmr,x                  ; 0.5px/f to ~+40, then return 1px/f while
-    cmp #120                     ; descending 0.5px/f -- lands back on the
-    bcs @merge                   ; neck as the body regrows)
-    cmp #38
-    bcs @dsc
-    dec o_y,x                    ; rise
-    bra @dx
-@dsc:
-    lsr
-    bcs @dx
-    inc o_y,x                    ; descend 1px/2f
-@dx:
-    lda o_tmr,x
-    cmp #80
-    bcs @ret
-    lsr                          ; outbound 1px/2f along the throw
-    bcs @cc
-    lda o_hp,x
-    jsr x_step
-    bra @cc
-@ret:
-    lda o_hp,x                   ; the return leg: 1px/f back
+.proc upd_mhead                  ; the thrown head: the GB's OCTAGON, per-frame
+    ldy o_st,x                   ; capture verbatim (user: "more orthogonal"):
+    cpy #7                       ; rise23, up-out15, out15, down-out15, down8,
+    bcs @merge                   ; down-back15, pure-back30 -- 121f, lands on
+    lda mh_dy,y                  ; the neck as the body regrows
+    clc
+    adc o_y,x
+    sta o_y,x
+    lda mh_dx,y
+    beq @nod
+    ldy o_hp,x                   ; dx rides the throw direction
+    bpl @go
     eor #$FF
     ina
+@go:
     jsr x_step
+@nod:
+    inc o_tmr,x
+    ldy o_st,x
+    lda mh_len,y
+    cmp o_tmr,x
+    bne @cc
+    stz o_tmr,x
+    inc o_st,x
 @cc:
     jmp mek_popc
 @merge:
     stz o_type,x
     rts
+mh_len: .byte 23,15,15,15,8,15,30
+mh_dy:  .byte $FF,$FF,0,1,1,1,0
+mh_dx:  .byte 0,1,1,1,0,$FF,$FF
 .endproc
 
 .proc mek_popc                   ; the all-$FF contact row: touch hurts;
