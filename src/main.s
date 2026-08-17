@@ -6029,10 +6029,11 @@ ovl_width:  jmp (ovl_vec+10)     ; A = erase width for kit types
     jsr obj_alloc_typed
     bcs @full
     jsr spawn_tabx
-    lda spawn_tab+2,y            ; o_y = bin oy + 16 (platform top+8 convention; this
-    clc                          ; reproduces 1-1's traced o_y bounds 64..124 exactly)
-    adc #16
-    sta o_y,x
+    lda spawn_tab+2,y            ; o_y = bin oy DIRECTLY: drawn top = o_y+8 =
+    sta o_y,x                    ; GBslotY-16 (2026-08-17 2-1 slot capture: GB end
+                                 ; platforms patrol screen 64..124; the old +16 rode
+                                 ; them 16px too low -- top short of the barrels,
+                                 ; bottom inside the floor, user-reported)
     stz o_st,x                   ; offset 0 = at the spawn point,
     stz o_vy,x                   ; heading away (down / left)
     clc                          ; C=0: spawned
@@ -10426,6 +10427,90 @@ HUDSHADOW = $1D00                ; 16 rows x 40 bytes (stride 40), WRAM ($1D00-$
 
 ; (rc_ball_kit deleted: GB $3186 row +3 = $00 for the W2 kit foes -- the
 ; superball has NO effect on them, it just passes. Freed RCODE bytes.)
+
+; rc_wball_aim: aim slot X's fresh Yurarin Boo ball at Mario. GB capture
+; (docs/12): every shot flies a STRAIGHT LINE to Mario's launch position --
+; vx = 0.5 px/f fixed, vy = 0.5 * dy/dx (observed slopes -4..+1.56, all
+; self-consistent), max |vy| ~2 px/f. Bresenham state in the ball's slot:
+; o_vy = |dx| (>=1), o_hp = |dy| with bit7 = downward, o_st = accumulator
+; (seeded dx/2 for round-to-nearest).
+.proc rc_wball_aim
+    jsr mario_dx                 ; tmpH3:tmpL3 = |mario centre - ball x|
+    lda tmpH3
+    beq @small
+    lda #$FF                     ; far shooter: dx0 = 255
+    bra @gotdx
+@small:
+    lda tmpL3
+    bne @gotdx
+    lda #1                       ; dx0 >= 1
+@gotdx:
+    sta tmpH2                    ; dx0 scratch
+    lda spr_y
+    sec
+    sbc o_y,x
+    php                          ; C=1 -> Mario below -> aim down
+    bcs @shr
+    eor #$FF
+    ina
+@shr:                            ; scale the PAIR down so |dy| fits 7 bits
+    cmp #$80                     ; (halving both preserves the slope)
+    bcc @slope
+    lsr
+    lsr tmpH2
+    bne @shr
+    inc tmpH2                    ; dx0 floor 1
+    bra @shr
+@slope:
+    sta tmpL2
+    lda tmpH2                    ; slope cap <= 4 (vy <= 2 px/f, GB max seen)
+    cmp #$20                     ; dx0 >= 32: 127/32 < 4 anyway
+    bcs @ok
+    asl
+    asl                          ; 4*dx0 (fits: dx0 < 32)
+    cmp tmpL2
+    bcs @ok
+    sta tmpL2
+@ok:
+    lda tmpH2
+    sta o_vy,x                   ; dx0
+    lsr
+    sta o_st,x                   ; accumulator seed = dx0/2
+    plp
+    lda tmpL2
+    bcc :+
+    ora #$80                     ; downward flag
+:   sta o_hp,x
+    rts
+.endproc
+
+; rc_wball_move: one frame of GB ball motion for slot X (X preserved).
+.proc rc_wball_move
+    lda frame_count
+    lsr
+    bcs @done                    ; x advances on alternate frames = 0.5 px/f
+    lda o_vx,x
+    jsr x_step
+    lda o_hp,x
+    and #$7F
+    clc
+    adc o_st,x
+    sta o_st,x
+@w: lda o_st,x
+    cmp o_vy,x
+    bcc @done
+    sbc o_vy,x                   ; C is set
+    sta o_st,x
+    lda o_hp,x
+    bmi @dn
+    dec o_y,x
+    bra @w
+@dn:
+    inc o_y,x
+    bra @w
+@done:
+    rts
+.endproc
 
 .proc nmi_hud_copy
     phy

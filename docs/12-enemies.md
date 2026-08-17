@@ -493,3 +493,36 @@ Yurarin Boo -- nearly the only row where +3 != +4):
   $27 serves rows $2F/$30; $32 -> $4F.
 - Column +1 (Chibibo $11 / Noko $12 / Fly $15 / Gao $41 / Yurarin $19,
   $00 for the fliers) = the block-bonk morph.
+
+## RE: Mario contact geometry, ball motion, platform placement (2026-08-17)
+
+PyBoy sweeps + OAM dumps + the $0aaf disassembly, chasing the user's "seahorse
+is stiff" report. Several long-held conventions corrected:
+
+- **$c201 = Mario's Y, $c202 = Mario's X** (OAM-ish space) -- inverted from
+  every prior note. (Why "pin $c201" makes pinned-flight fly: it pins HEIGHT.)
+  Object slot +2 = Y (bottom-tile OAM y), +3 = X (verified by pinning a slot
+  and reading OAM).
+- **Hitbox codes (phys byte1, slot +$0A): low nibble = HEIGHT in 8px tiles
+  (box extends UP from slot y), high nibble = WIDTH (extends LEFT), bit7 =
+  ball-immune.** Resolves the old platform puzzle: $B1 = 24 WIDE x 8 tall.
+  Arrow $12 = 8 wide x 16 tall (a vertical dart). Ball $23 = $11 = 8x8.
+  Honen $12, Boo/Yurarin/fly/Gao $22 = 16x16.
+- **Mario's contact band is TINY** ($08c7 setup + empirical sweep, exact
+  match): Y in [c201-2 (big, non-duck; small c201) .. c201+6], X in
+  [c202-3 .. c202+2] -- a ~6px-wide strip. Sweep vs the Honen box: hurt
+  windows objY-c201 in [-8..+14], objX-c202 in [-10..+2], matching the
+  $0aaf math bit-exact.
+- **Yurarin Boo's ball: vx = 0.5 px/f fixed, PROPORTIONALLY AIMED** -- every
+  captured shot is a straight line to Mario's launch position (slopes -4..
+  +1.56 all self-consistent; vy up to 2 px/f observed). Fire interval = 162
+  frames, metronome-constant. Lifetime = until offscreen (275f observed).
+- **Platform placement was 16px too low in the port** (2-1 slot capture: end
+  V-platforms patrol screen 64..124; the port's spawn +16 rode them 80..140
+  -- top short of the barrel jump, bottom inside the floor, user-reported).
+  spawn_plat now uses the bin y directly (drawn = GBslotY-16); this also
+  moves the W1 platforms to the 1-1 trace's exact 56..116.
+
+PORT: rc_wball_aim/rc_wball_move (RCODE Bresenham: dx/dy pair-scaled, slope
+cap 4, x steps on alternate frames), wball_box = the GB-exact tiny band
+(X centre-dist < 7, o_y - spr_y in [-10..+6]), spawn_plat offset fix.

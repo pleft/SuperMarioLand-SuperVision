@@ -356,35 +356,17 @@ w2_rts:
     sta o_y,x
     lda o_hp,y                   ; x-dir = the shooter's facing (F0 $C0 aims
     sta o_vx,x                   ; both axes at Mario at init)
-    lda spr_y                    ; y-dir = toward Mario's height
-    cmp o_y,x
-    bcs :+
-    lda #$FF
-    bra :++
-:   lda #1
-:   sta o_hp,x
-    stz o_tmr,x
-    stz o_st,x
+    jsr rc_wball_aim             ; GB: straight line to Mario (engine RCODE)
 @full:
     ldx oi
     rts
 .endproc
 
-; the ball: x 1px/f, y 1px every OTHER frame (script vel $12 nibbles at
-; divider 1 = half tick rate), no gravity; ANY contact hurts (a projectile).
+; the ball: GB-captured motion -- x 0.5px/f, y = the aimed Bresenham slope
+; (rc_wball_move), no gravity, lives until it leaves the screen; ANY contact
+; hurts (a projectile).
 .proc upd_wball
-    inc o_tmr,x
-    lda o_vx,x
-    jsr x_step
-
-    lda o_tmr,x
-    and #1
-    beq @clip
-    lda o_y,x
-    clc
-    adc o_hp,x
-    sta o_y,x
-@clip:
+    jsr rc_wball_move
     lda o_y,x
     cmp #16
     bcc @gone
@@ -393,9 +375,7 @@ w2_rts:
     jsr l3_cull                  ; camera passed it
     bcc :+
     rts
-:   lda o_tmr,x                  ; ~4s lifetime (GB: 165 ticks at half rate)
-    beq @gone
-    jsr wball_box                ; a projectile: any touch hurts (tight 8px box)
+:   jsr wball_box                ; a projectile: any touch hurts (tight 8px box)
     bcs @hit
     rts
 @hit:
@@ -420,26 +400,23 @@ w2_rts:
     jmp draw_quad
 .endproc
 
-; Tight AABB for the 8px ball vs Mario -- l3_box (kit, +/-14 tall) is sized for
-; the full-16px kit enemies and hits ~8px above/below this projectile. The ball's
-; visual box is o_y+8..o_y+16; overlap with Mario's 16px box (spr_y..+16) is
-; o_y-8 < spr_y < o_y+16, i.e. |spr_y - (o_y+4)| < 12. X within 9 (8px ball).
+; GB-EXACT ball-vs-Mario box (2026-08-17 PyBoy sweep + $0aaf RE, docs/12):
+; Mario's contact band is tiny -- X: a ~6px strip ([c202-3..c202+2]), Y:
+; [c201-2..c201+6] -- vs the ball's own 8x8 tile. Translated to port coords:
+; X: |mario_dx| < 7 (centre distance); Y: o_y - spr_y in [-10..+6].
 .proc wball_box                  ; C=1 -> touching
     jsr mario_dx
     lda tmpH3
     bne @no
     lda tmpL3
-    cmp #9
+    cmp #7
     bcs @no
-    lda spr_y
+    lda o_y,x
     sec
-    sbc o_y,x
-    sec
-    sbc #4
-    bpl :+
-    eor #$FF
-    ina
-:   cmp #12
+    sbc spr_y
+    clc
+    adc #10
+    cmp #17
     bcs @no
     sec
     rts

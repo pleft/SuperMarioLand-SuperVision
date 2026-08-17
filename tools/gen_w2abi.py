@@ -35,7 +35,7 @@ NEED = [
     # sfx
     "sfx_play",
     # shared-kit dependencies (the kit_sh*.inc bodies)
-    "mario_dx", "tmpL3", "mario_starT", "award_kill", "l3_above", "hurt_mario",
+    "mario_dx", "rc_wball_aim", "rc_wball_move", "tmpL3", "mario_starT", "award_kill", "l3_above", "hurt_mario",
     "ride", "carry_y_up", "spawn_item_snd", "obj_set_x8", "mrow", "spr_col", "mark_used",
     # kit constants live in code, not symbols -- redefined in w2code.s
 ]
