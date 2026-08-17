@@ -3560,13 +3560,14 @@ music_data:
     lda #MUS_GOVER               ; the game-over tune (GB: the strip copier writes
     jsr mus_start                ; $dfe8=$10 as the text lands; user-caught silence)
     lda #143                     ; trace: the strip rises WY 143 -> 64 at 1px/frame over the
-    sta tmpH3                    ; FROZEN game screen, then holds ~256 frames, then exits
+    sta b_awt                    ; FROZEN screen, hold ~256f. NOT tmpH3/L3: the
+                                 ; music player scratches tmpH3 every tick
 @anim:
     jsr @wait1
-    dec tmpH3                    ; the strip rises 1px; the new OPAQUE draw covers all of the
+    dec b_awt                    ; the strip rises 1px; the new OPAQUE draw covers all of the
     lda scroll_s                 ; old image except its bottom 1px sliver -> restore only the
     sta rb_vx                    ; single tile row containing it (screen-anchored, like PAUSE)
-    lda tmpH3
+    lda b_awt
     clc
     adc #8
     sta rb_y
@@ -3576,14 +3577,14 @@ music_data:
     sta rb_rows
     jsr restore_bg
     jsr @text                    ; draw the 17 glyphs at the new pixel Y
-    lda tmpH3
+    lda b_awt
     cmp #64
     bne @anim
     lda #255                     ; hold
-    sta tmpL3
+    sta b_gap
 @hold:
     jsr @wait1
-    dec tmpL3
+    dec b_gap
     bne @hold
     jmp reset
 @wait1:
@@ -3605,7 +3606,7 @@ music_data:
     clc
     adc dcol
     sta dcol
-    lda tmpH3
+    lda b_awt
     sta dy
     jsr set_dst
     ldx b_i
