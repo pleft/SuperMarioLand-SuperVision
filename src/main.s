@@ -6350,13 +6350,9 @@ ovl_width:  jmp (ovl_vec+10)     ; A = erase width for kit types
     ina
 :   cmp #14
     bcs @done
-    lda mario_starT              ; star: the arrow just dies (+100, class-0 like walkers)
-    beq @hurt
-    stz o_type,x
-    lda #$01
-    jmp award_kill
-@hurt:
-    jmp hurt_mario
+    lda mario_starT              ; star: the arrow passes with NO effect (GB
+    bne @done                    ; $3186[$45] star col = $00 -- no kill, no hurt;
+    jmp hurt_mario               ; the old star-kill +100 was an early guess)
 @done:
     rts
 .endproc
