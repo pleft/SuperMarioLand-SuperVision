@@ -1032,14 +1032,14 @@ main_loop:
     lda mario_big
     bne @flower
     lda #OBJ_MUSH
-    jsr spawn_walker
-    rts
+    jmp spawn_walker
+; (tail call)
 @flower:
     jmp spawn_flower
 @heart:
     lda #OBJ_HEART               ; walks exactly like the mushroom (types $2A/$2B == $28/$29)
-    jsr spawn_walker
-    rts
+    jmp spawn_walker
+; (tail call)
 @star:
     jmp spawn_star
 @gift:
@@ -1070,8 +1070,8 @@ main_loop:
     sta wcol
     lda feet_col+1
     sta wcol+1
-    jsr redraw_one
-    rts
+    jmp redraw_one
+; (tail call)
 .endproc
 
 ; find_block: search the contents table for (feet_col, mrow). Returns C=1 + A=value if listed,
@@ -1165,8 +1165,8 @@ main_loop:
     sta mrow
     jsr try_coin
     inc mrow                     ; body bottom row
-    jsr try_coin
-    rts
+    jmp try_coin
+; (tail call)
 .endproc
 
 .proc try_coin                   ; caller sets mrow; tests Mario's centre column at that row
@@ -1238,8 +1238,8 @@ main_loop:
     jsr spawn_debris4            ; burst into 4 shards (2 arcs x 2 directions)
     lda #$50                     ; +50 points
     ldx #$00
-    jsr add_score
-    rts
+    jmp add_score
+; (tail call)
 .endproc
 
 ; add_score: add a BCD amount (A = ones/tens byte, X = hundreds/thousands byte) to the
@@ -1680,8 +1680,8 @@ no:
     jsr draw_player              ; place Mario at the start
     lda #3                       ; 64Hz driver (GB: TMA=0 at level init)
     sta mus_rate
-    jsr lvl_music                ; per-level tune (GB table $07CE)
-    rts
+    jmp lvl_music  ; per-level tune (GB table $07CE)
+; (tail call)
 .endproc
 
 ; ---------------------------------------------------------------------------
@@ -2223,8 +2223,8 @@ quad_rows: .byte 0, 0, 8, 8
     stz e_hop
     lda #56                      ; first rest (captured)
     sta e_tmr
-    jsr l3e_moth_draw
-    rts
+    jmp l3e_moth_draw
+; (tail call)
 .endproc
 
 ; --- E_FLY: rest 40f, then a 56f parabolic hop (+2px/2f right, y arc), repeat
@@ -3417,8 +3417,8 @@ moth_tiles: .incbin "../build/gfx/moth.svt"
 @dormant:
     stz mus_pos+1,x
     stz mus_vol,x
-    jsr musn_wr
-    rts
+    jmp musn_wr
+; (tail call)
 @end:
     jmp mus_stop                 ; whole-song stop ($6CB1)
 @incp:
@@ -3592,8 +3592,8 @@ music_data:
     beq @wait1
     stz frame_flag
     jsr sfx_tick
-    jsr mus_tick
-    rts
+    jmp mus_tick
+; (tail call)
 @text:
     stz b_i
 @t:
@@ -3717,8 +3717,8 @@ NUM_LEVELS = 6
     jsr draw_player
     lda #3                       ; 64Hz driver (GB: TMA=0 at level init)
     sta mus_rate
-    jsr lvl_music                ; per-level tune (GB table $07CE)
-    rts
+    jmp lvl_music  ; per-level tune (GB table $07CE)
+; (tail call)
 .endproc
 
 ; ---------------------------------------------------------------------------
@@ -3939,8 +3939,8 @@ NUM_LEVELS = 6
     asl
     sta dy
     jsr set_dst
-    jsr blit_tile
-    rts
+    jmp blit_tile
+; (tail call)
 .endproc
 
 .proc redraw_pipe_front
@@ -4244,8 +4244,8 @@ TIMER_RATE = 40                  ; frames per clock unit (SML's $da00 sub-counte
     inx
     pla
     and #$0f
-    jsr put_hud
-    rts
+    jmp put_hud
+; (tail call)
 .endproc
 
 ; draw_hud: refresh score (row1 cols 0-5), coins (row0 cols 6-7), time (row1 cols 17-19).
@@ -4344,8 +4344,8 @@ TIMER_RATE = 40                  ; frames per clock unit (SML's $da00 sub-counte
 
 ; hud_init: set the clock to 400 and a fresh sub-counter (boot + level restart).
 .proc hud_init
-    lda #$00
-    sta timer
+; (stz'd) lda #$00
+    stz timer
     lda #$04
     sta timer+1
     lda #TIMER_RATE
@@ -5386,8 +5386,8 @@ STAR_ARC_N = 42
     jsr spawn_debris1
     lda #1                       ; right, low arc
     ldy #DEBRIS_LO
-    jsr spawn_debris1
-    rts
+    jmp spawn_debris1
+; (tail call)
 .endproc
 
 .proc spawn_debris1              ; A = vx (+1/-1), Y = jump-arc start index
@@ -5668,7 +5668,16 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     inc o_xh,x
 :   jsr riding_this
     bne :+
+    lda spr_x                    ; carried past the pin: push the CAMERA, not
+    cmp #PIN_X+1                 ; spr_x -- rides used to shove Mario way past
+    bcc @mv                      ; PIN_X and the next walk step dumped ALL the
+    inc cam_x                    ; excess into cam at once = the user's "rough
+    bne @rr                      ; transition" on the 2-1 platform rides.
+    inc cam_x+1                  ; (no cam_max guard: no H-plat rides exist at
+    bra @rr                      ;  any level end; streaming guards past-width)
+@mv:
     inc spr_x
+@rr:
 :   ldx oi
     dec o_st,x
     bne @done
@@ -9089,8 +9098,8 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     sta dy
     lda o_st,x
     tax
-    jsr draw_quad
-    rts
+    jmp draw_quad
+; (tail call)
 @bounce:
     lda spr_col                  ; the hopping block: its pre-bonk tile rides in o_vx
     sta dcol
@@ -9101,8 +9110,8 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     sta dy
     lda o_vx,x
     tax
-    jsr draw_quad
-    rts
+    jmp draw_quad
+; (tail call)
 @plat:
     ldx oi                       ; platform: 3x tile $EF side by side (24px)
     lda o_y,x
@@ -9134,8 +9143,8 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     adc #8
     sta dy
     ldx #PLAT_TILE
-    jsr draw_quad
-    rts
+    jmp draw_quad
+; (tail call)
 .endproc
 
 ; ---------------------------------------------------------------------------
@@ -9400,8 +9409,8 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     adc #8
     sta dy
     ldx #STONE_T
-    jsr draw_quad
-    rts
+    jmp draw_quad
+; (tail call)
 .endproc
 .segment "L12"
 .proc draw_cbunbun
@@ -9457,8 +9466,8 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     adc #8
     sta dy
     ldx #ARROW_B
-    jsr draw_quad
-    rts
+    jmp draw_quad
+; (tail call)
 .endproc
 .segment "CODE"
 
@@ -9501,8 +9510,8 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
 @idle:
     stz walk_t                   ; walking restarts the cycle at metasprite 1
     stz walk_i
-    lda #0                       ; stand
-    sta mario_frame
+; (stz'd) lda #0                       ; stand
+    stz mario_frame
     rts
 wcyc: .byte 2, 5, 1              ; port pose ids for GB metasprites 1, 2, 3
 .endproc
@@ -9545,8 +9554,8 @@ wcyc: .byte 2, 5, 1              ; port pose ids for GB metasprites 1, 2, 3
     sta src_ptr+1
     jsr set_dst
     stz blit_opaque              ; Mario is transparent (GB colour 0 = see-through)
-    jsr sprite_blit_subpx
-    rts
+    jmp sprite_blit_subpx
+; (tail call)
 .endproc
 
 ; set_dst: dst_ptr = $4000 + ((ring_b + dy*48 + dcol) mod $1FE0) — the window
@@ -11449,8 +11458,8 @@ water_alt: .incbin "build/gfx/water_alt.svt"   ; tile $5D, high plane = ROM $3fc
     jsr set_dst
     pla
     jsr get_tile_src
-    jsr blit_tile
-    rts
+    jmp blit_tile
+; (tail call)
 .endproc
 
 .proc bput_run                   ; A = tile, X = count: blit a horizontal run from b_col
@@ -11678,8 +11687,8 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
     sta b_ladder
     ldy #0                       ; first ladder visible at gap 0
     lda #0
-    jsr b_ladder_cell
-    rts
+    jmp b_ladder_cell
+; (tail call)
 @txt: .byte $0B,$18,$17,$1E,$1C,$2C,$10,$0A,$16,$0E   ; "BONUS GAME" (font; $2C = space)
 .endproc
 
@@ -11934,8 +11943,8 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
     and #3
     sta b_floor
     jsr b_sety
-    jsr draw_player
-    rts
+    jmp draw_player
+; (tail call)
 @walk:
     jsr b_erase                  ; walk right 1px/frame to the pedestal (x=128)
     jsr b_fixfloor               ; repaint the floor bricks he just passed over
@@ -12106,8 +12115,8 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
     inc mario_big                ; flash done -> big (superball was granted at the trigger)
 :   jsr b_erase
     jsr b_fixfloor
-    jsr draw_player
-    rts
+    jmp draw_player
+; (tail call)
 @ftimer:
     dec b_awt
     bne @adone2
