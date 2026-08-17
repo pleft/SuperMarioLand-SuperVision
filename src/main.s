@@ -603,7 +603,7 @@ main_loop:
     ora e_own
     beq :+
     jsr calc_view
-    jmp @skiprender
+    bra @skiprender
 :   jsr scroll_apply             ; shift decision + origin advance + fb_col0 + scroll_s,
     jsr calc_view                ; ALL at frame start: coords and the view registers
                                  ; mutate together; the logic phase sees coherent state
@@ -703,7 +703,7 @@ main_loop:
     lda #90
     sta hurt_inv
 @shf:
-    jmp @play
+    bra @play
 :   lda mario_grow               ; small->big grow running? freeze the action, just flash
     bne @growing
     lda mc_tmr                   ; multi-coin window ticks every frame ($c0ce)
@@ -1394,11 +1394,15 @@ no:
     bcs :+                        ; NO ceiling at the HUD (original: Mario rises behind it);
     lda #0                        ; clamp only at 0 so spr_y can't wrap
 :   sta tmpH                      ; tentative new spr_y -> head-bonk test first
-    lsr
+    ldy mario_big                 ; SMALL Mario = a 12px box: his head sits 4px
+    bne :+                        ; lower, so he rises 4px further under a ceiling
+    clc                           ; (GB: jump-squeezing into the 2-2 corridors
+    adc #4                        ; left-to-right, user-caught; wall_ahead already
+:   lsr                           ; has the matching top-row skip)
     lsr
     lsr
     sec
-    sbc #2                        ; head row = (new spr_y >> 3) - 2 (tile at his head)
+    sbc #2                        ; head row = (head y >> 3) - 2 (tile at his head)
     sta mrow
     jsr read_map_tile             ; effective tile above his head (centre column)
     cmp #$5F                      ; $5F = INVISIBLE block (see @hidden below)
@@ -1447,7 +1451,7 @@ no:
     sta jump_state
     lda #1
     sta fall_v
-    jmp @done
+    bra @done
 @hidden:
     jsr find_block                ; hidden blocks bonk ONLY when the contents table
     bcs @qblock                   ; lists them (GB $187b: content 0 -> plain ret, the
@@ -1456,13 +1460,13 @@ no:
     lda tmpH                      ; clear -> apply the upward move
     sta spr_y
     inc arc_idx
-    jmp @done
+    bra @done
 @apex:
     lda #2
     sta jump_state
     dec arc_idx
     stz fall_v                    ; jump descent follows the arc
-    jmp @done
+    bra @done
 @fall:
     lda fall_v
     bne @freefall                 ; free-fall: constant +3/frame
@@ -2962,7 +2966,7 @@ moth_tiles: .incbin "../build/gfx/moth.svt"
     lda (mus_lt),y
     ldy tmpH3
     sta mus_len,x
-    jmp @cell
+    bra @cell
 @inst:
     lda (mus_pos,x)              ; param 0 = GB NRx2 envelope
     sta mus_env,x
@@ -4081,12 +4085,12 @@ NUM_LEVELS = 6
     lda rj
     cmp rb_rows
     beq :+
-    jmp @rloop
+    bra @rloop
 :   inc ri
     lda ri
     cmp rb_cols
     beq :+
-    jmp @cloop
+    bra @cloop
 :   rts
 .endproc
 
@@ -4476,7 +4480,7 @@ PIN_X   = 64
     lda pad_held
     and #GB_RIGHT
     beq :+
-    jmp @right
+    bra @right
 :   lda pad_held
     and #GB_LEFT
     beq :+
@@ -4488,7 +4492,7 @@ PIN_X   = 64
     lda mdir
     cmp #1
     bne :+
-    jmp @rmove
+    bra @rmove
 :   cmp #2
     bne :+
     jmp @lmove
@@ -6219,7 +6223,7 @@ ovl_width:  jmp (ovl_vec+10)     ; A = erase width for kit types
     cmp #OBJ_GIFT
     bcc :+
     jsr l3_bonk                  ; 1-3 kit: per-type bonk outcome
-    jmp @next
+    bra @next
 :
     lda #$01                     ; kill value by class (star/ball convention):
     sta tmpH3                    ; walkers 100, fly 400, bunbun 800
@@ -8064,7 +8068,7 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     lda o_y,x
     adc #2
     sta o_y,x
-    jmp @consume
+    bra @consume
 @grounded:
     ldx oi                       ; snap to the floor tile top
     lda mrow
@@ -8112,7 +8116,7 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     eor #$FF
     ina
     sta o_vx,x
-    jmp @consume
+    bra @consume
 @wmove:
     jsr mush_xmove
 @consume:
@@ -9713,7 +9717,7 @@ hf_n1:       .res 1
     sta shtab_hi+768,x
     inx
     beq @done
-    jmp @b
+    bra @b
 @done:
     rts
 .endproc
@@ -9965,7 +9969,7 @@ hf_n1:       .res 1
 :   jsr ring_next_cur            ; dst += stride, ring-wrapped (docs/27)
 :   dec blit_row
     beq @out
-    jmp @row
+    bra @row
 @out:
     rts
 .endproc
@@ -11426,7 +11430,7 @@ water_alt: .incbin "build/gfx/water_alt.svt"   ; tile $5D, high plane = ROM $3fc
     lda w_row
     cmp #7
     beq :+
-    jmp @row
+    bra @row
 :   inc w_i
     lda w_i
     cmp #24
@@ -11819,7 +11823,7 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
     lda bonus_phase
     cmp #2
     bne :+
-    jmp @play
+    bra @play
 :   cmp #3
     bne :+
     jmp @walk
@@ -12016,7 +12020,7 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
     lda bonus_phase
     cmp #5
     bne :+
-    jmp @wback
+    bra @wback
 :   cmp #10
     bne :+
     jmp @flowert
@@ -12120,7 +12124,7 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
 @ftimer:
     dec b_awt
     bne @adone2
-    jmp @exit
+    bra @exit
 @adone2:
     rts
 @exit:
