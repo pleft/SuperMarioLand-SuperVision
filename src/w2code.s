@@ -29,6 +29,10 @@ OBJ_HCORP  = 33                  ; their ball/stomp corpses (dead-flip hop+fall)
 OBJ_LCORP  = 34
 OBJ_WBALL  = 35                  ; Yurarin Boo's shot: tile $E2 (the common
                                  ; fireball), aimed at Mario once at launch
+OBJ_YUR    = 36                  ; $16 YURARIN (2-2 only): swims, blows a child
+OBJ_YCH    = 37                  ; $17: the rising baby seahorse
+OBJ_YSQ    = 38                  ; $1C: the stomped squash (harmless, ~93f)
+OBJ_YCORP  = 39                  ; $19/$0D: the dead-flip fall
 SUU_TA  = $92
 ROCK_TL = $DD
 GAO_TL  = $A4
@@ -38,6 +42,11 @@ GIFT_T  = $E6
 ; PORT tile ids (the packer's compact slice; GB sources in pack_banks.py):
 LEAP_TA = $A4                    ; 16x16 quad: TL,TR,BL,BR; frame B = +4
 HON_TA  = $AC                    ; 8x16: top,bottom; frame B = +2
+.ifdef YUR22                     ; 2-2's extra slice (pack_banks level 4)
+YUR_TA  = $B0                    ; swim quad A $B0-$B3 (GB C4,C5,D4,D5), B +4
+YCH_T   = $B4                    ; child 16x8 = the frame-B top row (GB C6,C7)
+YSQ_T   = $B8                    ; squash/corpse 16x8 (GB D8,D9)
+.endif
 
 .segment "W2C"
 
@@ -59,6 +68,19 @@ vec_tab:
                                  ; re-bonk = the content-0 "nothing" case.
 
 .proc w2_spawn                   ; A = GB type, Y = spawn entry byte offset
+.ifdef YUR22
+    cmp #$16
+    bne @not16
+    lda #OBJ_YUR
+    jsr @go
+    bcs @full
+    jsr aim_leap                 ; face Mario (script F0 $40 at cycle start)
+    lda #3
+    sta o_vy,x                   ; swim step divider (1px/3f, capture)
+    clc
+    rts
+@not16:
+.endif
     cmp #$02
     bne :+
     lda #OBJ_SUU
@@ -115,6 +137,9 @@ vec_tab:
 w2_updtab:
     .word w2_rts-1, upd_suu-1, upd_rock-1
     .word upd_honen-1, upd_leap-1, w2_nop-1, w2_nop-1, upd_wball-1
+.ifdef YUR22
+    .word upd_yur-1, upd_ych-1, upd_ysq-1, upd_ycorp-1
+.endif
 
 .proc w2_draw                    ; A = o_type (engine convention), X = slot
     sec
@@ -133,6 +158,9 @@ w2_updtab:
 w2_drwtab:
     .word w2_rts-1, draw_suu-1, draw_rock-1
     .word draw_honen-1, draw_leap-1, w2_nop-1, w2_nop-1, draw_wball-1
+.ifdef YUR22
+    .word draw_yur-1, draw_ych-1, draw_ysq-1, draw_ycorp-1
+.endif
 
 w2_rts:
     rts
@@ -425,13 +453,18 @@ w2_rts:
     jmp pair16
 .endproc
 
-.proc draw_leap                  ; 16x16 seahorse: flap frame + TRUE mirror when
-    ldx oi                       ; facing right (GB OAM: columns swapped AND each
-    jsr foe_frame                ; tile x-flipped; tiles face left natively)
+.proc draw_leap
+    lda #LEAP_TA
+    ; falls through
+.endproc
+.proc draw_16q                   ; A = frame-A TL tile: 16x16 flap quad + TRUE
+    sta tmpH3                    ; mirror when facing right (GB OAM: columns
+    ldx oi                       ; swapped AND each tile x-flipped; tiles face
+    jsr foe_frame                ; left natively)
     asl
     asl
     clc
-    adc #LEAP_TA
+    adc tmpH3
     sta tmpH3                    ; this flap frame's TL tile
     lda o_hp,x                   ; facing: +1 = Mario is right -> mirror
     and #$80
@@ -484,6 +517,10 @@ w2_nop: rts                      ; dead dispatch rows (corpse types unused)
     beq @flap
     cmp #OBJ_LEAP
     beq @flap
+.ifdef YUR22
+    cmp #OBJ_YUR
+    beq @flap
+.endif
     lda #0                       ; gift/rock/corpses: position-only redraws
     rts
 @flap:
@@ -495,6 +532,17 @@ w2_nop: rts                      ; dead dispatch rows (corpse types unused)
 .endproc
 
 .proc w2_width                   ; erase widths (W2 roster only)
+.ifdef YUR22
+    cpy #OBJ_YUR
+    beq @w83
+    cpy #OBJ_YCH
+    bcc @wbase
+    cpy #OBJ_YCORP+1
+    bcs @wbase
+    lda #3                       ; child/squash/corpse: 16 wide, 8 tall
+    rts
+@wbase:
+.endif
     cpy #OBJ_SUU
     beq @w82
     cpy #OBJ_HONEN
@@ -520,6 +568,325 @@ w2_nop: rts                      ; dead dispatch rows (corpse types unused)
     lda #$82                     ; suu/honen/hcorp: 8 wide, 16 tall
     rts
 .endproc
+
+.ifdef YUR22
+; ---------------------------------------------------------------------------
+; YURARIN $16 (2-2), fully GB-captured (docs/12): swims horizontally 1px/3f
+; facing Mario for ~120f (flap C4..C7/D4..D7), then spawns the child $17
+; 8px above and HOLDS ~120f ($18), then re-faces and swims again. Stomp ->
+; $1C squash (harmless, ~93f static) -> the dead-flip fall ($19/$0D: the
+; 23-delta hop arc, squash tiles Y-FLIPPED, drift away, ~2px/f fall).
+; Ball/star kill -> the same corpse chain (unlike Boo/Honen, Yurarin IS
+; superball-killable: $3186[$16]+3 = $19). Child: any contact pops it
+; ($3186[$17] all $FF): touch hurts, stomp/ball/star despawn it.
+
+.proc upd_yur
+    jsr l3_cull
+    bcc :+
+    rts
+:   jsr yur_ballhit
+    bcc @noball
+    lda #0
+    sta o_type,y                 ; the ball expires against it
+    jsr yur_corpse
+    jmp yur_award
+@noball:
+    lda o_st,x
+    bne @hold
+    lda o_tmr,x                  ; SWIM ~120f at 1px/3f
+    inc o_tmr,x
+    cmp #120
+    bcs @fire
+    dec o_vy,x
+    bne @coll
+    lda #3
+    sta o_vy,x
+    lda o_hp,x
+    jsr x_step
+    bra @coll
+@fire:
+    jsr yur_fire                 ; blow the child, then hold ($18)
+    ldx oi
+    lda #1
+    sta o_st,x
+    stz o_tmr,x
+    bra @coll
+@hold:
+    lda o_tmr,x
+    inc o_tmr,x
+    cmp #120
+    bcc @coll
+    stz o_st,x
+    stz o_tmr,x
+    jsr aim_leap                 ; re-face for the new swim (F0 $40)
+@coll:
+    jmp yur_contact
+.endproc
+
+yur_award:                       ; +100 tag at the victim, slot X
+    ldx oi
+    jsr victim_xy
+    lda o_y,x
+    sta tmpH3
+    lda #$01
+    jmp award_kill_at
+
+.proc yur_fire                   ; child $17: 16x8, 8px above the mouth
+    lda #OBJ_YCH
+    jsr obj_alloc_typed
+    bcs @full
+    stz o_pdr,x
+    ldy oi
+    lda o_xl,y
+    sta o_xl,x
+    lda o_xh,y
+    sta o_xh,x
+    lda o_y,y
+    sec
+    sbc #8
+    sta o_y,x
+    lda o_hp,y                   ; drifts along the parent's facing
+    sta o_hp,x
+    stz o_tmr,x
+    stz o_st,x
+@full:
+    ldx oi
+    rts
+.endproc
+
+.proc upd_ych                    ; rises 1px/4f, drifts 0.5px/f (capture)
+    lda o_tmr,x
+    inc o_tmr,x
+    and #3
+    bne :+
+    dec o_y,x
+:   lda o_tmr,x
+    lsr
+    bcs :+
+    lda o_hp,x
+    jsr x_step
+:   lda o_y,x
+    cmp #16
+    bcc @gone
+    jsr l3_cull
+    bcc :+
+    rts
+:   jsr yur_ballhit
+    bcc @nob
+    lda #0
+    sta o_type,y                 ; ball pops it ($FF despawn)
+    bra @pop
+@nob:
+    jsr l3_box
+    bcs @touch
+    rts
+@touch:
+    lda mario_starT
+    bne @pop                     ; star: pops silently (+100)
+    jsr l3_above
+    bcc @stomp
+    jmp hurt_mario
+@stomp:
+    lda #1                       ; stomp: pop + the fixed bounce
+    sta jump_state
+    lda #14
+    sta arc_idx
+    stz fall_v
+    stz ride
+@pop:
+    jsr yur_award
+    ldx oi
+@gone:
+    stz o_type,x
+    rts
+.endproc
+
+.proc yur_contact                ; the parent's $3186 row: 1c/19/ff/19/19
+    jsr l3_box
+    bcs :+
+    rts
+:   ldx oi
+    lda mario_starT
+    bne @kill                    ; star -> the corpse chain (col +4 = $19)
+    jsr l3_above
+    bcc @stomp
+    jmp hurt_mario
+@stomp:
+    lda #OBJ_YSQ                 ; -> $1C: harmless squash, ~93f static
+    sta o_type,x
+    stz o_tmr,x
+    lda #1                       ; the fixed stomp bounce (RE $08C7)
+    sta jump_state
+    lda #14
+    sta arc_idx
+    stz fall_v
+    stz ride
+    lda #$01
+    jmp award_stomp
+@kill:
+    jsr yur_corpse
+    jmp yur_award
+.endproc
+
+.proc yur_corpse                 ; -> the dead-flip fall, thrown away from Mario
+    ldx oi
+    lda #OBJ_YCORP
+    sta o_type,x
+    stz o_st,x
+    lda o_hp,x                   ; o_hp faces Mario -> drift the OTHER way
+    eor #$FF
+    ina
+    sta o_vx,x
+    rts
+.endproc
+
+.proc upd_ysq                    ; $1C: static, harmless, ~93f -> the fall
+    jsr l3_cull
+    bcc :+
+    rts
+:   lda o_tmr,x
+    inc o_tmr,x
+    cmp #93
+    bcc :+
+    jsr yur_corpse
+:   rts
+.endproc
+
+.proc upd_ycorp                  ; the captured hop arc, then 2px/f off-screen
+    lda o_st,x
+    cmp #23
+    bcs @fall
+    tay
+    lda yc_dy,y
+    clc
+    adc o_y,x
+    sta o_y,x
+    inc o_st,x
+    bra @drift
+@fall:
+    lda o_y,x
+    ina
+    ina
+    sta o_y,x
+@drift:
+    lda frame_count              ; sideways ~0.5px/f throughout (capture +23/63f)
+    lsr
+    bcs @clip
+    lda o_vx,x
+    jsr x_step
+@clip:
+    lda o_y,x
+    cmp #160
+    bcc :+
+    stz o_type,x                 ; off the bottom -> gone
+:   rts
+.endproc
+yc_dy:                           ; kill_flip's captured trajectory, verbatim
+    .byte $FF,$FF,$FF,$FF,$FF,$00,$FF,$00,$FF,$00,$00,$00,$00
+    .byte $01,$00,$01,$00,$01,$01,$01,$01,$01,$01
+
+.proc yur_ballhit                ; C=1: the superball overlaps slot oi (Y=ball)
+    ldy #9
+@s: lda o_type,y
+    cmp #4                       ; engine OBJ_BALL
+    beq @got
+    dey
+    bpl @s
+    clc
+    rts
+@got:
+    lda o_xl,y
+    sec
+    sbc o_xl,x
+    sta tmpL2
+    lda o_xh,y
+    sbc o_xh,x
+    beq @pos
+    cmp #$FF
+    bne @no
+    lda tmpL2
+    cmp #$F8                     ; -8..-1
+    bcc @no
+    bra @dy
+@pos:
+    lda tmpL2
+    cmp #10
+    bcs @no
+@dy:
+    lda o_y,y
+    sec
+    sbc o_y,x
+    clc
+    adc #12
+    cmp #25
+    bcs @no
+    sec
+    rts
+@no:
+    clc
+    rts
+.endproc
+
+draw_yur:                        ; 16x16 swim quad = the shared flap+mirror loop
+    lda #YUR_TA
+    jmp draw_16q
+
+.proc yur_pair                   ; A = left tile; a 16x8 pair at o_y+8
+    sta tmpH3
+    ldx oi
+    lda o_y,x
+    clc
+    adc #8
+    sta dy
+    lda spr_col
+    sta dcol
+    ldx tmpH3
+    jsr draw_quad
+    ldx oi
+    lda o_y,x
+    clc
+    adc #8
+    sta dy
+    lda spr_col
+    ina
+    ina
+    sta dcol
+    ldx tmpH3
+    inx
+    jmp draw_quad
+.endproc
+
+draw_ych:
+    lda #YCH_T
+    jmp yur_pair
+draw_ysq:
+    lda #YSQ_T
+    jmp yur_pair
+
+.proc draw_ycorp                 ; the squash pair Y-FLIPPED (GB attr $40; no
+    stz do_flip                  ; column swap -- capture f=95)
+    ldx oi
+    lda o_y,x
+    clc
+    adc #8
+    sta dy
+    lda spr_col
+    sta dcol
+    ldx #YSQ_T
+    jsr draw_tile_yflip
+    ldx oi
+    lda o_y,x
+    clc
+    adc #8
+    sta dy
+    lda spr_col
+    ina
+    ina
+    sta dcol
+    ldx #YSQ_T+1
+    jmp draw_tile_yflip
+.endproc
+.endif
 
 ; --- the shared kit bodies (source-identical with the 1-3 kit) ---
 .include "kit_sh1.inc"           ; l3_cull, l3_box, upd_suu, upd_rock

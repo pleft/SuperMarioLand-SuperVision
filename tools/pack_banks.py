@@ -154,6 +154,13 @@ def main():
             #   $AE/$AF honen frame B top/bottom (GB C1,D1)
             W2_TILES = [0xA4,0xA5,0xB4,0xB5, 0xA6,0xA7,0xB6,0xB7,
                         0xC0,0xD0, 0xC1,0xD1]
+            if level == 4:
+                # 2-2 only: Yurarin $16 -- port ids $B0.. (w2code YUR_TA):
+                #   $B0-$B3 swim frame A (GB C4,C5,D4,D5)
+                #   $B4-$B7 swim frame B (GB C6,C7,D6,D7; child = C6,C7)
+                #   $B8-$B9 squash/corpse (GB D8,D9)
+                W2_TILES += [0xC4,0xC5,0xD4,0xD5, 0xC6,0xC7,0xD6,0xD7,
+                             0xD8,0xD9]
             OVL_LO = 0xA4
             sl = b"".join(w2_ovl1[(t-0xA0)*16:(t-0xA0+1)*16] for t in W2_TILES)
             assert len(sl) == len(W2_TILES)*16
@@ -161,7 +168,7 @@ def main():
             addr += len(sl)
             if False:
                 quad_base = chardata            # $A0-$DC unused by this build
-            w2blob = open("build/w2code.bin", "rb").read()
+            w2blob = open("build/w2code22.bin" if level == 4 else "build/w2code.bin", "rb").read()
             assert len(w2blob) <= 0x800, "w2code blob exceeds the $1500 window"
             ovl_code_at = addr                  # the W2 kit overlay (header +20/21)
             addr += len(w2blob)

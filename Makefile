@@ -25,6 +25,8 @@ $(ROM): $(OBJS) $(CFG) tools/pack_banks.py tools/gen_w2abi.py src/w2code.s cfg/w
 	python3 tools/gen_w2abi.py build/rel.dbg build/w2abi.inc
 	$(AS) $(ASFLAGS) -I build src/w2code.s -o build/w2code.o
 	$(LD) -C cfg/w2code.cfg build/w2code.o -o build/w2code.bin
+	$(AS) $(ASFLAGS) -I build -D YUR22 src/w2code.s -o build/w2code22.o
+	$(LD) -C cfg/w2code.cfg build/w2code22.o -o build/w2code22.bin
 	python3 tools/pack_banks.py $@ build/rom.map 0:1 2:2 3:3 4:4 5:5
 	@cp build/rel.dbg build/dbg.txt   # the sim harness reads symbols from here:
 	@echo "built $@ ($$(wc -c < $@) bytes)"   # no separate debug build anymore

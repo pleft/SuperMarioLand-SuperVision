@@ -527,3 +527,23 @@ is stiff" report. Several long-held conventions corrected:
 PORT: rc_wball_aim/rc_wball_move (RCODE Bresenham: dx/dy pair-scaled, slope
 cap 4, x steps on alternate frames), wball_box = the GB-exact tiny band
 (X centre-dist < 7, o_y - spr_y in [-10..+6]), spawn_plat offset fix.
+
+## PORT: Yurarin $16 (2-2) -- fully GB-captured (2026-08-17)
+
+Cycle (capture): swims 1px/3f at constant height facing Mario ~120f (16x16
+quad GB C4-C7/D4-D7, flap), spawns child $17 8px above + morphs $18 = HOLD
+~120f, re-faces, repeats. Child = a 16x8 baby seahorse (GB C6/C7, the parent's
+frame-B top row) rising 1px/4f with 0.5px/f drift along the parent's facing;
+$3186[$17] all $FF: touch hurts, stomp/ball/star pop it. Parent row
+1c/19/ff/19/19: stomp -> $1C squash (D8/D9, HARMLESS -- row zeros, ~93f
+static) -> $19 (1f, sets param $2A) -> $0D = the kill_flip dead-fall (squash
+tiles Y-FLIPPED attr $40, the 23-delta hop, ~0.4px/f away-drift, 2px/f fall,
+63f). Ball AND star -> the same corpse chain: unlike Boo/Honen, Yurarin IS
+superball-killable (+3=$19) -- handled KIT-side (yur_ballhit scans for the
+engine ball; zero engine bytes).
+
+Build: 2-2 gets its OWN blob variant (w2code22.bin, -D YUR22) + a per-level
+tile slice (port $B0-$B9 = GB C4,C5,D4,D5,C6,C7,D6,D7,D8,D9) -- bank 3 can't
+fit Yurarin (~135 free) but bank 4 can (29 free after). draw_leap's quad loop
+became the shared draw_16q (A = tile base) to dedupe draw_yur. Sim-verified
+vs the capture: spawn/swim/fire/hold/re-face/second-volley all match.
