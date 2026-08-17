@@ -1394,11 +1394,11 @@ no:
     bcs :+                        ; NO ceiling at the HUD (original: Mario rises behind it);
     lda #0                        ; clamp only at 0 so spr_y can't wrap
 :   sta tmpH                      ; tentative new spr_y -> head-bonk test first
-    ldy mario_big                 ; SMALL Mario = a 12px box: his head sits 4px
-    bne :+                        ; lower, so he rises 4px further under a ceiling
-    clc                           ; (GB: jump-squeezing into the 2-2 corridors
-    adc #4                        ; left-to-right, user-caught; wall_ahead already
-:   lsr                           ; has the matching top-row skip)
+    ldy mario_big                 ; SMALL Mario: he rises 8px further under a
+    bne :+                        ; ceiling -- the GB lets his box overlap the lip
+    clc                           ; so the 8px squeeze corridors (2-1/2-2 rooms)
+    adc #8                        ; pass in ONE jump (user-compared; +4 gave only
+:   lsr                           ; a 2-3 frame window = fiddly multi-try)
     lsr
     lsr
     sec
