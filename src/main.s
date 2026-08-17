@@ -7620,8 +7620,9 @@ title_tiles:                     ; the used tiles, SV-packed
     rts
 :   cmp #OBJ_HONEN
     bcc :+
-    jsr rc_ball_kit              ; W2 kit foes: corpse + points (RCODE)
-    bra @ballgone
+    bra @next2b                  ; W2 kit foes (+ their corpses/fireball): the
+                                 ; superball PASSES with no effect -- GB $3186
+                                 ; row +3 = $00 for $10/$24 (RE $2a68 morph col)
 :   cmp #OBJ_BUNBUN
     bne :+
     lda #$08                     ; bunbun 800
@@ -10423,30 +10424,8 @@ HUDSHADOW = $1D00                ; 16 rows x 40 bytes (stride 40), WRAM ($1D00-$
     jmp draw_quad
 .endproc
 
-.proc rc_ball_kit                ; ball vs a W2 kit foe (X = victim slot):
-    lda #1                       ; corpse thrown along Mario's facing
-    ldy mario_facing
-    beq :+
-    lda #$FF
-:   sta o_vx,x
-    lda o_type,x
-    cmp #OBJ_LEAP
-    beq @l
-    lda #OBJ_HCORP
-    ldy #$01                     ; honen class 0 = 100
-    bra @go
-@l: lda #OBJ_LCORP
-    ldy #$04                     ; leaper class 1 = 400
-@go:
-    sta o_type,x
-    stz o_st,x
-    stz o_tmr,x
-    jsr victim_xy
-    lda o_y,x
-    sta tmpH3
-    tya
-    jmp award_kill_at            ; the +points tag rises from the victim
-.endproc
+; (rc_ball_kit deleted: GB $3186 row +3 = $00 for the W2 kit foes -- the
+; superball has NO effect on them, it just passes. Freed RCODE bytes.)
 
 .proc nmi_hud_copy
     phy

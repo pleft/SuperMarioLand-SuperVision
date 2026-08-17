@@ -466,3 +466,30 @@ velocity" after F1 is really "spawn type $23" = THE BALL:
 Verified (harness): Boo x constant through full cycles; ball spawns at the
 dive from the mouth, correct signs/speeds toward Mario; honen stomp
 regression 100 pts intact.
+
+## RE: the $3186 table has TWO ball columns, switched by game state (2026-08-17)
+
+User challenged "the superball can't kill Yurarin Boo" -- the deeper dig
+(mgbdis of the collision handlers) settled the column map from the
+instruction stream and found a real subtlety:
+
+- **Call_000_2a68** (ball hit, NORMAL play): `type*5 + $3186 + 3` -> morph;
+  `$00` = `and a / ret z` = literal no-op, the ball passes. Three `inc hl`,
+  read from code.
+- **Call_000_2aad** (ball hit, state **$0D**): same structure, FOUR `inc hl`
+  -> column **+4**. The caller at $2052 dispatches on `$ffb3 == $0D`.
+- **State $0D = the Marine Pop / Sky Pop VEHICLE mode** (docs/14's "likely
+  the demo" guess corrected): 3 projectile slots (torpedoes) vs 1 ball,
+  projectiles break blocks (gated on $0D -- torpedoes do), and the $0D
+  handler's HP-clink specials are $1A/$61/$60 = Tamao + the Dragonzamasu
+  chain, the 2-3 underwater cast fought from the submarine. Type $60 hit
+  also writes $d007.
+
+Consequences for the W2 cast (row `ff 00 ff 00 27` for $10 Honen / $24
+Yurarin Boo -- nearly the only row where +3 != +4):
+- On foot the superball does NOT kill Honen/Yurarin Boo (+3=$00). Stomp =
+  silent despawn (+0=$FF, user-observed + ROM). Touch hurts (+2=$FF).
+- From the submarine (2-3) torpedoes kill them -> corpse $27 (+4). The same
+  $27 serves rows $2F/$30; $32 -> $4F.
+- Column +1 (Chibibo $11 / Noko $12 / Fly $15 / Gao $41 / Yurarin $19,
+  $00 for the fliers) = the block-bonk morph.

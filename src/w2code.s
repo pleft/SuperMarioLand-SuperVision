@@ -256,9 +256,10 @@ w2_rts:
     bcc @stomp
     jmp hurt_mario
 @stomp:
-    jsr foe_code                 ; class code from the type, BEFORE the morph
+    jsr foe_code                 ; class code from the type, BEFORE the despawn
     pha                          ; (a tmp would die under mario_dx's scratch)
-    jsr foe_corpse
+    stz o_type,x                 ; stomp = SILENT DESPAWN, no corpse/animation
+                                 ; (GB $3186 row +0 = $FF for $10/$24; user-observed)
     lda #1                       ; the fixed stomp bounce (RE $08C7)
     sta jump_state
     lda #14
@@ -398,7 +399,10 @@ w2_rts:
     bcs @hit
     rts
 @hit:
-    jmp hurt_mario
+    lda mario_starT              ; starred Mario: the ball passes harmlessly
+    beq :+                       ; (GB $3186 row $23, star col = $00 -> no effect)
+    rts
+:   jmp hurt_mario
 @gone:
     stz o_type,x
     rts
