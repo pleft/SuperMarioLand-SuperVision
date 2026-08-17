@@ -3557,6 +3557,8 @@ music_data:
 .ifdef HWMARK
     jmp game_over                ; probe builds: body donated (never reached)
 .else
+    lda #MUS_GOVER               ; the game-over tune (GB: the strip copier writes
+    jsr mus_start                ; $dfe8=$10 as the text lands; user-caught silence)
     lda #143                     ; trace: the strip rises WY 143 -> 64 at 1px/frame over the
     sta tmpH3                    ; FROZEN game screen, then holds ~256 frames, then exits
 @anim:
@@ -4902,8 +4904,8 @@ PIN_X   = 64
     adc #8
     sta dy
     ldx pose_br
-    jsr draw_quad
-    rts
+    jmp draw_quad
+; (tail-called above)
 @dead:
     lda spr_y                    ; 4 mirrored quads at Mario's spot; the bottom clip
     cmp #153                     ; hides rows past the frame as he falls out
@@ -7772,8 +7774,8 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     sta src_ptr+1
     jsr set_dst
     stz blit_opaque
-    jsr sprite_blit_subpx
-    rts
+    jmp sprite_blit_subpx
+; (tail-called above)
 .endproc
 
 .segment "CODE"
@@ -8688,8 +8690,8 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     adc #8                       ; o_y is the 16px-sprite convention; an 8px item sits +8 lower
     sta dy
     ldx #MUSH_TILE
-    jsr draw_quad
-    rts
+    jmp draw_quad
+; (tail-called above)
 @heart:
     lda spr_col
     sta dcol
@@ -8699,8 +8701,8 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     adc #8
     sta dy
     ldx #HEART_TILE
-    jsr draw_quad
-    rts
+    jmp draw_quad
+; (tail-called above)
 @chib:
     lda spr_col
     sta dcol
@@ -8716,8 +8718,8 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     and #1
     sta do_flip
     ldx #CHIB_TA
-    jsr draw_quad
-    rts
+    jmp draw_quad
+; (tail-called above)
 @corpse:
     lda spr_col                  ; the dead-flip: the enemy's own sprite Y-FLIPPED
     sta dcol                     ; (GB corpse OAM attr $40)
@@ -9018,8 +9020,8 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     adc #8
     sta dy
     ldx #DEBRIS_TILE
-    jsr draw_quad
-    rts
+    jmp draw_quad
+; (tail-called above)
 @ball:
     lda spr_col
     sta dcol
@@ -9029,8 +9031,8 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     adc #8
     sta dy
     ldx #BALL_TILE
-    jsr draw_quad
-    rts
+    jmp draw_quad
+; (tail-called above)
 @flower:
     lda spr_col
     sta dcol
@@ -9062,8 +9064,8 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
 :   clc
     adc #COINSPIN
     tax
-    jsr draw_quad
-    rts
+    jmp draw_quad
+; (tail-called above)
 @popup:
     lda spr_col                  ; two glyph tiles side by side (left in o_vx, right in o_st)
     sta dcol
@@ -10509,6 +10511,9 @@ HUDSHADOW = $1D00                ; 16 rows x 40 bytes (stride 40), WRAM ($1D00-$
     rts
 .endproc
 
+mus3_data:                       ; the game-over tune ($10): FIXED is full, so
+    .incbin "../build/audio/music3.bin"  ; it rides in the RCODE RAM blob
+
 .proc nmi_hud_copy
     phy
     lda tmpL2                    ; the mainline may be mid-blit in these
@@ -11947,8 +11952,8 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
     sta mario_frame
     jsr draw_player
     lda spr_x
-    cmp #80                      ; at the ladder column?
-    bne @notlad
+    cmp #76                      ; at the ladder, CENTRED (ladder 80..88, Mario
+    bne @notlad                  ; 16px: 76+8 = 84 = ladder centre -- user-caught)
     lda b_floor                  ; ladder top at his floor -> climb DOWN; bottom -> UP
     cmp b_gap
     bne :+
