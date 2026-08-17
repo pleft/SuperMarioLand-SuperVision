@@ -340,7 +340,13 @@ w2_rts:
     jsr l3_cull
     bcc :+
     rts
-:   jsr arc_step
+:   txa                          ; 30Hz motion, SLOT-STAGGERED (the bee-proven
+    eor frame_count              ; pattern): two arc steps every other frame =
+    lsr                          ; same trajectory, half the redraws, neighbours
+    bcs @foe                     ; on opposite parities -- the 2-1 sky cluster's
+    jsr arc_step                 ; 100-118% frames were honen-bob blit volume
+    jsr arc_step                 ; (profiled)
+@foe:
     lda #$01                     ; class 0 = 100
     jmp w2_foe
 .endproc
