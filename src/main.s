@@ -7017,6 +7017,8 @@ death_curve:                     ; ROM $0C19 verbatim (signed y deltas + $7F end
     ina
 :   cmp #14
     bcs @no
+    lda mario_starT              ; starred Mario is immune to the cloud (GB:
+    bne @no                      ; $46 star morph col = $00 -> nothing happens)
     jmp hurt_mario
 @no:
     rts
@@ -10429,11 +10431,11 @@ HUDSHADOW = $1D00                ; 16 rows x 40 bytes (stride 40), WRAM ($1D00-$
 ; superball has NO effect on them, it just passes. Freed RCODE bytes.)
 
 ; rc_wball_aim: aim slot X's fresh Yurarin Boo ball at Mario. GB capture
-; (docs/12): every shot flies a STRAIGHT LINE to Mario's launch position --
-; vx = 0.5 px/f fixed, vy = 0.5 * dy/dx (observed slopes -4..+1.56, all
-; self-consistent), max |vy| ~2 px/f. Bresenham state in the ball's slot:
-; o_vy = |dx| (>=1), o_hp = |dy| with bit7 = downward, o_st = accumulator
-; (seeded dx/2 for round-to-nearest).
+; (docs/12, axis-corrected 2026-08-17): every shot flies a STRAIGHT LINE to
+; Mario's launch position -- vy = 0.5 px/f FIXED (sign toward Mario), vx =
+; 0.5 * |dx|/|dy| aimed, max ~2 px/f. Bresenham state in the ball's slot:
+; o_vy = |dy| divisor (>=1), o_hp = |dx| numerator with bit7 = downward,
+; o_st = accumulator (seeded dy/2). X direction stays in o_vx (facing).
 .proc rc_wball_aim
     jsr mario_dx                 ; tmpH3:tmpL3 = |mario centre - ball x|
     lda tmpH3
@@ -10442,42 +10444,40 @@ HUDSHADOW = $1D00                ; 16 rows x 40 bytes (stride 40), WRAM ($1D00-$
     bra @gotdx
 @small:
     lda tmpL3
-    bne @gotdx
-    lda #1                       ; dx0 >= 1
 @gotdx:
-    sta tmpH2                    ; dx0 scratch
+    sta tmpH2                    ; dx0 (numerator) scratch
     lda spr_y
     sec
     sbc o_y,x
-    php                          ; C=1 -> Mario below -> aim down
+    php                          ; C=1 -> Mario below -> ball heads down
     bcs @shr
     eor #$FF
     ina
-@shr:                            ; scale the PAIR down so |dy| fits 7 bits
-    cmp #$80                     ; (halving both preserves the slope)
-    bcc @slope
+@shr:                            ; A = |dy|; scale the PAIR so dx0 fits 7 bits
+    bne :+
+    ina                          ; dy0 >= 1
+:   ldy tmpH2
+    bpl @slope                   ; dx0 < 128: done (Y flags via ldy)
+    lsr tmpH2                    ; halving both preserves the slope
     lsr
-    lsr tmpH2
-    bne @shr
-    inc tmpH2                    ; dx0 floor 1
     bra @shr
 @slope:
-    sta tmpL2
-    lda tmpH2                    ; slope cap <= 4 (vy <= 2 px/f, GB max seen)
-    cmp #$20                     ; dx0 >= 32: 127/32 < 4 anyway
-    bcs @ok
+    sta tmpL2                    ; dy0
+    ; cap vx <= 2 px/f: dx0 <= 4*dy0
+    cmp #$20
+    bcs @store                   ; dy0 >= 32 -> 4*dy0 >= 128 > any dx0
     asl
-    asl                          ; 4*dx0 (fits: dx0 < 32)
-    cmp tmpL2
-    bcs @ok
-    sta tmpL2
-@ok:
-    lda tmpH2
-    sta o_vy,x                   ; dx0
-    lsr
-    sta o_st,x                   ; accumulator seed = dx0/2
-    plp
+    asl                          ; 4*dy0 (fits: dy0 < 32)
+    cmp tmpH2
+    bcs @store
+    sta tmpH2
+@store:
     lda tmpL2
+    sta o_vy,x                   ; dy0 divisor
+    lsr
+    sta o_st,x                   ; accumulator seed = dy0/2
+    plp
+    lda tmpH2
     bcc :+
     ora #$80                     ; downward flag
 :   sta o_hp,x
@@ -10488,9 +10488,14 @@ HUDSHADOW = $1D00                ; 16 rows x 40 bytes (stride 40), WRAM ($1D00-$
 .proc rc_wball_move
     lda frame_count
     lsr
-    bcs @done                    ; x advances on alternate frames = 0.5 px/f
-    lda o_vx,x
-    jsr x_step
+    bcs @done                    ; y advances on alternate frames = 0.5 px/f
+    lda o_hp,x
+    bmi @dn
+    dec o_y,x                    ; up toward Mario
+    bra @acc
+@dn:
+    inc o_y,x
+@acc:
     lda o_hp,x
     and #$7F
     clc
@@ -10501,12 +10506,8 @@ HUDSHADOW = $1D00                ; 16 rows x 40 bytes (stride 40), WRAM ($1D00-$
     bcc @done
     sbc o_vy,x                   ; C is set
     sta o_st,x
-    lda o_hp,x
-    bmi @dn
-    dec o_y,x
-    bra @w
-@dn:
-    inc o_y,x
+    lda o_vx,x
+    jsr x_step                   ; one aimed x pixel per whole dy0 accumulated
     bra @w
 @done:
     rts

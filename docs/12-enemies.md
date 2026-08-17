@@ -513,10 +513,11 @@ is stiff" report. Several long-held conventions corrected:
   [c202-3 .. c202+2] -- a ~6px-wide strip. Sweep vs the Honen box: hurt
   windows objY-c201 in [-8..+14], objX-c202 in [-10..+2], matching the
   $0aaf math bit-exact.
-- **Yurarin Boo's ball: vx = 0.5 px/f fixed, PROPORTIONALLY AIMED** -- every
-  captured shot is a straight line to Mario's launch position (slopes -4..
-  +1.56 all self-consistent; vy up to 2 px/f observed). Fire interval = 162
-  frames, metronome-constant. Lifetime = until offscreen (275f observed).
+- **Yurarin Boo's ball: vy = 0.5 px/f FIXED, vx PROPORTIONALLY AIMED** (axis
+  labels corrected after the user caught the port ball feeling slow: the
+  capture's columns were slot +2/+3 = Y/X): every shot is a straight line to
+  Mario's launch position; horizontal closing speed up to ~2 px/f. Fire
+  interval = 162 frames, metronome-constant. Lifetime = until offscreen.
 - **Platform placement was 16px too low in the port** (2-1 slot capture: end
   V-platforms patrol screen 64..124; the port's spawn +16 rode them 80..140
   -- top short of the barrel jump, bottom inside the floor, user-reported).

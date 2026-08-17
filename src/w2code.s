@@ -13,6 +13,7 @@
 .include "../build/audio/sfx.inc"
 
 ; --- object ids + kit tiles (mirror main.s; the GB sheets are common) ---
+OBJ_BOOM   = 16                  ; engine explosion (the GB $27 corpse visual)
 OBJ_GIFT   = 22
 OBJ_SUU    = 23
 OBJ_ROCK   = 24
@@ -113,7 +114,7 @@ vec_tab:
 .endproc
 w2_updtab:
     .word w2_rts-1, upd_suu-1, upd_rock-1
-    .word upd_honen-1, upd_leap-1, upd_wcorp-1, upd_wcorp-1, upd_wball-1
+    .word upd_honen-1, upd_leap-1, w2_nop-1, w2_nop-1, upd_wball-1
 
 .proc w2_draw                    ; A = o_type (engine convention), X = slot
     sec
@@ -131,7 +132,7 @@ w2_updtab:
 .endproc
 w2_drwtab:
     .word w2_rts-1, draw_suu-1, draw_rock-1
-    .word draw_honen-1, draw_leap-1, draw_hcorp-1, draw_lcorp-1, draw_wball-1
+    .word draw_honen-1, draw_leap-1, w2_nop-1, w2_nop-1, draw_wball-1
 
 w2_rts:
     rts
@@ -290,22 +291,12 @@ w2_rts:
     rts
 .endproc
 
-.proc foe_corpse                 ; slot X's foe -> its dead-flip corpse
-    ldx oi
-    lda #1                       ; thrown away along Mario's facing
-    ldy mario_facing
-    beq :+
-    lda #$FF
-:   sta o_vx,x
-    lda o_type,x
-    cmp #OBJ_LEAP
-    beq @l
-    lda #OBJ_HCORP
-    bra :+
-@l: lda #OBJ_LCORP
-:   sta o_type,x
-    stz o_st,x
-    stz o_tmr,x
+.proc foe_corpse                 ; slot X's foe -> the GB $27 corpse = a static
+    ldx oi                       ; 16x16 explosion puff, ~32f (PyBoy star-kill
+    lda #OBJ_BOOM                ; capture: tiles $9D/$9E quad, no motion) --
+    sta o_type,x                 ; the engine's cloud IS that visual.
+    lda #32
+    sta o_tmr,x
     rts
 .endproc
 
@@ -425,36 +416,6 @@ w2_rts:
     rts
 .endproc
 
-; the dead-flip corpse: the star-kill capture's 23 deltas, then +2/f off-screen
-.proc upd_wcorp
-    lda o_st,x
-    cmp #23
-    bcs @fall
-    tay
-    lda w2c_dy,y
-    clc
-    adc o_y,x
-    sta o_y,x
-    lda o_vx,x                   ; sideways drift only during the arc
-    jsr x_step
-    inc o_st,x
-    bra @clip
-@fall:
-    lda o_y,x
-    clc
-    adc #2
-    sta o_y,x
-@clip:
-    lda o_y,x
-    cmp #160
-    bcc :+
-    stz o_type,x                 ; off the bottom -> gone
-:   rts
-.endproc
-
-w2c_dy:                          ; kill_flip's captured trajectory, verbatim
-    .byte $FF,$FF,$FF,$FF,$FF,$00,$FF,$00,$FF,$00,$00,$00,$00
-    .byte $01,$00,$01,$00,$01,$01,$01,$01,$01,$01
 
 ; (pair16/quad16 live in the engine's RCODE now -- shared, RAM-resident)
 
@@ -482,42 +443,8 @@ w2c_dy:                          ; kill_flip's captured trajectory, verbatim
     jmp quad16
 .endproc
 
-.proc draw_hcorp                 ; the bones upside-down: rows swapped
-    lda #HON_TA                  ; TODO: same latent Y-flip bug as draw_lcorp had
-    sta tmpL2                    ; (tiles upright, not mirrored) -- fix when bank 3
-    lda #HON_TA+1                ; has room; user hasn't hit the Honen death yet.
-    jmp pair16
-.endproc
+w2_nop: rts                      ; dead dispatch rows (corpse types unused)
 
-; Dead-flip corpse = a true VERTICAL flip (the GB OAM Y-flip attr): the tile rows
-; swap AND each 8x8 tile is blitted bottom-up (draw_tile_yflip). The old row-swap
-; alone left every tile upright -> scrambled corpse. Table-driven to stay compact
-; (bank 3 is tight). Order = the flip: TL<-BL, TR<-BR, BL<-TL, BR<-TR.
-.proc draw_lcorp                 ; 16x16 seahorse (Yurarin Boo), upside-down
-    stz do_flip
-    ldy #0
-@l:
-    ldx oi
-    lda o_y,x
-    clc
-    adc lc_dy,y
-    sta dy
-    lda spr_col
-    clc
-    adc lc_dc,y
-    sta dcol
-    ldx lc_t,y
-    phy
-    jsr draw_tile_yflip
-    ply
-    iny
-    cpy #4
-    bne @l
-    rts
-lc_dy: .byte 0, 0, 8, 8
-lc_dc: .byte 0, 2, 0, 2
-lc_t:  .byte LEAP_TA+2, LEAP_TA+3, LEAP_TA, LEAP_TA+1
-.endproc
 
 .proc w2_token                   ; anim tokens (mirrors the draw choices)
     lda o_type,x
