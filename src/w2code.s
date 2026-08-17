@@ -313,20 +313,15 @@ w2_rts:
     jsr l3_cull                  ; is 0 -> NO x movement ever (GB $2879 masks
     bcc :+                       ; $0F for x); F0's track-Mario bit sets FACING
     rts                          ; only. It bobs the script arc and SHOOTS at
-:   jsr arc_step                 ; the dive (F9 $04 + F1 -> child type $23).
-    lda tmpL2                    ; phase transition?
-    cmp #1
-    bne :+
-    jsr aim_leap                 ; face Mario for the dive...
+:   jsr aim_leap                 ; GB capture: re-faces Mario IMMEDIATELY
+    jsr arc_step                 ; (flip within ~2f of him crossing sides,
+    lda tmpL2                    ; mid-bob) -- track every frame, not per phase
+    cmp #1                       ; dive transition: F9 $04 + F1 -> child $23
+    bne @foe
     lda #SFX_DFF8_04
     jsr sfx_play
     ldx oi
-    jsr spawn_wball              ; ...and launch the ball
-    bra @foe
-:   cmp #0
-    bne @foe
-    jsr aim_leap                 ; face the new hop
-    ldx oi
+    jsr spawn_wball              ; launch the aimed ball
 @foe:
     jmp w2_foe
 .endproc
