@@ -743,7 +743,9 @@ mh_dx:  .byte 0,1,1,1,0,$FF,$FF
     lda #0
     sta o_type,y                 ; the ball expires against it
     bra @pop
-:   jsr l3_box
+:   jsr wball_box                ; the GB-exact tiny band (the head is 8px tall
+                                 ; like the ball; l3_box's +/-14 Y let the head
+                                 ; hit Mario where the GB flies past, user-caught)
     bcs :+
     rts
 :   ldx oi
