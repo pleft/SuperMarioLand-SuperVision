@@ -718,7 +718,8 @@ mek_award:                       ; +100 tag at the victim, slot X
     eor #$FF
     ina
 @go:
-    jsr x_step
+    ora #0                       ; x_step branches on A's SIGN FLAG -- the ldy
+    jsr x_step                   ; above clobbered it (right-throw returns bug)
 @nod:
     inc o_tmr,x
     ldy o_st,x
