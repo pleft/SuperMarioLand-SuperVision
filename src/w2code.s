@@ -425,17 +425,51 @@ w2_rts:
     jmp pair16
 .endproc
 
-.proc draw_leap                  ; 16x16 hopper, flap frame
-    ldx oi
-    jsr foe_frame
+.proc draw_leap                  ; 16x16 seahorse: flap frame + TRUE mirror when
+    ldx oi                       ; facing right (GB OAM: columns swapped AND each
+    jsr foe_frame                ; tile x-flipped; tiles face left natively)
     asl
     asl
     clc
-    adc #LEAP_TA+2
-    sta tmpL2                    ; bottom row TL
-    dea
-    dea
-    jmp quad16
+    adc #LEAP_TA
+    sta tmpH3                    ; this flap frame's TL tile
+    lda o_hp,x                   ; facing: +1 = Mario is right -> mirror
+    and #$80
+    eor #$80                     ; $80 -> 0 (left, native); 0 -> $80 (flip)
+    sta tmpL3
+    ldy #0
+@q: phy
+    ldx oi
+    lda o_y,x
+    clc
+    adc lq_dy,y
+    sta dy
+    lda spr_col
+    clc
+    adc lq_dc,y
+    sta dcol
+    lda tmpL3
+    sta do_flip
+    beq @nf
+    lda lq_tf,y                  ; mirrored: swapped columns
+    bra @tl
+@nf:
+    lda lq_tn,y
+@tl:
+    clc
+    adc tmpH3
+    tax
+    jsr draw_quad
+    ply
+    iny
+    cpy #4
+    bne @q
+    stz do_flip
+    rts
+lq_dy: .byte 0,0,8,8
+lq_dc: .byte 0,2,0,2
+lq_tn: .byte 0,1,2,3
+lq_tf: .byte 1,0,3,2
 .endproc
 
 w2_nop: rts                      ; dead dispatch rows (corpse types unused)
@@ -453,7 +487,11 @@ w2_nop: rts                      ; dead dispatch rows (corpse types unused)
     lda #0                       ; gift/rock/corpses: position-only redraws
     rts
 @flap:
-    jmp foe_frame
+    jsr foe_frame                ; flap bit + facing bit: a flip during the
+    ldy o_hp,x                   ; static rest phase must still dirty the redraw
+    bmi :+
+    ora #2
+:   rts
 .endproc
 
 .proc w2_width                   ; erase widths (W2 roster only)
