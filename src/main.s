@@ -1261,6 +1261,15 @@ main_loop:
     rts
 .endproc
 
+; feet_probe: solidity of the tile row at Mario's feet (centre column; feet_col
+; already set). Falls through into read_solid.
+.proc feet_probe
+    lda spr_y
+    lsr
+    lsr
+    lsr
+    sta mrow
+.endproc                         ; falls through
 ; read_solid: A = 1 if the tile at (feet_col, mrow) is SOLID (tile >= $60, per the game's
 ; FloorCheck), else 0. (Off-map rows are non-solid.)
 .proc read_solid
@@ -1333,14 +1342,13 @@ no:
     beq @tilesup
     jsr ride_support
     beq @unsup                    ; slipped off the platform's edge -> fall
-    jmp @done
+    jsr feet_probe                ; GB: tile collision keeps running while RIDING --
+    beq @keep                     ; when the ride sinks to real ground the FLOOR wins
+    stz ride                      ; (Mario lands flush, the stone sinks on beneath
+@keep:                            ; him); without this a door stone carried Mario
+    jmp @done                     ; THROUGH the 2-2 floor to a pit death (user)
 @tilesup:
-    lda spr_y                     ; still supported? test the tile under the feet
-    lsr
-    lsr
-    lsr
-    sta mrow
-    jsr read_solid                ; centre probe (feet_col set at entry, +8)
+    jsr feet_probe                ; still supported? centre probe (feet_col set at entry, +8)
     bne @sup
     lda #6                        ; foot probes +6/+8. GB-measured truth (docs/12)
     jsr calc_feet_col             ; is probes ~+2/+3 with a NARROWER wall test --
