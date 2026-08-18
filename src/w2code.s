@@ -506,7 +506,7 @@ w2_rts:
 .endif
 
 .ifdef MAR23
-.segment "W2FAR"
+.segment "W2FV"
 .endif
 .proc draw_leap
     lda #LEAP_TA
@@ -568,7 +568,7 @@ w2_nop: rts                      ; dead dispatch rows (corpse types unused)
 
 
 .ifdef MAR23
-.segment "W2FAR"
+.segment "W2FV"
 .endif
 .proc w2_token                   ; anim tokens (mirrors the draw choices)
     lda o_type,x

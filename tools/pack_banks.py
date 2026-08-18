@@ -112,14 +112,16 @@ def main():
         return p
 
     win23_img = None
+    carve23 = b""
     for level, bank in jobs:
         pre = prefix
         preblob = l3 if bank == 2 else l11 if bank == 1 else b""
         if level >= 3:
             pre = w2_bank_prefix("05" if level == 5 else "08")
+
         lvl_hdr_addr = hdr_addr + len(preblob)
         lv = f"build/levels/level_{level:02d}"
-        blobs = {}
+        blobs = {}  # BISECT-EXPERIMENT truncation below
         for key, suffix in (("map", ".bin"), ("pipes", "_pipes.bin"),
                             ("blocks", "_blocks.bin"), ("spawns", "_spawns.bin")):
             blobs[key] = open(lv + suffix, "rb").read()
@@ -146,13 +148,31 @@ def main():
             w2c_sz = int(re.search(r"^W2C\s+\S+\s+\S+\s+([0-9A-F]+)", m23, re.M).group(1), 16)
             far_m = re.search(r"^W2FAR\s+([0-9A-F]+)\s+\S+\s+([0-9A-F]+)", m23, re.M)
             far_at, far_sz = int(far_m.group(1), 16), int(far_m.group(2), 16)
+            fv_m = re.search(r"^W2FV\s+([0-9A-F]+)\s+\S+\s+([0-9A-F]+)", m23, re.M)
+            fv_at, fv_sz = (int(fv_m.group(1), 16), int(fv_m.group(2), 16)) if fv_m else (0, 0)
             full23 = open("build/w2code23.bin", "rb").read()
             win23_img = full23[:w2c_sz]
             assert len(win23_img) <= 0x7D0, "2-3 window kit exceeds $7D0"
             far23 = full23[w2c_sz:w2c_sz + far_sz]
+            carve23 = full23[w2c_sz + far_sz:w2c_sz + far_sz + fv_sz]
             assert far_at == 0xA260, "W2FARM moved -- update pack_banks"
+            if fv_sz:
+                # the carve = bank5 chardata tiles $20-$4F (Mario poses; he
+                # never draws in the sub level). Guard the address drift.
+                assert fv_at == sym["bg_chardata"], \
+                    f"W2CARV != bg_chardata (${sym['bg_chardata']:04X}) -- update cfg/w2code.cfg"
+                assert fv_sz <= 0x2C0, "carve kit exceeds BG tiles $00-$2B"
+                lvl5 = open("build/levels/level_05.bin", "rb").read()
+                hot = set(b for b in lvl5 if b < 0x2C)
+                assert not hot, f"2-3 map uses carved BG tiles: {sorted(hot)}"
             assert addr <= far_at, "level 5 header overlaps the far kit"
             addr = far_at + len(far23)
+            if carve23:
+                pre = bytearray(pre)
+                co = sym["bg_chardata"] - BASE
+                assert co + len(carve23) <= len(pre)
+                pre[co:co + len(carve23)] = carve23
+                pre = bytes(pre)
         place = {}
         for key, data in [("map", blobs["map"]), ("room0", rooms[0]), ("room1", rooms[1]),
                           ("room2", rooms[2]), ("pipes", blobs["pipes"]),

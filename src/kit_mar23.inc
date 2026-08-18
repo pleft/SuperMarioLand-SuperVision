@@ -343,10 +343,20 @@ vthp:   .res 10                  ; per-slot torpedo HP (GB slot+$0C & $3F)
 .endproc
 
 .segment "W2FAR"
-.proc draw_subv                  ; the sub quad; the BL tile IS the propeller:
-    stz do_flip                  ; $72 <-> $74 every 4f (OAM: it REPLACES -- a
-    ldy #0                       ; framebuffer overdraw merged both blades,
-@q: phy                          ; user-caught)
+.proc draw_subv                  ; the sub quad: small $70-$73 / BIG $75-$78
+    stz do_flip                  ; (a mushroom re-skins the hull -- OAM-captured
+    stz tmpL2                    ; after the c203-bit4 lesson)
+    lda mario_big
+    beq :+
+    lda #5                       ; the big hull tile base offset
+    sta tmpL2
+:   lda frame_count              ; the BL quad is the propeller: +2 more tiles
+    and #4                       ; on blade-B frames (holds for BOTH hull sets:
+    beq :+                       ; $72/$74 small, $77/$79 big -- OAM-captured)
+    lda #2
+:   sta tmpH2
+    ldy #0
+@q: phy
     ldx oi
     lda o_y,x
     clc
@@ -356,19 +366,14 @@ vthp:   .res 10                  ; per-slot torpedo HP (GB slot+$0C & $3F)
     clc
     adc sq_dc,y
     sta dcol
-    cpy #2                       ; the BL quad = the propeller
-    bne @plain
-    lda frame_count
-    and #4
-    beq @bladeA
-    lda #$74                     ; blade B
-    bra @tx
-@bladeA:
-    lda #SUB_T+2                 ; blade A
-@plain:
     lda sq_t,y
-@tx:
-    tax
+    clc
+    adc tmpL2
+    cpy #2
+    bne :+
+    clc
+    adc tmpH2                    ; the blade swap (REPLACES the tile)
+:   tax
     jsr draw_quad
     ply
     iny
@@ -458,9 +463,18 @@ sq_t:  .byte SUB_T, SUB_T+1, SUB_T+2, SUB_T+3
     ldx oi
     jsr break_brick
     bra @gone
-:   cmp #$80                     ; ?-block: the content pops ($254d path)
-    bne @gone
-    jsr hit_qblock
+:   cmp #$80                     ; ?-block: the content pops AND the block
+    bne @gone                    ; is DESTROYED (GB $2097; user-caught: only a
+    jsr hit_qblock               ; Mario bonk leaves a used block) + 50
+    jsr mod_set
+    lda feet_col
+    sta wcol
+    lda feet_col+1
+    sta wcol+1
+    jsr redraw_one
+    lda #$50
+    ldx #0
+    jsr add_score
 @gone:
     ldx oi
     stz o_type,x
@@ -627,7 +641,7 @@ sc0:
 .endproc
 
 
-.segment "W2FAR"
+.segment "W2FV"
 .proc draw_torp                  ; one 8x8 dart
     ldx #TORP_T
     bra draw_one
@@ -649,18 +663,61 @@ sc0:
 ; foes. Contact is state-$0D style: ANY overlap = the touch column (no stomp);
 ; star applies the ball column (torion/tamao/dragon/shots: $00 = no effect).
 .proc veh_touch                  ; A-in = the star reaction (0 none, 1 puff+100)
-    pha                          ; (l3_box/mario_dx scratch everything else)
-    jsr l3_box
-    bcs :+
-    pla
+    sta tmpL2                    ; the GB $0aaf test, bit-exact (docs/12):
+    lda o_type,x                 ; rel_x = (o_x-cam)-spr_x in [-3 .. w*8+2],
+    sec                          ; rel_y = o_y-spr_y in [-b .. 6+h*8] (b=2 big)
+    sbc #OBJ_HONEN
+    tay
+    lda vbox,y
+    beq @no                      ; boxless (drgb: the upper slot owns contact)
+    sta tmpH3
+    lda o_xl,x
+    sec
+    sbc cam_x
+    sta tmpL3
+    lda o_xh,x
+    sbc cam_x+1
+    bne @no                      ; far offscreen
+    lda tmpL3
+    sec
+    sbc spr_x                    ; rel_x
     clc
-    rts
-:   ldx oi
-    pla
+    adc #3
+    sta tmpL3
+    lda tmpH3
+    and #$F0                     ; w*8 (the high nibble is already w*16/2)
+    lsr
+    clc
+    adc #5                       ; accept rel_x <= w*8+2 (GB-exact; +5 vs the
+    cmp tmpL3                    ; +3 bias -- the first cut was 1px generous)
+    bcc @no
+    lda tmpL3                    ; negative rel_x+3 wrapped: reject
+    cmp #$80
+    bcs @no
+    lda o_y,x
+    sec
+    sbc spr_y                    ; rel_y
+    clc
+    adc #2                       ; +b (the GB big-band; small errs 2px generous)
+    sta tmpL3
+    lda tmpH3
+    and #$0F
+    asl
+    asl
+    asl                          ; h*8
+    clc
+    adc #8                       ; accept rel_y <= 6+h8 (GB-exact, +2 bias)
+    cmp tmpL3
+    bcc @no
+    lda tmpL3
+    cmp #$80
+    bcs @no
+    ldx oi
+    lda tmpL2
     ldy mario_starT
     beq @hurt
     and #1
-    beq @none                    ; star + col $00: they just coexist
+    beq @no                      ; star + ball col $00: they just coexist
     jsr foe_corpse
     ldx oi
     jsr victim_xy
@@ -670,13 +727,17 @@ sc0:
     jsr award_kill_at
     sec
     rts
-@none:
+@no:
     clc
     rts
 @hurt:
     jsr hurt_mario
     sec
     rts
+vbox:                            ; GB phys byte1 per type (docs/12 table)
+    .byte $12,$22,0,0,0,0,0      ; honen leap hcorp lcorp wball subv torp
+    .byte $22,$22,$11,$21,$21    ; torion gunion ghalf yura2 yfire
+    .byte $22,$24,$11,0          ; tamao dragon dshot drgb
 .endproc
 
 .segment "W2C"
@@ -808,7 +869,7 @@ sc0:
     clc
     adc #FIRE_T
     tax
-    bra draw_one
+    jmp draw_one
 .endproc
 
 .segment "W2C"
@@ -880,17 +941,69 @@ sc0:
 .segment "W2C"
 
 
-.proc upd_yfire                  ; $30: straight left, 1px/f at its depth
-    jsr l3_cull
-    bcc :+
+.segment "W2FAR"
+.proc upd_yfire                  ; $30: the rectangle sweep (capture): LEFT
+    jsr l3_cull                  ; 1px/f ~144f, then VERTICAAL 24px toward
+    bcc :+                       ; Mario's depth, then RIGHT off the screen
     rts
-:   lda o_xl,x
+:   lda o_st,x
+    cmp #1
+    beq @vert
+    bcs @right
+    inc o_tmr,x
+    lda o_tmr,x
+    cmp #144
+    bcc @left
+    lda #1                       ; -> the vertical leg: pick the y direction
+    sta o_st,x
+    stz o_tmr,x
+    lda #1
+    ldy o_y,x
+    cpy spr_y
+    bcc :+
+    lda #$FF
+:   sta o_vy,x
+@left:
+    lda o_xl,x
     bne :+
     dec o_xh,x
 :   dec o_xl,x
-    lda #1
+    bra @foe
+@vert:
+    lda o_y,x
+    clc
+    adc o_vy,x
+    sta o_y,x
+    inc o_tmr,x
+    lda o_tmr,x
+    cmp #24
+    bcc @foe
+    lda #2
+    sta o_st,x
+    bra @foe
+@right:
+    inc o_xl,x
+    bne :+
+    inc o_xh,x
+:   lda o_xl,x                   ; past the right edge: gone
+    sec
+    sbc cam_x
+    sta tmpL3
+    lda o_xh,x
+    sbc cam_x+1
+    bne @gone
+    lda tmpL3
+    cmp #168
+    bcs @gone
+@foe:
+    lda #1                       ; ball col $27: star kills
     jmp veh_touch
+@gone:
+    stz o_type,x
+    rts
 .endproc
+.segment "W2C"
+
 
 .segment "W2FAR"
 .segment "W2C"
@@ -919,16 +1032,15 @@ sc0:
     jmp draw_16q
 .endproc
 
-.segment "W2FAR"
+.segment "W2FV"
 .proc upd_tamao                  ; $48: the invincible 0.5px/f diagonal bouncer
-    jsr l3_cull
-    bcc :+
+    jsr l3_cull                  ; (screen-bound bounce: he lives only in the
+    bcc :+                       ; fixed boss chamber)
     rts
 :   lda frame_count
     lsr
     bcs @foe
-    ; x step + tile bounce (phys $54: reverse on walls)
-    lda o_st,x                   ; bit0 = x dir right, bit1 = y dir down
+    lda o_st,x                   ; bit0 = x right, bit1 = y down
     and #1
     beq @xl
     inc o_xl,x
@@ -941,13 +1053,23 @@ sc0:
     dec o_xh,x
 :   dec o_xl,x
 @xchk:
-    jsr tam_probe_x
+    lda o_xl,x
+    sec
+    sbc cam_x
+    sta tmpL3
+    lda o_xh,x
+    sbc cam_x+1
+    bne @xflip
+    lda tmpL3
+    cmp #16
+    bcc @xflip
+    cmp #132
     bcc @ystep
-    lda o_st,x                   ; bounce: flip the x dir
+@xflip:
+    lda o_st,x
     eor #1
     sta o_st,x
 @ystep:
-    ldx oi
     lda o_st,x
     and #2
     beq @yu
@@ -966,41 +1088,9 @@ sc0:
     eor #2
     sta o_st,x
 @foe:
+    ldx oi
     lda #0                       ; invincible: star passes too
     jmp veh_touch
-.endproc
-
-.proc tam_probe_x                ; solid at the leading edge? C=1
-    ldx oi
-    lda o_st,x
-    and #1
-    beq @l
-    lda o_xl,x
-    clc
-    adc #16
-    sta feet_col
-    lda o_xh,x
-    adc #0
-    bra @go
-@l:
-    lda o_xl,x
-    sec
-    sbc #2
-    sta feet_col
-    lda o_xh,x
-    sbc #0
-@go:
-    sta feet_col+1
-    jsr col_shift
-    ldx oi
-    lda o_y,x
-    clc
-    adc #8
-    jsr vrowset
-    jsr read_solid
-    ldx oi
-    lsr                          ; solid=1 -> C
-    rts
 .endproc
 
 .segment "W2FAR"
@@ -1009,7 +1099,7 @@ sc0:
     jmp draw_16q                 ; o_hp stays $FF (faces left, native)
 .endproc
 
-.segment "W2FAR"
+.segment "W2FV"
 .proc upd_dragon                 ; $1A: right-edge vertical patrol + spits
     jsr l3_cull
     bcc :+
