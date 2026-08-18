@@ -29,9 +29,9 @@ OBJ_DRGB   = 46                  ; the dragon's lower 16x16 (erase codes cap at
 SUB_T   = $70                    ; base sheet: sub quad $70-$73 (OAM-verified)
 TORP_T  = $7A                    ; base sheet: the torpedo dart (8x8)
 GUN_TA  = $B0                    ; slice: gunion quad (frame A; bank5 is
-YUR2_T  = $B4                    ; byte-starved -- the 2-3 foes ride single
-TAM_T   = $B6                    ; frames); tamao = a PRE-MIRRORED 16q quad
-DRG_TA  = $BA                    ; dragon 16x32, frame A
+YUR2_T  = $B4                    ; fish pair A ($B4/$B5), B ($B6/$B7): the flap
+TAM_T   = $B8                    ; is back; tamao = a PRE-MIRRORED 16q quad
+DRG_TA  = $BC                    ; dragon 16x32, frame A
 MUS_GOAL_ = 3                    ; build/audio/music.inc (blob can't include it)
 
 ; pad bits (GB layout; supervision.inc isn't included in the blob)
@@ -343,9 +343,23 @@ vthp:   .res 10                  ; per-slot torpedo HP (GB slot+$0C & $3F)
 .endproc
 
 .segment "W2FAR"
-.proc draw_subv                  ; quad $70-$73 via the shared 16q machinery
-    lda #SUB_T                   ; (o_tmr stays 0 = frame A; o_hp $FF = native)
-    jmp draw_16q
+.proc draw_subv                  ; quad $70-$73 + the propeller swap: on frame
+    lda #SUB_T                   ; B the BL tile is $74 (GB c203 $0A/$0B toggle,
+    jsr draw_16q                 ; OAM-verified)
+    lda frame_count
+    and #4
+    beq @done
+    ldx oi
+    lda o_y,x
+    clc
+    adc #8
+    sta dy
+    lda spr_col
+    sta dcol
+    ldx #$74
+    jmp draw_quad
+@done:
+    rts
 .endproc
 
 .segment "W2C"
@@ -757,23 +771,13 @@ sc0:
 .segment "W2FAR"
 .proc spawn_half
     lda #OBJ_GHALF
-    jsr obj_alloc_typed
+    jsr spawn_at_parent
     bcs @full
-    stz o_pdr,x
-    ldy oi
-    lda o_xl,y
-    sta o_xl,x
-    lda o_xh,y
-    sta o_xh,x
-    lda o_y,y
-    sta o_y,x
-    lda #2
-    sta o_st,x
-    lda #$FF                     ; both halves flee LEFT (capture: x 8 -> off
-    sta o_vx,x                   ; the left edge at 1px/f, fixed y)
-    stz vthp,x
+    lda #2                       ; a flying half (o_st>=2), fleeing LEFT
+    sta o_st,y
+    lda #$FF
+    sta o_vx,y
 @full:
-    ldx oi
     rts
 .endproc
 .segment "W2C"
@@ -803,32 +807,26 @@ sc0:
 @slow:
     inc o_tmr,x
     lda o_tmr,x
-    and #7
-    bne @spit
-    lda o_y,x                    ; drift toward Mario's depth
-    cmp spr_y
-    beq @spit
-    bcs @up
-    inc o_y,x
-    bra @spit
-@up:
-    dec o_y,x
-@spit:
-    lda o_tmr,x
-    cmp #48
+    cmp #34                      ; GB cadence: a spit every ~34f
     bcc @foe
     stz o_tmr,x
+    lda o_y,x                    ; the stair: +4px down before each spit
+    clc                          ; (capture: y 128->132->136->140 = the school
+    adc #4                       ; forms a diagonal, never a stack)
+    sta o_y,x
+    lda o_st,x
+    cmp #2
+    bcs @join
+    inc o_st,x
     lda #SFX_DFF8_04
     jsr sfx_play
     ldx oi
     jsr spawn_yfire
     ldx oi
-    inc o_st,x
-    lda o_st,x
-    cmp #3
-    bcc @foe
-    lda #OBJ_YFIRE               ; the third spit: it swims off with them
-    sta o_type,x
+    bra @foe
+@join:
+    lda #OBJ_YFIRE               ; the third fish IS the parent (GB morph --
+    sta o_type,x                 ; three per school, not four)
     stz o_st,x
 @foe:
     lda #1                       ; ball col $27: star kills
@@ -838,7 +836,10 @@ sc0:
 .segment "W2FAR"
 .proc spawn_yfire
     lda #OBJ_YFIRE
-    jsr obj_alloc_typed
+    ; falls through
+.endproc
+.proc spawn_at_parent            ; A = type: allocate at the spawner's position;
+    jsr obj_alloc_typed          ; C=0 with the NEW slot in Y (X back to oi)
     bcs @full
     stz o_pdr,x
     ldy oi
@@ -851,6 +852,9 @@ sc0:
     stz o_st,x
     stz o_tmr,x
     stz vthp,x
+    txa
+    tay
+    clc
 @full:
     ldx oi
     rts
@@ -873,14 +877,21 @@ sc0:
 .segment "W2FAR"
 .segment "W2C"
 .proc draw_yura2                 ; the school fish: a 16x8 pair, side by side
-    ldx #YUR2_T                  ; (GB param $2C = [a8][a9] horizontal; caught by
-    jsr draw_one                 ; the user's mGBA side-by-side) -- draw_one sets
-    ldx oi                       ; dy=o_y+8, the right half rides the same dy
+    ldx oi                       ; (GB param $2C/$2E = [a8][a9]/[b8][b9]); the
+    jsr foe_frame                ; flap picks the pair
+    asl
+    clc
+    adc #YUR2_T
+    tax
+    phx
+    jsr draw_one                 ; sets dy = o_y+8; the right half rides it
+    ldx oi
     lda spr_col
     ina
     ina
     sta dcol
-    ldx #YUR2_T+1
+    plx
+    inx
     jmp draw_quad
 .endproc
 .segment "W2FAR"
@@ -1066,26 +1077,17 @@ sc0:
 
 .proc spawn_dshot
     lda #OBJ_DSHOT
-    jsr obj_alloc_typed
-    bcs @full
-    stz o_pdr,x
-    ldy oi
-    lda o_xl,y                   ; from the mouth (his left edge, upper body)
+    jsr spawn_at_parent          ; at the body (visual +8 = the mouth band);
+    bcs @full                    ; nudge 4 left
+    lda o_xl,y
     sec
     sbc #4
-    sta o_xl,x
+    sta o_xl,y
+    bcs @full
     lda o_xh,y
-    sbc #0
-    sta o_xh,x
-    lda o_y,y
-    clc
-    adc #8
-    sta o_y,x
-    stz o_st,x
-    stz o_tmr,x
-    stz vthp,x
+    dea
+    sta o_xh,y
 @full:
-    ldx oi
     rts
 .endproc
 
@@ -1183,68 +1185,39 @@ dg_dc: .byte 0,2,0,2
 
 ; mar_spawn: the 2-3 spawn cases (A = GB type, Y = entry offset). Same C
 ; contract as w2_spawn: C=0 consumed, C=1 = pool full (the spawner retries).
-.proc mar_spawn
-    cmp #$1D
-    beq @torion
-    cmp #$20
-    beq @gunion
-    cmp #$2F
-    beq @yura
-    cmp #$48
-    beq @tamao
-    cmp #$1A
-    beq @dragon
+.proc mar_spawn                  ; A = GB type, Y = entry offset. Table-driven
+    sty tmpL3                    ; (bank5 diet). C contract = w2_spawn's.
+    ldy #4
+:   cmp mst_gb,y
+    beq @hit
+    dey
+    bpl :-
     clc                          ; not a 2-3 type: consume-and-forget
     rts
-@torion:
-    lda #OBJ_TORION
+@hit:
+    lda mst_port,y
+    phy
+    ldy tmpL3
     jsr w2_go
+    ply
     bcs @full
+    lda mst_hp,y
+    sta vthp,x
+    lda #$FF                     ; face left / no mirror (16q reads bit7)
+    sta o_hp,x
+    cpy #0                       ; torion: the spawn-time y aim (F0 $90)
+    bne @ok
     lda #1
-    sta vthp,x                   ; 2 torpedoes (GB hp byte $41)
-    lda #$FF
-    sta o_hp,x                   ; faces left, always
-    lda #1                       ; the spawn-time y aim (F0 $90)
     ldy o_y,x
     cpy spr_y
     bcc :+
     lda #$FF
 :   sta o_vy,x
-    clc
-    rts
-@gunion:
-    lda #OBJ_GUNION
-    jsr w2_go
-    bcs @full
-    lda #2
-    sta vthp,x
-    lda #$FF
-    sta o_hp,x
-    clc
-    rts
-@yura:
-    lda #OBJ_YURA2
-    jsr w2_go
-    bcs @full
-    stz vthp,x
-    clc
-    rts
-@tamao:
-    lda #OBJ_TAMAO
-    jsr w2_go
-    bcs @full
-    lda #$FF
-    sta vthp,x
-    sta o_hp,x                   ; 16q: no mirror, frame A (o_tmr stays 0)
-    clc
-    rts
-@dragon:
-    lda #OBJ_DRAGON
-    jsr w2_go
-    bcs @full
-    lda #19
-    sta vthp,x
+@ok:
     clc
 @full:
     rts
+mst_gb:   .byte $1D, $20, $2F, $48, $1A
+mst_port: .byte OBJ_TORION, OBJ_GUNION, OBJ_YURA2, OBJ_TAMAO, OBJ_DRAGON
+mst_hp:   .byte 1, 2, 0, $FF, 19
 .endproc

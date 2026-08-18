@@ -599,6 +599,10 @@ w2_nop: rts                      ; dead dispatch rows (corpse types unused)
     cmp #OBJ_GHALF
     beq @flap2
     cmp #OBJ_DSHOT
+    beq @flap2
+    cmp #OBJ_YURA2
+    beq @flap2
+    cmp #OBJ_YFIRE
     bne @none
 @flap2:
     jmp foe_frame                ; anim bit dirties the redraw
