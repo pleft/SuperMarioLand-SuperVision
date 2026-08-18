@@ -113,6 +113,7 @@ def main():
 
     win23_img = None
     carve23 = b""
+    spawns23 = b""
     for level, bank in jobs:
         pre = prefix
         preblob = l3 if bank == 2 else l11 if bank == 1 else b""
@@ -148,11 +149,11 @@ def main():
             w2c_sz = int(re.search(r"^W2C\s+\S+\s+\S+\s+([0-9A-F]+)", m23, re.M).group(1), 16)
             far_m = re.search(r"^W2FAR\s+([0-9A-F]+)\s+\S+\s+([0-9A-F]+)", m23, re.M)
             far_at, far_sz = int(far_m.group(1), 16), int(far_m.group(2), 16)
-            fv_m = re.search(r"^W2FV\s+([0-9A-F]+)\s+\S+\s+([0-9A-F]+)", m23, re.M)
+            fv_m = None  # the BG-tile carve is DEAD: the HUD font lives in "unused" bg tiles
             fv_at, fv_sz = (int(fv_m.group(1), 16), int(fv_m.group(2), 16)) if fv_m else (0, 0)
             full23 = open("build/w2code23.bin", "rb").read()
             win23_img = full23[:w2c_sz]
-            assert len(win23_img) <= 0x7D0, "2-3 window kit exceeds $7D0"
+            assert len(win23_img) <= 0x800, "2-3 window kit exceeds the $800 window"
             far23 = full23[w2c_sz:w2c_sz + far_sz]
             carve23 = full23[w2c_sz + far_sz:w2c_sz + far_sz + fv_sz]
             assert far_at == 0xA260, "W2FARM moved -- update pack_banks"
@@ -167,6 +168,11 @@ def main():
                 assert not hot, f"2-3 map uses carved BG tiles: {sorted(hot)}"
             assert addr <= far_at, "level 5 header overlaps the far kit"
             addr = far_at + len(far23)
+            # the spawn list rides bank 6 (the stub copies it into spawn_tab);
+            # bank 5 keeps only the $FFFF sentinel the loader consumes
+            spawns23 = blobs["spawns"]
+            assert len(spawns23) <= 160, "2-3 spawn list exceeds the stub copy"
+            blobs["spawns"] = b"\xFF\xFF"
             if carve23:
                 pre = bytearray(pre)
                 co = sym["bg_chardata"] - BASE
@@ -279,10 +285,11 @@ def main():
 
     if win23_img is not None:
         off = 6 * BANK + 0x3000
-        assert all(b == 0xFF for b in img[off:off + 0x7D0]), \
+        assert all(b == 0xFF for b in img[off:off + 0x800 + 160]), \
             "bank 6 $B000 region not free for the 2-3 window kit"
         img[off:off + len(win23_img)] = win23_img
-        print(f"pack_banks: 2-3 window kit ({len(win23_img)} bytes) -> bank 6 $B000")
+        img[off + 0x800:off + 0x800 + len(spawns23)] = spawns23
+        print(f"pack_banks: 2-3 window kit ({len(win23_img)}B) + spawns ({len(spawns23)}B) -> bank 6 $B000")
     open(img_path, "wb").write(bytes(img))
 
 if __name__ == "__main__":

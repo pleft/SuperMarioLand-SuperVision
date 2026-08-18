@@ -463,18 +463,9 @@ sq_t:  .byte SUB_T, SUB_T+1, SUB_T+2, SUB_T+3
     ldx oi
     jsr break_brick
     bra @gone
-:   cmp #$80                     ; ?-block: the content pops AND the block
-    bne @gone                    ; is DESTROYED (GB $2097; user-caught: only a
-    jsr hit_qblock               ; Mario bonk leaves a used block) + 50
-    jsr mod_set
-    lda feet_col
-    sta wcol
-    lda feet_col+1
-    sta wcol+1
-    jsr redraw_one
-    lda #$50
-    ldx #0
-    jsr add_score
+:   cmp #$80                     ; ?-block: GB $2097 semantics (torp_qblock)
+    bne @gone
+    jsr torp_qblock
 @gone:
     ldx oi
     stz o_type,x
@@ -641,7 +632,7 @@ sc0:
 .endproc
 
 
-.segment "W2FV"
+.segment "W2FAR"
 .proc draw_torp                  ; one 8x8 dart
     ldx #TORP_T
     bra draw_one
@@ -913,6 +904,35 @@ vbox:                            ; GB phys byte1 per type (docs/12 table)
 .endproc
 
 .segment "W2FAR"
+.proc torp_qblock                ; GB $2097: award ONLY registered content,
+    jsr find_block               ; then shatter -- NO bonk-hop, NO coin default
+    bcc @shatter                 ; (hit_qblock is the BONK handler; using it
+    cmp #$28                     ; here gave the user a coin + a hopping block)
+    beq @pow
+    cmp #$2A
+    beq @heart
+    cmp #$2C
+    beq @star
+    bra @shatter                 ; multicoin/$F0/unknown: shatter only
+@pow:
+    lda mario_big                ; the SML size rule, same as the bonk path
+    bne @flower
+    lda #1                       ; OBJ_MUSH
+    jsr spawn_walker
+    bra @shatter
+@flower:
+    jsr spawn_flower
+    bra @shatter
+@heart:
+    lda #5                       ; OBJ_HEART
+    jsr spawn_walker
+    bra @shatter
+@star:
+    jsr spawn_star
+@shatter:
+    jmp break_brick              ; erase + repaint + debris + 50 (the GB shape)
+.endproc
+
 .proc spawn_yfire
     lda #OBJ_YFIRE
     ; falls through
@@ -942,65 +962,56 @@ vbox:                            ; GB phys byte1 per type (docs/12 table)
 
 
 .segment "W2FAR"
-.proc upd_yfire                  ; $30: the rectangle sweep (capture): LEFT
-    jsr l3_cull                  ; 1px/f ~144f, then VERTICAAL 24px toward
-    bcc :+                       ; Mario's depth, then RIGHT off the screen
+.proc upd_yfire                  ; $30 rectangle sweep (capture): LEFT 1px/f
+    jsr l3_cull                  ; ~144f -> 24px VERTICAL toward Mario -> RIGHT
+    bcc :+                       ; off the screen
     rts
-:   lda o_st,x
-    cmp #1
-    beq @vert
-    bcs @right
-    inc o_tmr,x
+:   inc o_tmr,x
+    lda o_st,x
+    bne @s12
+    lda o_xl,x                   ; the left leg
+    bne :+
+    dec o_xh,x
+:   dec o_xl,x
     lda o_tmr,x
     cmp #144
-    bcc @left
-    lda #1                       ; -> the vertical leg: pick the y direction
-    sta o_st,x
+    bcc @foe
+@adv:
     stz o_tmr,x
-    lda #1
+    inc o_st,x
+    lda #1                       ; aim the vertical leg at Mario's depth
     ldy o_y,x
     cpy spr_y
     bcc :+
     lda #$FF
 :   sta o_vy,x
-@left:
-    lda o_xl,x
-    bne :+
-    dec o_xh,x
-:   dec o_xl,x
     bra @foe
-@vert:
-    lda o_y,x
+@s12:
+    cmp #2
+    bcs @right
+    lda o_y,x                    ; the vertical leg
     clc
     adc o_vy,x
     sta o_y,x
-    inc o_tmr,x
     lda o_tmr,x
     cmp #24
-    bcc @foe
-    lda #2
-    sta o_st,x
+    bcs @adv
     bra @foe
 @right:
     inc o_xl,x
     bne :+
     inc o_xh,x
-:   lda o_xl,x                   ; past the right edge: gone
-    sec
+:   lda o_xl,x                   ; a screen-width past the camera: gone (the
+    sec                          ; engine's draw clips the approach margin)
     sbc cam_x
-    sta tmpL3
     lda o_xh,x
     sbc cam_x+1
-    bne @gone
-    lda tmpL3
-    cmp #168
-    bcs @gone
+    beq @foe
+    stz o_type,x
+    rts
 @foe:
     lda #1                       ; ball col $27: star kills
     jmp veh_touch
-@gone:
-    stz o_type,x
-    rts
 .endproc
 .segment "W2C"
 
@@ -1032,44 +1043,43 @@ vbox:                            ; GB phys byte1 per type (docs/12 table)
     jmp draw_16q
 .endproc
 
-.segment "W2FV"
+.segment "W2FAR"
 .proc upd_tamao                  ; $48: the invincible 0.5px/f diagonal bouncer
-    jsr l3_cull                  ; (screen-bound bounce: he lives only in the
+    jsr l3_cull                  ; (screen-bounds bounce; he lives only in the
     bcc :+                       ; fixed boss chamber)
     rts
 :   lda frame_count
     lsr
     bcs @foe
     lda o_st,x                   ; bit0 = x right, bit1 = y down
-    and #1
-    beq @xl
-    inc o_xl,x
-    bne @xchk
-    inc o_xh,x
-    bra @xchk
-@xl:
+    lsr
+    bcs @xr
     lda o_xl,x
     bne :+
     dec o_xh,x
 :   dec o_xl,x
+    bra @xchk
+@xr:
+    inc o_xl,x
+    bne @xchk
+    inc o_xh,x
 @xchk:
     lda o_xl,x
     sec
     sbc cam_x
-    sta tmpL3
+    tay
     lda o_xh,x
     sbc cam_x+1
-    bne @xflip
-    lda tmpL3
-    cmp #16
-    bcc @xflip
-    cmp #132
-    bcc @ystep
-@xflip:
+    bne @xf
+    cpy #16
+    bcc @xf
+    cpy #132
+    bcc @y
+@xf:
     lda o_st,x
     eor #1
     sta o_st,x
-@ystep:
+@y:
     lda o_st,x
     and #2
     beq @yu
@@ -1077,13 +1087,13 @@ vbox:                            ; GB phys byte1 per type (docs/12 table)
     lda o_y,x
     cmp #124
     bcc @foe
-    bra @yflip
+    bra @yf
 @yu:
     dec o_y,x
     lda o_y,x
     cmp #33
     bcs @foe
-@yflip:
+@yf:
     lda o_st,x
     eor #2
     sta o_st,x
@@ -1099,7 +1109,7 @@ vbox:                            ; GB phys byte1 per type (docs/12 table)
     jmp draw_16q                 ; o_hp stays $FF (faces left, native)
 .endproc
 
-.segment "W2FV"
+.segment "W2FAR"
 .proc upd_dragon                 ; $1A: right-edge vertical patrol + spits
     jsr l3_cull
     bcc :+
@@ -1169,6 +1179,7 @@ vbox:                            ; GB phys byte1 per type (docs/12 table)
     rts
 .endproc
 
+.segment "W2C"
 .proc upd_drgb                   ; glued by the upper half; orphaned -> gone
     ldy #9
 :   lda o_type,y
@@ -1182,7 +1193,10 @@ vbox:                            ; GB phys byte1 per type (docs/12 table)
     lda #0
     jmp veh_touch
 .endproc
+.segment "W2FAR"
 
+
+.segment "W2C"
 .proc spawn_dshot
     lda #OBJ_DSHOT
     jsr spawn_at_parent          ; at the body (visual +8 = the mouth band);
@@ -1198,6 +1212,8 @@ vbox:                            ; GB phys byte1 per type (docs/12 table)
 @full:
     rts
 .endproc
+.segment "W2FAR"
+
 
 .segment "W2FAR"
 .proc upd_dshot                  ; $1F rise 2px/f x16f -> $58 level left 1px/f
@@ -1208,16 +1224,11 @@ vbox:                            ; GB phys byte1 per type (docs/12 table)
     bne @level
     dec o_y,x
     dec o_y,x
-    lda o_y,x
-    cmp #34                      ; never into the HUD
-    bcc @tolevel
     inc o_tmr,x
     lda o_tmr,x
-    cmp #16
-    bcc @foe
-@tolevel:
-    lda #1
-    sta o_st,x
+    cmp #16                      ; ~32px rise; the spawn depth keeps it clear
+    bcc @foe                     ; of the HUD (the dragon patrols y >= 63)
+    inc o_st,x
     bra @foe
 @level:
     lda o_xl,x
@@ -1278,6 +1289,7 @@ dg_dc: .byte 0,2,0,2
 
 ; ---------------------------------------------------------------------------
 .segment "W2FAR"
+.segment "W2C"
 .proc veh_clear                  ; = goal_check's body: jingle freeze -> tally
     lda #1
     sta goal_phase
@@ -1290,6 +1302,8 @@ dg_dc: .byte 0,2,0,2
     lda #MUS_GOAL_
     jmp mus_start
 .endproc
+.segment "W2FAR"
+
 
 ; mar_spawn: the 2-3 spawn cases (A = GB type, Y = entry offset). Same C
 ; contract as w2_spawn: C=0 consumed, C=1 = pool full (the spawner retries).

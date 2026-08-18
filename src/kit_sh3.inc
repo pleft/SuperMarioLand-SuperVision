@@ -1,3 +1,4 @@
+.ifndef MAR23
 .proc l3_xoff                    ; X = slot; C=1 -> off-screen (slot freed)
     lda o_xl,x
     sec
@@ -17,3 +18,4 @@
     clc
     rts
 .endproc
+.endif

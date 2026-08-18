@@ -41,7 +41,7 @@ NEED = [
     "veh_vec", "pad_held", "pad_pressed", "goal_phase", "goal_tmr", "goal_top",
     "mus_rate", "mus_stop", "mus_start", "cam_max", "mod_test", "mod_set",
     "wcol", "redraw_one", "award_coin", "hit_qblock", "break_brick",
-    "read_map_tile", "add_score", "calc_feet_col",
+    "read_map_tile", "add_score", "calc_feet_col", "find_block", "spawn_walker", "spawn_flower", "spawn_star",
     # kit constants live in code, not symbols -- redefined in w2code.s
 ]
 

@@ -68,6 +68,7 @@
 .endproc
 .endif
 
+.ifndef MAR23                    ; 2-3 draws ride quad/pair16 directly
 .proc l3_pair                    ; tmpL3/tmpH3 = left/right tiles, at o_y+8
     ldx oi
     lda o_y,x
@@ -101,3 +102,4 @@
     sta dcol
     jmp draw_quad
 .endproc
+.endif
