@@ -674,11 +674,11 @@ sc0:
 ; foes. Contact is state-$0D style: ANY overlap = the touch column (no stomp);
 ; star applies the ball column (torion/tamao/dragon/shots: $00 = no effect).
 .proc veh_touch                  ; A-in = the star reaction (0 none, 1 puff+100)
-    sta tmpL2                    ; the GB $0aaf test, bit-exact (docs/12):
-    lda o_type,x                 ; rel_x = (o_x-cam)-spr_x in [-3 .. w*8+2],
-    sec                          ; rel_y = o_y-spr_y in [-b .. 6+h*8] (b=2 big)
-    sbc #OBJ_HONEN
-    tay
+    sta tmpL2                    ; box = the MEASURED GB kill window (PyBoy slot
+    lda o_type,x                 ; sweeps, 2026-08-18): rel_x in [-w8-1..+6],
+    sec                          ; rel_y in [-8..ymax(h)] with ymax 6/15/20 for
+    sbc #OBJ_HONEN               ; h=1/2/4 -- the $0aaf paper model was 12px too
+    tay                          ; generous rightward (three user deaths' worth)
     lda vbox,y
     beq @no                      ; boxless (drgb: the upper slot owns contact)
     sta tmpH3
@@ -692,37 +692,40 @@ sc0:
     lda tmpL3
     sec
     sbc spr_x                    ; rel_x
-    clc
-    adc #3
     sta tmpL3
     lda tmpH3
-    and #$F0                     ; w*8 (the high nibble is already w*16/2)
-    lsr
+    and #$F0
+    lsr                          ; w*8
+    sta tmpH2
+    ina                          ; val = rel_x + w8 + 1  (>= 0 iff rel >= -w8-1)
     clc
-    adc #5                       ; accept rel_x <= w*8+2 (GB-exact; +5 vs the
-    cmp tmpL3                    ; +3 bias -- the first cut was 1px generous)
+    adc tmpL3
+    cmp #$80
+    bcs @no                      ; wrapped negative: left of the window
+    sta tmpL3
+    lda tmpH2
+    clc
+    adc #4                       ; bound: accept val <= w8+3 (right edge +2..3,
+    cmp tmpL3                    ; the MEASURED static GB edge)
     bcc @no
-    lda tmpL3                    ; negative rel_x+3 wrapped: reject
+    lda o_y,x
+    clc
+    adc #16                      ; GB slot y = o_y + 16
+    sec
+    sbc spr_y
+    sec
+    sbc #16                      ; minus GB c201 = spr_y + 16 -> rel_y
+    clc
+    adc #7                       ; val = rel_y + 7 (>= 0 iff rel >= -7, measured)
     cmp #$80
     bcs @no
-    lda o_y,x
-    sec
-    sbc spr_y                    ; rel_y
-    clc
-    adc #2                       ; +b (the GB big-band; small errs 2px generous)
     sta tmpL3
     lda tmpH3
     and #$0F
-    asl
-    asl
-    asl                          ; h*8
-    clc
-    adc #8                       ; accept rel_y <= 6+h8 (GB-exact, +2 bias)
+    tay
+    lda ybnd,y                   ; accept val <= 8 + ymax(h)
     cmp tmpL3
     bcc @no
-    lda tmpL3
-    cmp #$80
-    bcs @no
     ldx oi
     lda tmpL2
     ldy mario_starT
@@ -743,9 +746,11 @@ sc0:
     rts
 @hurt:
     jsr sub_off                  ; the hull vanishes with the hit: the death
-    jsr hurt_mario               ; shows ONE clean Mario hop (the frozen-sub +
-    sec                          ; ghost-Mario pair read as a glitch; the true
-    rts                          ; GB falling-sub needs FIXED bytes we lack)
+    jsr hurt_mario               ; shows ONE clean hop at the true spot
+    sec
+    rts
+ybnd:                            ; 7 + ymax per height nibble (h = 1/2/4)
+    .byte 0, 13, 22, 0, 27
 vbox:                            ; GB phys byte1 per type (docs/12 table)
     .byte $12,$22,0,0,0,0,0      ; honen leap hcorp lcorp wball subv torp
     .byte $22,$22,$11,$21,$21    ; torion gunion ghalf yura2 yfire
