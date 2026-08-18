@@ -373,11 +373,11 @@ probe_stripes:                   ; the full proven liturgy + stripes, FIXED-ROM
     sta lvl_ptr+1
     jsr copy_win8            ; 8 pages -> $1500 (the overlay window, free at boot)
 .ifdef HWMA
-    jmp probe_stripes        ; probe A: window copy done, no RAM execution
+    bra probe_stripes        ; probe A: window copy done, no RAM execution
 .endif
     jsr $1500                ; = boot6_init, running from RAM
 .if .defined(HWMB) .or .defined(HWMC) .or .defined(HWMD)
-    jmp probe_stripes        ; probes B/C/D: boot6 truncated by the same flag
+    bra probe_stripes        ; probes B/C/D: boot6 truncated by the same flag
 .endif
 
     ; --- bank 0 + NMI/IRQ + LCD ON. Commercial boots (Block Buster $DF) set the
@@ -633,7 +633,7 @@ main_loop:
     lda pipe_phase              ; pipe sink/rise animation running? -> just animate
     beq @normal
     jsr pipe_animate
-    jmp main_loop
+    bra main_loop
 @normal:
     jsr read_input
     lda pad_pressed              ; Start toggles pause (gameplay only, like the original's
@@ -1048,7 +1048,7 @@ main_loop:
     jsr mark_used
 @coinspawn:
     jsr spawn_coin               ; coin-pop animation
-    jmp award_coin               ; +1 coin, +100 score, 1-up at 100
+    bra award_coin               ; +1 coin, +100 score, 1-up at 100
 @multicoin:
     lda mc_tmr                   ; window open (incl. the first bonk) -> another coin
     beq @mc_conv
@@ -1165,7 +1165,7 @@ main_loop:
     sta mrow
     jsr try_coin
     inc mrow                     ; body bottom row
-    jmp try_coin
+    bra try_coin
 ; (tail call)
 .endproc
 
@@ -1238,7 +1238,7 @@ main_loop:
     jsr spawn_debris4            ; burst into 4 shards (2 arcs x 2 directions)
     lda #$50                     ; +50 points
     ldx #$00
-    jmp add_score
+    bra add_score
 ; (tail call)
 .endproc
 
@@ -1766,7 +1766,7 @@ no:
     rts
 :   lda goal_top                 ; top door -> the ladder bonus game first
     beq @next
-    jmp enter_bonus
+    bra enter_bonus
 @next:
     jmp next_level
 @jingle:
@@ -2120,7 +2120,7 @@ quad_rows: .byte 0, 0, 8, 8
     dex
     bpl @l
     lda #SFX_DFF8_01             ; the bang (unconditional: silent only in the
-    jmp sfx_play                 ; star-killed-boss-then-sphere edge case, where
+    bra sfx_play                 ; star-killed-boss-then-sphere edge case, where
 .endproc                         ; a lone bang is a harmless 1-shot)
 
 ; ---------------- the room scenes (e_own frames) ----------------
@@ -3429,7 +3429,7 @@ moth_tiles: .incbin "../build/gfx/moth.svt"
 @dormant:
     stz mus_pos+1,x
     stz mus_vol,x
-    jmp musn_wr
+    bra musn_wr
 ; (tail call)
 @end:
     jmp mus_stop                 ; whole-song stop ($6CB1)
@@ -3567,7 +3567,7 @@ music_data:
 ; (the original shows GAME OVER then returns to the title; the port has no title yet).
 .proc game_over
 .ifdef HWMARK
-    jmp game_over                ; probe builds: body donated (never reached)
+    bra game_over                ; probe builds: body donated (never reached)
 .else
     lda #MUS_GOVER               ; the game-over tune (GB: the strip copier writes
     jsr mus_start                ; $dfe8=$10 as the text lands; user-caught silence)
@@ -4256,7 +4256,7 @@ TIMER_RATE = 40                  ; frames per clock unit (SML's $da00 sub-counte
     inx
     pla
     and #$0f
-    jmp put_hud
+    bra put_hud
 ; (tail call)
 .endproc
 
@@ -5398,7 +5398,7 @@ STAR_ARC_N = 42
     jsr spawn_debris1
     lda #1                       ; right, low arc
     ldy #DEBRIS_LO
-    jmp spawn_debris1
+    bra spawn_debris1
 ; (tail call)
 .endproc
 
@@ -5683,10 +5683,17 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     lda spr_x                    ; carried past the pin: push the CAMERA, not
     cmp #PIN_X+1                 ; spr_x -- rides used to shove Mario way past
     bcc @mv                      ; PIN_X and the next walk step dumped ALL the
-    inc cam_x                    ; excess into cam at once = the user's "rough
-    bne @rr                      ; transition" on the 2-1 platform rides.
-    inc cam_x+1                  ; (no cam_max guard: no H-plat rides exist at
-    bra @rr                      ;  any level end; streaming guards past-width)
+    lda cam_x                    ; excess into cam at once = the user's "rough
+    cmp cam_max                  ; transition" on the 2-1 platform rides.
+    bne @push                    ; CAM_MAX GUARD (user-caught at the 2-2 top
+    lda cam_x+1                  ; platform, which rides AT the level end): an
+    cmp cam_max+1                ; unclamped push scrolled past max and broke
+    beq @mv                      ; goal_check's exact cam==max door test --
+@push:                           ; at max Mario moves on screen instead, like
+    inc cam_x                    ; the walk path's @atmax.
+    bne @rr
+    inc cam_x+1
+    bra @rr
 @mv:
     inc spr_x
 @rr:
@@ -7724,7 +7731,7 @@ title_tiles:                     ; the used tiles, SV-packed
     ldx oi
     lda o_type,x                 ; despawned inside step 1?
     beq @skip
-    jmp corpse_step
+    bra corpse_step
 @skip:
     rts
 .endproc
@@ -9110,7 +9117,7 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     sta dy
     lda o_st,x
     tax
-    jmp draw_quad
+    bra draw_quad
 ; (tail call)
 @bounce:
     lda spr_col                  ; the hopping block: its pre-bonk tile rides in o_vx
@@ -9122,7 +9129,7 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     sta dy
     lda o_vx,x
     tax
-    jmp draw_quad
+    bra draw_quad
 ; (tail call)
 @plat:
     ldx oi                       ; platform: 3x tile $EF side by side (24px)
@@ -9155,7 +9162,7 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     adc #8
     sta dy
     ldx #PLAT_TILE
-    jmp draw_quad
+    bra draw_quad
 ; (tail call)
 .endproc
 
@@ -9421,7 +9428,7 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     adc #8
     sta dy
     ldx #STONE_T
-    jmp draw_quad
+    bra draw_quad
 ; (tail call)
 .endproc
 .segment "L12"
@@ -10917,7 +10924,7 @@ l3_updtab:
     rts
 :   lda mario_starT
     bne @done
-    jmp l3_hurt    
+    bra l3_hurt    
 @gone:
     stz o_type,x
     rts
