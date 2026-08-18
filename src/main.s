@@ -736,7 +736,16 @@ main_loop:
     eor #1
     sta star_flash
 @nostar:
-    jsr player_step              ; walk+jump+fire -- or the vehicle handler (2-3)
+    lda veh_vec+1                ; the vehicle handler owns the player slot (2-3)
+    beq :+
+    jsr @veh
+    bra @postplay
+@veh:
+    jmp (veh_vec)
+:   jsr try_fire                 ; B + Superball Mario -> fire a superball
+    jsr move_player              ; walk (updates spr_x) or scroll the camera (cam_x)
+    jsr jump_player              ; A = jump (real arc); updates spr_y while airborne
+@postplay:
     jsr goal_check               ; walked through the goal door? start the clear sequence
     jsr spawn_check              ; enemy spawn list (fires at the camera's right edge)
     jsr coin_collect             ; grab floating coins Mario walked/jumped into
@@ -872,8 +881,10 @@ main_loop:
     beq @used
     cmp #$80                     ; only $80/$81 ?-blocks become the used block; anything else
     bcc @keep                    ; (a mod bit that bled onto a blank/wall/coin-row tile in a
-@used:
-    lda #$7F                     ; room) is left RAW, so it can never turn into a solid block
+@used:                           ; room) is left RAW, so it can never turn solid
+    ldy veh_vec+1                ; vehicle level: no bonks exist, so a modded
+    bne @broke                   ; ?-block is TORPEDOED = destroyed (GB $2097)
+    lda #$7F
 @keep:
     rts
 @broke:
@@ -1218,18 +1229,6 @@ main_loop:
     lda o_xh,x
     sbc #0
     sta feet_col+1
-    rts
-.endproc
-.proc timer_dec                  ; TIME -= 1 (BCD: timer+1 = hundreds)
-    sed
-    lda timer
-    sec
-    sbc #1
-    sta timer
-    lda timer+1
-    sbc #0
-    sta timer+1
-    cld
     rts
 .endproc
 .proc lose_life
@@ -1720,19 +1719,6 @@ no:
 
 ; ---------------------------------------------------------------------------
 ; Level-clear (goal) sequence. Trace-exact vs the original (tools/trace_goal.lua):
-; player_step: the per-frame player physics dispatch. A vehicle level's blob
-; (Marine Pop 2-3; Sky Pop 4-3 later) installs veh_vec at bind time and takes
-; the whole slot: dpad sub movement, torpedoes, autoscroll (GB State_0D).
-.proc player_step
-    lda veh_vec+1
-    beq @walk
-    jmp (veh_vec)
-@walk:
-    jsr try_fire                 ; B + Superball Mario -> fire a superball
-    jsr move_player              ; walk (updates spr_x) or scroll the camera (cam_x)
-    jmp jump_player              ; A = jump (real arc); updates spr_y while airborne
-.endproc
-
 ; Mario walks fully through the door (screen x = 160) -> 240-frame jingle freeze
 ; (st=$07) -> 64-frame hold (st=$05 entry, $ffa6=$40) -> TALLY: TIME -1/frame with
 ; +10 score each, to 000 -> 43-frame hold (st=$06+$08) -> next level, clock 400.
@@ -4348,7 +4334,15 @@ TIMER_RATE = 40                  ; frames per clock unit (SML's $da00 sub-counte
     ora timer+1
     bne :+
     rts
-:   jsr timer_dec               ; BCD TIME -= 1 (shared)
+:   sed
+    lda timer
+    sec
+    sbc #1
+    sta timer
+    lda timer+1
+    sbc #0
+    sta timer+1
+    cld
     lda #1
     sta hud_dirty
     lda timer                    ; hit 000? TIME-UP death: the hop plays (harness: state
