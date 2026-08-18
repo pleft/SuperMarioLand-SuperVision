@@ -186,11 +186,25 @@ def main():
                 #   $B8-$BB seahorse pairs A/B (GB a8,a9 / b8,b9)
                 #   $BC-$BD tamao pair (GB aa,ab)
                 #   $BE-$CD dragon 16x32 frames A/B (upper+lower halves)
+                # tamao ships PRE-MIRRORED (TL,TR,BL,BR for draw_16q;
+                # a negative id = x-mirror the tile in python)
                 W2_TILES += [0xA0,0xA1,0xB0,0xB1,
-                             0xA8,0xA9, 0xAA,0xAB,
+                             0xA8,0xA9, 0xAA,-0xAA, 0xAB,-0xAB,
                              0xAE,0xAF,0xBE,0xBF, 0xCE,0xCF,0xBC,0xBD]
             OVL_LO = 0xA4
-            sl = b"".join(w2_ovl1[(t-0xA0)*16:(t-0xA0+1)*16] for t in W2_TILES)
+            def _mir(td):
+                # SV 2bpp: 2 bytes/row, 4 px/byte -> mirror = swap bytes +
+                # reverse the 2-bit groups within each
+                out = bytearray()
+                for r in range(8):
+                    def rev(b):
+                        return ((b & 3) << 6) | ((b >> 2 & 3) << 4) | ((b >> 4 & 3) << 2) | (b >> 6 & 3)
+                    out += bytes((rev(td[r*2+1]), rev(td[r*2])))
+                return bytes(out)
+            def _tile(t):
+                td = w2_ovl1[(abs(t)-0xA0)*16:(abs(t)-0xA0+1)*16]
+                return _mir(td) if t < 0 else td
+            sl = b"".join(_tile(t) for t in W2_TILES)
             assert len(sl) == len(W2_TILES)*16
             quad_base = addr - OVL_LO*16
             addr += len(sl)

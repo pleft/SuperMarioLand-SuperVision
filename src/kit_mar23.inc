@@ -30,8 +30,8 @@ SUB_T   = $70                    ; base sheet: sub quad $70-$73 (OAM-verified)
 TORP_T  = $7A                    ; base sheet: the torpedo dart (8x8)
 GUN_TA  = $B0                    ; slice: gunion quad (frame A; bank5 is
 YUR2_T  = $B4                    ; byte-starved -- the 2-3 foes ride single
-TAM_T   = $B6                    ; frames, torion/honen/leap keep their flap)
-DRG_TA  = $B8                    ; dragon 16x32, frame A
+TAM_T   = $B6                    ; frames); tamao = a PRE-MIRRORED 16q quad
+DRG_TA  = $BA                    ; dragon 16x32, frame A
 MUS_GOAL_ = 3                    ; build/audio/music.inc (blob can't include it)
 
 ; pad bits (GB layout; supervision.inc isn't included in the blob)
@@ -53,6 +53,7 @@ vthp:   .res 10                  ; per-slot torpedo HP (GB slot+$0C & $3F)
 ; ---------------------------------------------------------------------------
 ; veh_init: called from the blob init (level bind). Installs the player
 ; handler and disarms the walk-era goal door (cam never == $FFFF).
+.segment "W2C"
 .proc veh_init
     lda #<veh_step
     sta veh_vec
@@ -65,6 +66,8 @@ vthp:   .res 10                  ; per-slot torpedo HP (GB slot+$0C & $3F)
     sta vfire
     rts
 .endproc
+.segment "W2FAR"
+
 
 .segment "W2C"
 ; ---------------------------------------------------------------------------
@@ -832,6 +835,7 @@ sc0:
     jmp veh_touch
 .endproc
 
+.segment "W2FAR"
 .proc spawn_yfire
     lda #OBJ_YFIRE
     jsr obj_alloc_typed
@@ -851,6 +855,8 @@ sc0:
     ldx oi
     rts
 .endproc
+.segment "W2C"
+
 
 .proc upd_yfire                  ; $30: straight left, 1px/f at its depth
     jsr l3_cull
@@ -865,48 +871,23 @@ sc0:
 .endproc
 
 .segment "W2FAR"
-.proc draw_yura2                 ; mirrored 16x16 from the 8x16 pair
-    lda #YUR2_T
-    bra drw_mirror
-.endproc
-.proc draw_tamao                 ; same shape, its own pair, no flap
-    lda #TAM_T
-    ; falls through
-.endproc
-.proc drw_mirror                 ; A = pair top tile: left half + x-mirrored right
-    sta tmpH3
-    ldx oi
-    lda o_y,x
-    sta dy
-    lda spr_col
-    sta dcol
-    stz do_flip
-    ldx tmpH3
-    jsr @pair
-    ldx oi
-    lda o_y,x
-    sta dy
+.segment "W2C"
+.proc draw_yura2                 ; the school fish: a 16x8 pair, side by side
+    ldx #YUR2_T                  ; (GB param $2C = [a8][a9] horizontal; caught by
+    jsr draw_one                 ; the user's mGBA side-by-side) -- draw_one sets
+    ldx oi                       ; dy=o_y+8, the right half rides the same dy
     lda spr_col
     ina
     ina
     sta dcol
-    lda #$80
-    sta do_flip
-    ldx tmpH3
-    jsr @pair
-    stz do_flip
-    rts
-@pair:
-    phx
-    jsr draw_quad                ; top 8x8
-    ldx oi
-    lda o_y,x
-    clc
-    adc #8
-    sta dy
-    plx
-    inx
-    jmp draw_quad                ; bottom 8x8
+    ldx #YUR2_T+1
+    jmp draw_quad
+.endproc
+.segment "W2FAR"
+
+.proc draw_tamao                 ; pre-mirrored quad via the shared 16q
+    lda #TAM_T                   ; (o_tmr stays 0 = frame A; o_hp $FF = native)
+    jmp draw_16q
 .endproc
 
 .segment "W2FAR"
@@ -1254,6 +1235,7 @@ dg_dc: .byte 0,2,0,2
     bcs @full
     lda #$FF
     sta vthp,x
+    sta o_hp,x                   ; 16q: no mirror, frame A (o_tmr stays 0)
     clc
     rts
 @dragon:

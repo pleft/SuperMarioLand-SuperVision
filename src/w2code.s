@@ -630,6 +630,13 @@ w2_nop: rts                      ; dead dispatch rows (corpse types unused)
     bne :+
     lda #2
     rts
+:   cpy #OBJ_YURA2
+    beq @wfish
+    cpy #OBJ_YFIRE
+    bne :+
+@wfish:
+    lda #3                       ; the school fish: 16 wide, 8 tall (short band)
+    rts
 :   cpy #OBJ_SUBV
     bcc @wbase23                 ; honen/leap/wball keep the shared rows
     lda #$83                     ; every 2-3 body: 16 wide, 16 tall
