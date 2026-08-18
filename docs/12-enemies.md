@@ -554,3 +554,51 @@ tile slice (port $B0-$B9 = GB C4,C5,D4,D5,C6,C7,D6,D7,D8,D9) -- bank 3 can't
 fit what only 2-2 uses; bank 4 lands at 4 bytes free. draw_leap's quad loop
 became the shared draw_16q. Sim-verified vs both captures: walk/throw/hold/
 resume + the head's 120f out-and-back landing on the neck.
+
+## 2-3 MARINE POP -- GB State $0D + the whole level (2026-08-18, PyBoy + RE)
+- **State $0D** = the vehicle gameplay state ($2376). Frame: LevelColumnStream,
+  bank1 $4fb2 (autoscroll: cam +1 per 2f until c0d2>=7 = the tail columns
+  streamed, i.e. cam_max 2720; the crush-dec pushes the sub left when a solid
+  sits at (c201+5 row, c202+8); c202 forced $F0 at 0 -> $515e = forced-small
+  death), $4fec (dpad: UP/DOWN 1px/f fall through into the horizontal = true
+  diagonals; LEFT decs twice while the scroll runs; clamps c202 [16,160],
+  c201 [48,148]), $5118 (torpedoes), bank3 $498b/$4a1a (fire: A or B pressed
+  fires, held A autofires per c0ae=12; spawn OAM (c201-2, c202+2) tile $7A),
+  $200a sweep -> $2aad: slot+$0C = HP (&$3F) decs with a clink (dff0=1 only
+  for $1a/$61/$60) while nonzero; at 0 the $3186 col+4 morph applies.
+- **Screen rows**: the GB playfield = BG rows 2-17; LEVEL row = screen row - 2.
+  (An 8-hour detour: the live-scraped map "contradicted" the extractor until
+  this offset surfaced. The extractor was right all along.)
+- **The probes** ($50cc H / $5046 up / $5089 down): H at y+5 (+ y-3 when big),
+  up at y-3/-4 two corners (+2/-4), down at y+10 two corners (-2/+2). $F4
+  collects in passing (NOT from torpedoes in $0D), $E1/$83 -> jp $1b45.
+- **$1b45 IS THE LEVEL CLEAR, not a hurt**: clear jingle = track $01, state
+  $07 -> tally -> next level. Tile $E1 = THE SPHERE (2-3: col 357 row 9,
+  behind a 2x3 brick wall + over-spike... no: over nothing -- the spike
+  reading was wrong all along). d007 = the boss-kill auto-clear flag ($60
+  Tatanga sets it; State_0D then fires 1b45; it also gates the $09f1 death
+  -- the game's own god-mode during the 4-3 ending).
+- **2-3 types** ($3186 stomp/bonk/touch/ball/torp + $3375 phys + scripts):
+  $1D Torion 00/00/FF/00/27 hp$41: swims left 2px/3f, y-dir aimed once (400).
+  $20 Gunion FF/00/FF/21/21 hp$82: bobs in place; killed -> $21 rises and
+  spawns two $22 halves (level flight left 1px/f) then puffs (800).
+  $2F Yurarin 00/00/FF/27/27: paces the scroll (+0.5px/f world), spits a $30
+  every ~30-48f, the 3rd spit morphs it into $30 too (the school!). $30 =
+  straight left 1px/f. Both draw params $2C/$2E (same look!).
+  $48 TAMAO 00/00/FF/00/00 hp$FF phys$54: invincible 0.5px/f diagonal
+  bouncer (torpedoes absorbed silently forever).
+  $1A DRAGONZAMASU 00/00/FF/00/4F hp$D3 hitbox$24 (16 wide x 32 TALL),
+  params $4F/$4E = 8-tile stacks: right-edge vertical patrol ~0.5px/f,
+  spits $1F (rises ~2px/f ~16f, from FFC1 $70/$70/$40) -> morphs $58
+  (level left 1px/f) every ~64f alternating slots. 19 clinks + the 20th
+  kills: +5000 (class 3) AND the arena clears (Tamao + in-flight shots
+  puff -- capture-observed).
+- **The sub** = 16x16 OAM quad tiles $70-$73 (8x8 mode! LCDC $C3), constant
+  (no propeller tile anim; big/small identical). Torpedo = tile $7A 8x8.
+  Boss shots/halves = the $E2/$E3 blob pair.
+- **PORT** (commit 1db1780): engine player_step + veh_vec dispatch; the level-5
+  kit = kit_mar23.inc in three pieces (window $1500 <= $7D0 stored in BANK 6
+  $B000 + the w2stub bank-crossing loader + W2FAR bank-resident at $A268) --
+  bank5 has 0 bytes free (the 5.7K raw map). Cut for bytes: gunion/yura/
+  tamao/dragon flap frames, the x-3 rescue scene (standard tally; wraps to
+  1-1 until W3 exists).
