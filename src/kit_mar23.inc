@@ -76,7 +76,11 @@ vthp:   .res 10                  ; per-slot torpedo HP (GB slot+$0C & $3F)
     lda goal_phase               ; sphere touched: the clear sequence owns the
     beq :+                       ; frame (jingle -> tally -> next level)
     rts
-:   jsr sub_ensure               ; the sub sprite object (survives respawns)
+:   lda spr_x                    ; the walk normally derives mario_vx; the dead
+    clc                          ; pose draws from it -- stale, it threw every
+    adc scroll_s                 ; death hop far from the sub (user-diagnosed:
+    sta mario_vx                 ; "the real player position is where the sub is")
+    jsr sub_ensure               ; the sub sprite object (survives respawns)
     ; --- autoscroll: +1px every other frame until cam 2720 ($4fb2) ---
     lda frame_count
     lsr
@@ -95,7 +99,8 @@ vthp:   .res 10                  ; per-slot torpedo HP (GB slot+$0C & $3F)
     cmp #9
     bcs @move
     stz mario_big                ; crushed against the screen edge: death even
-    jmp hurt_mario               ; when big (GB $515e forces small + state 1)
+    jsr sub_off                  ; when big (GB $515e forces small + state 1)
+    jmp hurt_mario
 @move:
     ; --- vertical (falls through into horizontal = GB diagonals) ---
     lda pad_held
@@ -168,6 +173,7 @@ vthp:   .res 10                  ; per-slot torpedo HP (GB slot+$0C & $3F)
 .endproc
 
 ; ---------------------------------------------------------------------------
+.segment "W2FAR"
 .proc at_max                     ; C=1 when the autoscroll has reached 2720
     lda cam_x+1
     cmp #VAUTO_HI
@@ -183,6 +189,8 @@ vthp:   .res 10                  ; per-slot torpedo HP (GB slot+$0C & $3F)
     sec
     rts
 .endproc
+.segment "W2C"
+
 
 ; probes ($50cc/$5046/$5089 in port coords). All classify through vh_class:
 ; C=1 blocked; coins collect in passing; E1/$83 = the sphere -> level clear.
@@ -310,6 +318,18 @@ vthp:   .res 10                  ; per-slot torpedo HP (GB slot+$0C & $3F)
 
 ; ---------------------------------------------------------------------------
 ; the sub sprite: one slot glued to Mario, draw-only (contact stays Mario's).
+.proc sub_off                    ; the lethal hit despawns the hull
+    ldy #9
+:   lda o_type,y
+    cmp #OBJ_SUBV
+    bne :+
+    lda #0
+    sta o_type,y
+:   dey
+    bpl :--
+    rts
+.endproc
+
 .proc sub_ensure
     ldx #9
 :   lda o_type,x
@@ -722,9 +742,10 @@ sc0:
     clc
     rts
 @hurt:
-    jsr hurt_mario
-    sec
-    rts
+    jsr sub_off                  ; the hull vanishes with the hit: the death
+    jsr hurt_mario               ; shows ONE clean Mario hop (the frozen-sub +
+    sec                          ; ghost-Mario pair read as a glitch; the true
+    rts                          ; GB falling-sub needs FIXED bytes we lack)
 vbox:                            ; GB phys byte1 per type (docs/12 table)
     .byte $12,$22,0,0,0,0,0      ; honen leap hcorp lcorp wball subv torp
     .byte $22,$22,$11,$21,$21    ; torion gunion ghalf yura2 yfire
