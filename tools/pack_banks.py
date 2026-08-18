@@ -111,6 +111,7 @@ def main():
         assert meta["lt"] == 512, "unexpected length-table offset (slot patch too small)"
         return p
 
+    win23_img = None
     for level, bank in jobs:
         pre = prefix
         preblob = l3 if bank == 2 else l11 if bank == 1 else b""
@@ -132,8 +133,26 @@ def main():
         assert len(blobs["spawns"]) <= 256, f"level {level}: spawn list > 256 bytes"
         assert len(blobs["map"]) % 16 == 0
 
+        if level == 5:
+            rooms = [b"", b"", b""]      # 2-3 has no pipes: the extractor's "rooms"
+                                         # are lead-in artifacts -- reclaim the bank
         # lay out: header, then map, rooms, pipes, blocks, spawns [, W2 quad overlay]
         addr = lvl_hdr_addr + HDR_SIZE
+        far23 = b""
+        if level == 5:
+            # the far kit is BANK-RESIDENT at a fixed $A260 (cfg W2FARM):
+            # place it FIRST so the level data starts after it
+            m23 = open("build/w2code23.map").read()
+            w2c_sz = int(re.search(r"^W2C\s+\S+\s+\S+\s+([0-9A-F]+)", m23, re.M).group(1), 16)
+            far_m = re.search(r"^W2FAR\s+([0-9A-F]+)\s+\S+\s+([0-9A-F]+)", m23, re.M)
+            far_at, far_sz = int(far_m.group(1), 16), int(far_m.group(2), 16)
+            full23 = open("build/w2code23.bin", "rb").read()
+            win23_img = full23[:w2c_sz]
+            assert len(win23_img) <= 0x7D0, "2-3 window kit exceeds $7D0"
+            far23 = full23[w2c_sz:w2c_sz + far_sz]
+            assert far_at == 0xA268, "W2FARM moved -- update pack_banks"
+            assert addr <= far_at, "level 5 header overlaps the far kit"
+            addr = far_at + len(far23)
         place = {}
         for key, data in [("map", blobs["map"]), ("room0", rooms[0]), ("room1", rooms[1]),
                           ("room2", rooms[2]), ("pipes", blobs["pipes"]),
@@ -161,6 +180,15 @@ def main():
                 #   $B8-$B9 squash/corpse (GB D8,D9)
                 W2_TILES += [0xC4,0xC5,0xD4,0xD5, 0xC6,0xC7,0xD6,0xD7,
                              0xD8,0xD9]
+            if level == 5:
+                # 2-3 Marine Pop (kit_mar23.inc port ids $B0..):
+                #   $B0-$B7 gunion quads A/B (GB a0,a1,b0,b1 / a2,a3,b2,b3)
+                #   $B8-$BB seahorse pairs A/B (GB a8,a9 / b8,b9)
+                #   $BC-$BD tamao pair (GB aa,ab)
+                #   $BE-$CD dragon 16x32 frames A/B (upper+lower halves)
+                W2_TILES += [0xA0,0xA1,0xB0,0xB1,
+                             0xA8,0xA9, 0xAA,0xAB,
+                             0xAE,0xAF,0xBE,0xBF, 0xCE,0xCF,0xBC,0xBD]
             OVL_LO = 0xA4
             sl = b"".join(w2_ovl1[(t-0xA0)*16:(t-0xA0+1)*16] for t in W2_TILES)
             assert len(sl) == len(W2_TILES)*16
@@ -168,7 +196,15 @@ def main():
             addr += len(sl)
             if False:
                 quad_base = chardata            # $A0-$DC unused by this build
-            w2blob = open("build/w2code22.bin" if level == 4 else "build/w2code.bin", "rb").read()
+            if level == 5:
+                # 2-3: [window image][far image] per build/w2code23.map; the
+                # window part is stored in BANK 6 (the map owns bank 5) and
+                # pulled in by the stub blob; the far part is BANK-RESIDENT
+                # at $A260 (placed above, before the level data).
+                w2blob = open("build/w2stub.bin", "rb").read()
+            else:
+                w2blob = open("build/w2code22.bin" if level == 4 else
+                              "build/w2code.bin", "rb").read()
             assert len(w2blob) <= 0x800, "w2code blob exceeds the $1500 window"
             ovl_code_at = addr                  # the W2 kit overlay (header +20/21)
             addr += len(w2blob)
@@ -189,7 +225,10 @@ def main():
         hdr += bytes((ovl_code_at & 0xFF, ovl_code_at >> 8))
         assert len(hdr) == HDR_SIZE
 
-        region = hdr + blobs["map"] + rooms[0] + rooms[1] + rooms[2] \
+        region = hdr
+        if level == 5:
+            region += b"\xFF" * (0xA268 - (lvl_hdr_addr + HDR_SIZE)) + far23
+        region += blobs["map"] + rooms[0] + rooms[1] + rooms[2] \
                      + blobs["pipes"] + blobs["blocks"] + blobs["spawns"]
         if level >= 3:
             region += sl + w2blob
@@ -203,6 +242,12 @@ def main():
               f"({cols} cols, {len(region)} bytes at ${hdr_addr:04X}, "
               f"{BANK - hdr_off - len(region)} free)")
 
+    if win23_img is not None:
+        off = 6 * BANK + 0x3000
+        assert all(b == 0xFF for b in img[off:off + 0x7D0]), \
+            "bank 6 $B000 region not free for the 2-3 window kit"
+        img[off:off + len(win23_img)] = win23_img
+        print(f"pack_banks: 2-3 window kit ({len(win23_img)} bytes) -> bank 6 $B000")
     open(img_path, "wb").write(bytes(img))
 
 if __name__ == "__main__":

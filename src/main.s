@@ -160,6 +160,8 @@ rb_rows:     .res 1          ; restore_bg: height in tiles
 oi:          .res 1          ; object loop index
 ovx:         .res 1          ; object draw scratch: VRAM pixel X
 blk_lim:     .res 1          ; find_block loop limit = block_count*4 (set at boot)
+veh_vec:     .res 2          ; vehicle-level player handler (2-3/4-3): hi byte 0 =
+                             ; walking physics; set by the level blob's init
 mario_frame: .res 1          ; current pose index (0 stand, 1/2 walk, 3 jump)
 prev_frame:  .res 1          ; last drawn pose
 pose_tl:     .res 1          ; the 4 tiles of the current pose
@@ -734,9 +736,7 @@ main_loop:
     eor #1
     sta star_flash
 @nostar:
-    jsr try_fire                 ; B + Superball Mario -> fire a superball
-    jsr move_player              ; walk (updates spr_x) or scroll the camera (cam_x)
-    jsr jump_player              ; A = jump (real arc); updates spr_y while airborne
+    jsr player_step              ; walk+jump+fire -- or the vehicle handler (2-3)
     jsr goal_check               ; walked through the goal door? start the clear sequence
     jsr spawn_check              ; enemy spawn list (fires at the camera's right edge)
     jsr coin_collect             ; grab floating coins Mario walked/jumped into
@@ -1140,8 +1140,8 @@ main_loop:
     jsr add_score
     sed
     lda coins
-    clc
-    adc #1
+; (ina'd) clc
+    ina
     sta coins
     cld
     bne @done                    ; rolled 99->00 = 100th coin -> 1-up
@@ -1200,8 +1200,8 @@ main_loop:
     lda lives
     cmp #$99
     bcs @done
-    clc
-    adc #1
+; (ina'd) clc
+    ina
     sta lives
 @done:
     cld
@@ -1214,8 +1214,8 @@ main_loop:
     sed
     lda lives
     beq @done                    ; already 0 -> game over (TODO)
-    sec
-    sbc #1
+; (dea'd) sec
+    dea
     sta lives
 @done:
     cld
@@ -1698,6 +1698,19 @@ no:
 
 ; ---------------------------------------------------------------------------
 ; Level-clear (goal) sequence. Trace-exact vs the original (tools/trace_goal.lua):
+; player_step: the per-frame player physics dispatch. A vehicle level's blob
+; (Marine Pop 2-3; Sky Pop 4-3 later) installs veh_vec at bind time and takes
+; the whole slot: dpad sub movement, torpedoes, autoscroll (GB State_0D).
+.proc player_step
+    lda veh_vec+1
+    beq @walk
+    jmp (veh_vec)
+@walk:
+    jsr try_fire                 ; B + Superball Mario -> fire a superball
+    jsr move_player              ; walk (updates spr_x) or scroll the camera (cam_x)
+    jmp jump_player              ; A = jump (real arc); updates spr_y while airborne
+.endproc
+
 ; Mario walks fully through the door (screen x = 160) -> 240-frame jingle freeze
 ; (st=$07) -> 64-frame hold (st=$05 entry, $ffa6=$40) -> TALLY: TIME -1/frame with
 ; +10 score each, to 000 -> 43-frame hold (st=$06+$08) -> next level, clock 400.
@@ -1794,8 +1807,8 @@ no:
     beq @tdone
     sed                          ; TIME -= 1 (BCD; timer+1 = hundreds)
     lda timer
-    sec
-    sbc #1
+; (dea'd) sec
+    dea
     sta timer
     lda timer+1
     sbc #0
@@ -3797,6 +3810,8 @@ NUM_LEVELS = 6
 ; find_pipe: A = room index if Mario's centre column is a pipe entry (within the 2-wide
 ; pipe), else $FF.
 .proc find_pipe
+    lda pipe_cnt                 ; 0 pipes: the do-while below would walk the
+    beq @none                    ; whole RAM past the table (2-3 sim-caught)
     lda #8
     jsr calc_feet_col            ; feet_col = centre column
     ldx #0                       ; byte index into pipe_tab (5 bytes/pipe)
@@ -3820,6 +3835,7 @@ NUM_LEVELS = 6
     iny
     cpy pipe_cnt
     bne @loop
+@none:
     lda #$FF
     rts
 .endproc
@@ -3959,8 +3975,8 @@ NUM_LEVELS = 6
     lda #8
     jsr calc_feet_col            ; feet_col = Mario's centre column
     lda feet_col                 ; wcol = feet_col - 1
-    sec
-    sbc #1
+; (dea'd) sec
+    dea
     sta wcol
     lda feet_col+1
     sbc #0
@@ -4312,8 +4328,8 @@ TIMER_RATE = 40                  ; frames per clock unit (SML's $da00 sub-counte
     rts
 :   sed                          ; time -= 1 (BCD: timer+1 = hundreds, timer = tens/ones)
     lda timer
-    sec
-    sbc #1
+; (dea'd) sec
+    dea
     sta timer
     lda timer+1
     sbc #0
@@ -4807,6 +4823,9 @@ PIN_X   = 64
     lda death_anim               ; dying? the DEAD pose: tiles $0F/$1F + their X-mirrors
     beq :+                       ; (RE State_03 builds exactly this 16x16 OAM group)
     jmp @dead
+:   lda veh_vec+1                ; vehicle level: the kit's sub object IS the player
+    beq :+                       ; sprite -- walking Mario never draws (death excepted
+    rts                          ; above: the death hop shows Mario himself, GB-true)
 :   lda star_flash               ; star invincibility: Mario blinks (skip the draw this phase;
     beq :+                       ; the erase runs every frame regardless, so nothing goes stale)
     rts
@@ -5288,8 +5307,8 @@ STAR_ARC_N = 42
     bra @wtest
 @wleft:
     lda o_xl,x
-    sec
-    sbc #1
+; (dea'd) sec
+    dea
     sta feet_col
     lda o_xh,x
     sbc #0
@@ -5306,8 +5325,8 @@ STAR_ARC_N = 42
     lsr
     lsr
     lsr
-    sec
-    sbc #1
+; (dea'd) sec
+    dea
     sta mrow
     jsr read_solid
     beq @wmove
@@ -5956,6 +5975,7 @@ ovl_spawn:  jmp (ovl_vec+0)      ; A = GB type, Y = spawn entry (C=0 spawned/con
 ovl_update: jmp (ovl_vec+2)      ; X = slot (types >= OBJ_GIFT)
 ovl_width:  jmp (ovl_vec+10)     ; A = erase width for kit types
 .proc ovl_bind                   ; call RIGHT AFTER load_level (level bank mapped):
+    stz veh_vec+1                ; walking physics unless the blob's init opts in
     lda cur_level                ; bind the window vectors for this level's overlay
     cmp #3
     bcs @w2
@@ -6523,8 +6543,8 @@ ovl_width:  jmp (ovl_vec+10)     ; A = erase width for kit types
     bra @wchk
 @wleft:
     lda o_xl,x
-    sec
-    sbc #1
+; (dea'd) sec
+    dea
     sta feet_col
     lda o_xh,x
     sbc #0
@@ -6645,16 +6665,16 @@ ovl_width:  jmp (ovl_vec+10)     ; A = erase width for kit types
     lda o_vx,x
     bmi @xl
     lda o_xl,x
-    clc
-    adc #1
+; (ina'd) clc
+    ina
     sta o_xl,x
     bcc @ystep
     inc o_xh,x
     bra @ystep
 @xl:
     lda o_xl,x
-    sec
-    sbc #1
+; (dea'd) sec
+    dea
     sta o_xl,x
     bcs @ystep
     dec o_xh,x
@@ -7469,8 +7489,8 @@ title_tiles:                     ; the used tiles, SV-packed
     lsr
     lsr
     lsr
-    sec
-    sbc #1                       ; test the wall one row ABOVE the feet, so the flat floor the
+; (dea'd) sec
+    dea                       ; test the wall one row ABOVE the feet, so the flat floor the
     sta mrow                     ; ball bounces on is never mistaken for a wall (the yo-yo bug)
     jsr ball_solid               ; (a coin here is collected + bounces the ball)
     beq @vert
@@ -7522,8 +7542,8 @@ title_tiles:                     ; the used tiles, SV-packed
     lsr
     lsr
     lsr
-    sec
-    sbc #1
+; (dea'd) sec
+    dea
     sta mrow
     jsr ball_solid               ; (a coin here is collected + bounces the ball down)
     beq @edge
@@ -8104,8 +8124,8 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     bra @wchk
 @wleft:
     lda o_xl,x                   ; left: ahead = (o_x - 1) >> 3
-    sec
-    sbc #1
+; (dea'd) sec
+    dea
     sta feet_col
     lda o_xh,x
     sbc #0
@@ -8121,8 +8141,8 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     lsr
     lsr
     lsr
-    sec
-    sbc #1
+; (dea'd) sec
+    dea
     sta mrow
     jsr read_solid
     beq @wmove
@@ -9252,7 +9272,11 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     sta lvl_ptr+1
     lda hdr_buf+12
     sta pipe_cnt
-    beq @nopipes
+    bne @haspipes
+    lda #$FF                     ; NO pipes: poison entry 0 -- find_pipe is a
+    sta pipe_tab+1               ; do-while, so a stale table from the PREVIOUS
+    bra @nopipes                 ; level warps Mario into a ghost room (2-3,
+@haspipes:                       ; user... sim-caught before the user this time)
     asl
     asl
     adc pipe_cnt                 ; *5 (<= 3 pipes, no carry)
@@ -10381,8 +10405,8 @@ HUDSHADOW = $1D00                ; 16 rows x 40 bytes (stride 40), WRAM ($1D00-$
 :   rts
 @m:
     lda o_xl,x
-    sec
-    sbc #1
+; (dea'd) sec
+    dea
     sta o_xl,x
     bcs :+
     dec o_xh,x

@@ -317,6 +317,7 @@ def main():
         for i, (l, o) in enumerate(live):
             f.write(f"SFX_{l.upper()} = {i}\n")
         f.write(f"SFX_COUNT = {len(live)}\n")
+        f.write(".ifndef SFX_IDS_ONLY\n")
         f.write("sfx_offsets_lo:\n")
         for l, o in live: f.write(f"    .byte <{o}\n")
         f.write("sfx_offsets_hi:\n")
@@ -325,6 +326,7 @@ def main():
         for m in masks: f.write(f"    .byte {m}\n")
         f.write("sfx_nctrl:\n")
         for m in nctrl: f.write(f"    .byte %{m:08b}\n")
+        f.write(".endif\n")
     print(f"total: {len(blob)} bytes, {len([1 for _,o in table if o>=0])} live SFX")
 
 if __name__ == "__main__":

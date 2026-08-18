@@ -1,3 +1,4 @@
+.ifndef MAR23
 .proc suu_frame                  ; X = slot -> A = 0/2 (tile offset)
     lda o_tmr,x
     cmp #78
@@ -18,7 +19,9 @@
     lda #0
     rts
 .endproc
+.endif
 
+.ifndef MAR23
 .proc draw_suu
     ldx oi
     lda o_y,x
@@ -53,8 +56,9 @@
 @done:
     rts
 .endproc
+.endif
 
-.ifndef YUR22
+.if .not (.defined(YUR22) .or .defined(MAR23))
 .proc draw_rock
     lda #ROCK_TL
     sta tmpL3

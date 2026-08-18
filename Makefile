@@ -20,13 +20,17 @@ ROM     = build/super-mario-land.sv
 
 all: $(ROM)
 
-$(ROM): $(OBJS) $(CFG) tools/pack_banks.py tools/gen_w2abi.py src/w2code.s cfg/w2code.cfg $(W2GFX)
+$(ROM): $(OBJS) $(CFG) tools/pack_banks.py tools/gen_w2abi.py src/w2code.s src/kit_mar23.inc src/w2stub.s cfg/w2code.cfg cfg/w2stub.cfg $(W2GFX)
 	$(LD) -C $(CFG) $(OBJS) -o $@ -m build/rom.map -Ln build/rom.lbl --dbgfile build/rel.dbg
 	python3 tools/gen_w2abi.py build/rel.dbg build/w2abi.inc
 	$(AS) $(ASFLAGS) -I build src/w2code.s -o build/w2code.o
 	$(LD) -C cfg/w2code.cfg build/w2code.o -o build/w2code.bin
 	$(AS) $(ASFLAGS) -I build -D YUR22 src/w2code.s -o build/w2code22.o
 	$(LD) -C cfg/w2code.cfg build/w2code22.o -o build/w2code22.bin
+	$(AS) $(ASFLAGS) -I build -D MAR23 src/w2code.s -o build/w2code23.o
+	$(LD) -C cfg/w2code.cfg build/w2code23.o -o build/w2code23.bin -m build/w2code23.map
+	$(AS) $(ASFLAGS) -I build src/w2stub.s -o build/w2stub.o
+	$(LD) -C cfg/w2stub.cfg build/w2stub.o -o build/w2stub.bin
 	python3 tools/pack_banks.py $@ build/rom.map 0:1 2:2 3:3 4:4 5:5
 	@cp build/rel.dbg build/dbg.txt   # the sim harness reads symbols from here:
 	@echo "built $@ ($$(wc -c < $@) bytes)"   # no separate debug build anymore

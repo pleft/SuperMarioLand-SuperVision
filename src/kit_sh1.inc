@@ -46,6 +46,7 @@
 
 ; --- SUU $02: 200f cycle -- 62f hold low, 16f rise, 105f hold high (anim
 ; toggles every ~16f), 16f descend (trace: y 120<->104 GB) ---
+.ifndef MAR23                    ; 2-3 spawns no Suu -- reclaim
 .proc upd_suu
     jsr l3_cull
     bcc :+
@@ -87,10 +88,11 @@
 @hurt:
     jmp l3_hurt                  ; hurt from the side only (see l3_hurt)
 .endproc
+.endif
 
 ; --- ROCK $0C: hangs 174f, then falls 1px/f THROUGH terrain; gone at y>=168.
 ; Spiky: any contact hurts; star/ball have no effect ($3186: 00 00 FF 00 00) ---
-.ifndef YUR22                    ; 2-2 has no spiky ball -- reclaim the bytes
+.if .not (.defined(YUR22) .or .defined(MAR23)) ; 2-2/2-3: no spiky ball
 .proc upd_rock
     lda o_tmr,x
     cmp #174

@@ -10,6 +10,7 @@
 ; Next: Honen ($10) and the Yurarin leaper ($24).
 ; ---------------------------------------------------------------------------
 .include "w2abi.inc"
+SFX_IDS_ONLY = 1                 ; ids only -- the engine owns the tables
 .include "../build/audio/sfx.inc"
 
 ; --- object ids + kit tiles (mirror main.s; the GB sheets are common) ---
@@ -56,7 +57,11 @@ init:                            ; $1500: bind our vector table
     sta ovl_vec,x
     dex
     bpl :-
+.ifdef MAR23
+    jmp veh_init                 ; 2-3: install the vehicle player (veh_vec)
+.else
     rts
+.endif
 
 vec_tab:
     .addr w2_spawn, w2_update, w2_token, w2_gift, w2_draw, w2_width
@@ -80,29 +85,48 @@ vec_tab:
     bra @consume
 @not16:
 .endif
+.ifndef MAR23
     cmp #$02
     bne :+
     lda #OBJ_SUU
     bra @go
+.endif
 .ifndef YUR22                    ; 2-2 spawns no rock/honen (types nop'd there)
+.ifndef MAR23
 :   cmp #$0C
     bne :+
     lda #OBJ_ROCK
     bra @go
+.endif
 :   cmp #$10
     bne :+
     lda #OBJ_HONEN
     bra @go
 .endif
 :   cmp #$24
+.ifdef MAR23
+    bne @mar23                   ; the 2-3 types dispatch in kit_mar23.inc
+.else
     bne @consume
+.endif
     lda #OBJ_LEAP
     jsr @go                      ; common body, then the pre-hop aim (F0 $60:
     bcs @full                    ; the script faces Mario before the first rise)
     jsr aim_leap
     clc                          ; consumed (aim's cmp may leave C set)
     rts
-@go:
+@go = w2_go
+@consume:
+    clc                          ; unknown W2 types consume
+@full:
+    rts
+.ifdef MAR23
+@mar23:
+    jmp mar_spawn
+.endif
+.endproc
+
+.proc w2_go                      ; the shared allocate+seed (A=type, Y=entry)
     jsr obj_alloc_typed
     bcs @full                    ; pool full: C=1 -> the spawner retries
     stz o_pdr,x                  ; fresh slot: NOTHING to erase (a stale "was
@@ -114,13 +138,12 @@ vec_tab:
     sta o_vy,x                   ; base y = the column rim (draw clip + hold)
     stz o_tmr,x
     stz o_st,x
-@consume:
-    clc                          ; unknown W2 types (honen/leaper: next) consume
+    clc
 @full:
     rts
 .endproc
 
-.proc w2_update                  ; X = slot; types 22..24
+.proc w2_update                  ; X = slot; kit types 22+
     lda o_type,x
     sec
     sbc #OBJ_GIFT
@@ -136,7 +159,13 @@ vec_tab:
     rts
 .endproc
 w2_updtab:
-.ifdef YUR22
+.ifdef MAR23
+    .word w2_rts-1, w2_nop-1, w2_nop-1
+    .word upd_honen-1, upd_leap-1, w2_nop-1, w2_nop-1, upd_wball-1
+    .word w2_rts-1, upd_torp-1, upd_torion-1, upd_gunion-1
+    .word upd_ghalf-1, upd_yura2-1, upd_yfire-1, upd_tamao-1
+    .word upd_dragon-1, upd_dshot-1, upd_drgb-1
+.elseif .defined(YUR22)
     .word w2_rts-1, upd_suu-1, w2_nop-1
     .word w2_nop-1, upd_leap-1, w2_nop-1, w2_nop-1, upd_wball-1
     .word upd_mek-1, upd_mhead-1, upd_msq-1, upd_mcorp-1
@@ -160,7 +189,13 @@ w2_updtab:
     rts
 .endproc
 w2_drwtab:
-.ifdef YUR22
+.ifdef MAR23
+    .word w2_rts-1, w2_nop-1, w2_nop-1
+    .word draw_honen-1, draw_leap-1, w2_nop-1, w2_nop-1, draw_wball-1
+    .word draw_subv-1, draw_torp-1, draw_leap-1, draw_gunion-1
+    .word draw_ghalf-1, draw_yura2-1, draw_yura2-1, draw_tamao-1
+    .word draw_dragon-1, draw_dshot-1, draw_drgb-1
+.elseif .defined(YUR22)
     .word w2_rts-1, draw_suu-1, w2_nop-1
     .word w2_nop-1, draw_leap-1, w2_nop-1, w2_nop-1, draw_wball-1
     .word draw_mek-1, draw_mhead-1, draw_msq-1, draw_mcorp-1
@@ -470,6 +505,9 @@ w2_rts:
 .endproc
 .endif
 
+.ifdef MAR23
+.segment "W2FAR"
+.endif
 .proc draw_leap
     lda #LEAP_TA
     ; falls through
@@ -521,16 +559,26 @@ lq_dc: .byte 0,2,0,2
 lq_tn: .byte 0,1,2,3
 lq_tf: .byte 1,0,3,2
 .endproc
+.ifdef MAR23
+.segment "W2C"
+.endif
+
 
 w2_nop: rts                      ; dead dispatch rows (corpse types unused)
 
 
+.ifdef MAR23
+.segment "W2FAR"
+.endif
 .proc w2_token                   ; anim tokens (mirrors the draw choices)
     lda o_type,x
+.ifndef MAR23
     cmp #OBJ_SUU
     bne :+
     jmp suu_frame
-:   cmp #OBJ_HONEN
+:
+.endif
+    cmp #OBJ_HONEN
     beq @flap
     cmp #OBJ_LEAP
     beq @flap
@@ -545,6 +593,17 @@ w2_nop: rts                      ; dead dispatch rows (corpse types unused)
     rts
 @notmek:
 .endif
+.ifdef MAR23
+    cmp #OBJ_TORION
+    beq @flap2
+    cmp #OBJ_GHALF
+    beq @flap2
+    cmp #OBJ_DSHOT
+    bne @none
+@flap2:
+    jmp foe_frame                ; anim bit dirties the redraw
+@none:
+.endif
     lda #0                       ; gift/rock/corpses: position-only redraws
     rts
 @flap:
@@ -554,8 +613,29 @@ w2_nop: rts                      ; dead dispatch rows (corpse types unused)
     ora #2
 :   rts
 .endproc
+.segment "W2C"
+
 
 .proc w2_width                   ; erase widths (W2 roster only)
+.ifdef MAR23
+    cpy #OBJ_TORP
+    bne :+
+    lda #2                       ; the dart: one tile
+    rts
+:   cpy #OBJ_GHALF
+    bne :+
+    lda #2
+    rts
+:   cpy #OBJ_DSHOT
+    bne :+
+    lda #2
+    rts
+:   cpy #OBJ_SUBV
+    bcc @wbase23                 ; honen/leap/wball keep the shared rows
+    lda #$83                     ; every 2-3 body: 16 wide, 16 tall
+    rts
+@wbase23:
+.endif
 .ifdef YUR22
     cpy #OBJ_MEK
     beq @w83
@@ -967,6 +1047,9 @@ draw_msq:
 .endif
 
 ; --- the shared kit bodies (source-identical with the 1-3 kit) ---
+.ifdef MAR23
+.include "kit_mar23.inc"         ; the 2-3 Marine Pop kit (vehicle + foes)
+.endif
 .include "kit_sh1.inc"           ; l3_cull, l3_box, upd_suu, upd_rock
 .include "kit_sh2.inc"           ; l3_hurt
 .include "kit_sh3.inc"           ; l3_xoff
