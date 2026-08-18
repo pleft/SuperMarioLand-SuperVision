@@ -374,7 +374,7 @@ vthp:   .res 10                  ; per-slot torpedo HP (GB slot+$0C & $3F)
     sta o_xh,x
     lda spr_y
     sec
-    sbc #2
+    sbc #10                      ; o_y = visual-8 (the draw_one/erase law)
     sta o_y,x
     lda #SFX_DFE0_02             ; the launch pop (GB $dfe0=$02)
     jsr sfx_play
@@ -411,7 +411,7 @@ vthp:   .res 10                  ; per-slot torpedo HP (GB slot+$0C & $3F)
     ldx oi
     lda o_y,x
     clc
-    adc #6
+    adc #14                      ; visual y (+8) + the GB's +6 nose row
     jsr vrowset
     jsr read_map_tile
     cmp #$60
@@ -469,6 +469,8 @@ vthp:   .res 10                  ; per-slot torpedo HP (GB slot+$0C & $3F)
     cmp #23
     bcs @next
     lda o_y,x
+    clc
+    adc #8                       ; the torpedo's VISUAL y (o_y is top-8)
     sec
     sbc o_y,y
     clc
@@ -595,10 +597,12 @@ sc0:
     ldx #TORP_T
     bra draw_one
 .endproc
-.proc draw_one                   ; X = the tile, at (o_y, spr_col)
-    phx
-    ldx oi
-    lda o_y,x
+.proc draw_one                   ; X = the tile. o_y is the 16px-box TOP; the
+    phx                          ; 8px sprite draws at +8 to match the engine's
+    ldx oi                       ; erase (the wball trail law) -- spawns store
+    lda o_y,x                    ; visual_y - 8 in o_y.
+    clc
+    adc #8
     sta dy
     lda spr_col
     sta dcol

@@ -1140,8 +1140,8 @@ main_loop:
     jsr add_score
     sed
     lda coins
-; (ina'd) clc
-    ina
+    clc
+    adc #1
     sta coins
     cld
     bne @done                    ; rolled 99->00 = 100th coin -> 1-up
@@ -1200,8 +1200,8 @@ main_loop:
     lda lives
     cmp #$99
     bcs @done
-; (ina'd) clc
-    ina
+    clc
+    adc #1
     sta lives
 @done:
     cld
@@ -1210,12 +1210,34 @@ main_loop:
     rts
 .endproc
 
+.proc colx_left                  ; feet_col = slot X's x - 1 (caller shifts)
+    lda o_xl,x
+    sec
+    sbc #1
+    sta feet_col
+    lda o_xh,x
+    sbc #0
+    sta feet_col+1
+    rts
+.endproc
+.proc timer_dec                  ; TIME -= 1 (BCD: timer+1 = hundreds)
+    sed
+    lda timer
+    sec
+    sbc #1
+    sta timer
+    lda timer+1
+    sbc #0
+    sta timer+1
+    cld
+    rts
+.endproc
 .proc lose_life
     sed
     lda lives
     beq @done                    ; already 0 -> game over (TODO)
-; (dea'd) sec
-    dea
+    sec
+    sbc #1
     sta lives
 @done:
     cld
@@ -1807,8 +1829,8 @@ no:
     beq @tdone
     sed                          ; TIME -= 1 (BCD; timer+1 = hundreds)
     lda timer
-; (dea'd) sec
-    dea
+    sec
+    sbc #1
     sta timer
     lda timer+1
     sbc #0
@@ -3975,8 +3997,8 @@ NUM_LEVELS = 6
     lda #8
     jsr calc_feet_col            ; feet_col = Mario's centre column
     lda feet_col                 ; wcol = feet_col - 1
-; (dea'd) sec
-    dea
+    sec
+    sbc #1
     sta wcol
     lda feet_col+1
     sbc #0
@@ -4326,15 +4348,7 @@ TIMER_RATE = 40                  ; frames per clock unit (SML's $da00 sub-counte
     ora timer+1
     bne :+
     rts
-:   sed                          ; time -= 1 (BCD: timer+1 = hundreds, timer = tens/ones)
-    lda timer
-; (dea'd) sec
-    dea
-    sta timer
-    lda timer+1
-    sbc #0
-    sta timer+1
-    cld
+:   jsr timer_dec               ; BCD TIME -= 1 (shared)
     lda #1
     sta hud_dirty
     lda timer                    ; hit 000? TIME-UP death: the hop plays (harness: state
@@ -5306,13 +5320,7 @@ STAR_ARC_N = 42
     sta feet_col+1
     bra @wtest
 @wleft:
-    lda o_xl,x
-; (dea'd) sec
-    dea
-    sta feet_col
-    lda o_xh,x
-    sbc #0
-    sta feet_col+1
+    jsr colx_left                ; feet_col = (o_x - 1), pre-shift
 @wtest:
     lsr feet_col+1
     ror feet_col
@@ -6542,13 +6550,7 @@ ovl_width:  jmp (ovl_vec+10)     ; A = erase width for kit types
     sta feet_col+1
     bra @wchk
 @wleft:
-    lda o_xl,x
-; (dea'd) sec
-    dea
-    sta feet_col
-    lda o_xh,x
-    sbc #0
-    sta feet_col+1
+    jsr colx_left                ; feet_col = (o_x - 1), pre-shift
 @wchk:
     lsr feet_col+1
     ror feet_col
@@ -6665,16 +6667,16 @@ ovl_width:  jmp (ovl_vec+10)     ; A = erase width for kit types
     lda o_vx,x
     bmi @xl
     lda o_xl,x
-; (ina'd) clc
-    ina
+    clc
+    adc #1
     sta o_xl,x
     bcc @ystep
     inc o_xh,x
     bra @ystep
 @xl:
     lda o_xl,x
-; (dea'd) sec
-    dea
+    sec
+    sbc #1
     sta o_xl,x
     bcs @ystep
     dec o_xh,x
@@ -8123,13 +8125,7 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     sta feet_col+1
     bra @wchk
 @wleft:
-    lda o_xl,x                   ; left: ahead = (o_x - 1) >> 3
-; (dea'd) sec
-    dea
-    sta feet_col
-    lda o_xh,x
-    sbc #0
-    sta feet_col+1
+    jsr colx_left                ; feet_col = (o_x - 1), pre-shift
 @wchk:
     lsr feet_col+1
     ror feet_col
@@ -9272,11 +9268,7 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     sta lvl_ptr+1
     lda hdr_buf+12
     sta pipe_cnt
-    bne @haspipes
-    lda #$FF                     ; NO pipes: poison entry 0 -- find_pipe is a
-    sta pipe_tab+1               ; do-while, so a stale table from the PREVIOUS
-    bra @nopipes                 ; level warps Mario into a ghost room (2-3,
-@haspipes:                       ; user... sim-caught before the user this time)
+    beq @nopipes
     asl
     asl
     adc pipe_cnt                 ; *5 (<= 3 pipes, no carry)
@@ -10405,8 +10397,8 @@ HUDSHADOW = $1D00                ; 16 rows x 40 bytes (stride 40), WRAM ($1D00-$
 :   rts
 @m:
     lda o_xl,x
-; (dea'd) sec
-    dea
+    sec
+    sbc #1
     sta o_xl,x
     bcs :+
     dec o_xh,x

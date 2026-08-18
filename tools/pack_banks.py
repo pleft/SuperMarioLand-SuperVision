@@ -150,7 +150,7 @@ def main():
             win23_img = full23[:w2c_sz]
             assert len(win23_img) <= 0x7D0, "2-3 window kit exceeds $7D0"
             far23 = full23[w2c_sz:w2c_sz + far_sz]
-            assert far_at == 0xA268, "W2FARM moved -- update pack_banks"
+            assert far_at == 0xA260, "W2FARM moved -- update pack_banks"
             assert addr <= far_at, "level 5 header overlaps the far kit"
             addr = far_at + len(far23)
         place = {}
@@ -227,7 +227,7 @@ def main():
 
         region = hdr
         if level == 5:
-            region += b"\xFF" * (0xA268 - (lvl_hdr_addr + HDR_SIZE)) + far23
+            region += b"\xFF" * (0xA260 - (lvl_hdr_addr + HDR_SIZE)) + far23
         region += blobs["map"] + rooms[0] + rooms[1] + rooms[2] \
                      + blobs["pipes"] + blobs["blocks"] + blobs["spawns"]
         if level >= 3:
