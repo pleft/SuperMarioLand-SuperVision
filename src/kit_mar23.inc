@@ -343,23 +343,41 @@ vthp:   .res 10                  ; per-slot torpedo HP (GB slot+$0C & $3F)
 .endproc
 
 .segment "W2FAR"
-.proc draw_subv                  ; quad $70-$73 + the propeller swap: on frame
-    lda #SUB_T                   ; B the BL tile is $74 (GB c203 $0A/$0B toggle,
-    jsr draw_16q                 ; OAM-verified)
-    lda frame_count
-    and #4
-    beq @done
+.proc draw_subv                  ; the sub quad; the BL tile IS the propeller:
+    stz do_flip                  ; $72 <-> $74 every 4f (OAM: it REPLACES -- a
+    ldy #0                       ; framebuffer overdraw merged both blades,
+@q: phy                          ; user-caught)
     ldx oi
     lda o_y,x
     clc
-    adc #8
+    adc sq_dy,y
     sta dy
     lda spr_col
+    clc
+    adc sq_dc,y
     sta dcol
-    ldx #$74
-    jmp draw_quad
-@done:
+    cpy #2                       ; the BL quad = the propeller
+    bne @plain
+    lda frame_count
+    and #4
+    beq @bladeA
+    lda #$74                     ; blade B
+    bra @tx
+@bladeA:
+    lda #SUB_T+2                 ; blade A
+@plain:
+    lda sq_t,y
+@tx:
+    tax
+    jsr draw_quad
+    ply
+    iny
+    cpy #4
+    bne @q
     rts
+sq_dy: .byte 0,0,8,8
+sq_dc: .byte 0,2,0,2
+sq_t:  .byte SUB_T, SUB_T+1, SUB_T+2, SUB_T+3
 .endproc
 
 .segment "W2C"
