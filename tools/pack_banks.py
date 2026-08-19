@@ -200,11 +200,9 @@ def main():
                 assert not hot, f"2-3 map uses carved BG tiles: {sorted(hot)}"
             assert addr <= far_at, "level 5 header overlaps the far kit"
             addr = far_at + len(far23)
-            # the spawn list rides bank 6 (the stub copies it into spawn_tab);
-            # bank 5 keeps only the $FFFF sentinel the loader consumes
-            spawns23 = blobs["spawns"]
-            assert len(spawns23) <= 160, "2-3 spawn list exceeds the stub copy"
-            blobs["spawns"] = b"\xFF\xFF"
+            # (the spawn list used to ride bank 6 behind a loader stub: bank 5
+            # had no room for the kit before maps were column-deduped. It does
+            # now, so 2-3 loads like every other level -- no stub, no detour.)
             if carve23:
                 pre = bytearray(pre)
                 co = sym["bg_chardata"] - BASE
@@ -274,11 +272,7 @@ def main():
             if False:
                 quad_base = chardata            # $A0-$DC unused by this build
             if level == 5:
-                # 2-3: [window image][far image] per build/w2code23.map; the
-                # window part is stored in BANK 6 (the map owns bank 5) and
-                # pulled in by the stub blob; the far part is BANK-RESIDENT
-                # at $A260 (placed above, before the level data).
-                w2blob = open("build/w2stub.bin", "rb").read()
+                w2blob = win23_img          # the kit itself, in its own bank
             else:
                 w2blob = open("build/w2code22.bin" if level == 4 else
                               "build/w2code.bin", "rb").read()
@@ -332,21 +326,15 @@ def main():
               f"{BANK - hdr_off - len(region)} free)")
 
     if win23_img is not None:
-        off = 6 * BANK + 0x3000
-        assert all(b == 0xFF for b in img[off:off + 0x800 + 160]), \
-            "bank 6 $B000 region not free for the 2-3 window kit"
-        img[off:off + len(win23_img)] = win23_img
-        img[off + 0x800:off + 0x800 + len(spawns23)] = spawns23
-        # the 2-3 rescue creature sheet at bank 6 $B900: the L13E room machine
-        # copies it over the moth tiles when ending13 == 2 (main.s @pdone)
+        # the rescue creature sheet: pinned in BANK 5's tail (2-3's own bank);
+        # the L13E room machine copies it over the moth tiles (main.s @pdone)
         creat = open("build/gfx/creature23.svt", "rb").read()
         assert len(creat) == 128, "creature23.svt must be 8 tiles (128B)"
-        coff = 6 * BANK + 0x3900
+        coff = 5 * BANK + 0xBF00 - BASE
         assert all(b == 0xFF for b in img[coff:coff + 128]), \
-            "bank 6 $B900 region not free for the creature sheet"
+            "bank 5 $BF00 not free for the creature sheet"
         img[coff:coff + 128] = creat
-        print(f"pack_banks: 2-3 window kit ({len(win23_img)}B) + spawns ({len(spawns23)}B) "
-              f"+ creature (128B) -> bank 6 $B000/$B900")
+        print(f"pack_banks: 2-3 kit in its own bank; creature (128B) -> bank 5 $BF00")
     if w3_jobs:
         pack_w3(img, sym)
     open(img_path, "wb").write(bytes(img))
@@ -401,7 +389,7 @@ def pack_w3(img, sym):
         "bank 6 spawn-table slot not free"
     img[BNK6 + W3SPT - BASE:BNK6 + W3SPT - BASE + len(spt)] = spt
     # scripts / display lists / the compact tile slice, at the kit's pins
-    for pin, path in ((0xB980, "build/w3scripts.bin"), (0xBBD0, "build/w3dlists.bin")):
+    for pin, path in ((0xB000, "build/w3scripts.bin"), (0xB520, "build/w3dlists.bin")):
         d = open(path, "rb").read()
         off = BNK6 + pin - BASE
         assert all(b == 0xFF for b in img[off:off + len(d)]), f"bank 6 ${pin:04X} busy"
@@ -409,13 +397,15 @@ def pack_w3(img, sym):
     ovl = open("build/gfx/w3_ovl_8A00.svt", "rb").read()
     order = [int(t, 16) for t in open("build/w3tiles.txt").read().split()]
     slice_ = b"".join(ovl[(t - 0xA0) * 16:(t - 0xA0 + 1) * 16] for t in order)
-    off = BNK6 + 0xBD20 - BASE
-    assert all(b == 0xFF for b in img[off:off + len(slice_)]), "bank 6 $BD20 busy"
+    off = BNK6 + 0xB780 - BASE
+    assert all(b == 0xFF for b in img[off:off + len(slice_)]), "bank 6 $B780 busy"
     img[off:off + len(slice_)] = slice_
-    win = open("build/w3code.bin", "rb").read()
+    full3 = open("build/w3code.bin", "rb").read()
     m3 = open("build/w3code.map").read()
     w3c_sz = int(re.search(r"^W2C\s+\S+\s+\S+\s+([0-9A-F]+)", m3, re.M).group(1), 16)
-    win = win[:w3c_sz]
+    fm = re.search(r"^W2FAR\s+([0-9A-F]+)\s+\S+\s+([0-9A-F]+)", m3, re.M)
+    far3_at, far3 = (int(fm.group(1), 16), full3[w3c_sz:w3c_sz + int(fm.group(2), 16)]) if fm else (0, b"")
+    win = full3[:w3c_sz]
     assert len(win) <= 0x800, "W3 kit exceeds the $800 window"
     assert all(b == 0xFF for b in img[BNK6 + W3WIN - BASE:BNK6 + W3WIN - BASE + 0x800]), \
         "bank 6 $A400 window slot not free"
@@ -456,7 +446,7 @@ def pack_w3(img, sym):
         hdr.append(pieces[(i, "pipes")][1])
         hdr += bytes((pieces[(i, "blocks")][0] & 0xFF, pieces[(i, "blocks")][0] >> 8))
         hdr.append(pieces[(i, "blocks")][1])
-        quad_base = 0xBD20 - 0xA0 * 16          # port ids $A0.. -> the slice
+        quad_base = 0xB780 - 0xA0 * 16          # port ids $A0.. -> the slice
         for v in (sent_at, quad_base, stub_at, bgc_at):
             hdr += bytes((v & 0xFF, v >> 8))
         assert len(hdr) == HDR_SIZE
@@ -465,6 +455,13 @@ def pack_w3(img, sym):
     assert all(b == 0xFF for b in img[toff:toff + len(tail)]), \
         "bank 1 tail not free for W3 (1-1 region grew past W3HDR?)"
     img[toff:toff + len(tail)] = tail
+    if far3:
+        assert far3_at == 0xBE40, "W3FAR moved -- update pack_banks"
+        foff = 1 * BANK + far3_at - BASE
+        assert all(b == 0xFF for b in img[foff:foff + len(far3)]), \
+            f"bank 1 ${far3_at:04X} not free for the W3 far kit"
+        img[foff:foff + len(far3)] = far3
+    print(f"pack_banks: W3 far kit {len(far3)}B at $BE40")
     print(f"pack_banks: W3 -> bank 6 cold {len(cold) + len(spt) + len(win)}B, "
           f"bank 1 tail {len(tail)}B at ${W3HDR:04X} "
           f"({BASE + BANK - W3HDR - len(tail)} free)")

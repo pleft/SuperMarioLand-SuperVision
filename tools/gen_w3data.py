@@ -18,6 +18,9 @@ OUT_INC = "build/w3data.inc"
 SCRIPT_TBL = 0x349E                       # AIScriptPtrTable, 99 entries
 DL_RIGHT, DL_LEFT = 0x2FE2, 0x30B4        # metasprite display lists
 PHYS_TBL = 0x3375                         # 3 bytes per type
+CONTACT_TBL = 0x3186                      # 5 bytes per type; +0 = the STOMP result
+                                          # (0 = not stompable: the GB's stomp test
+                                          # at $08C7 reads this column)
 
 # every GB type W3's spawn lists name (types the ENGINE already handles --
 # $00/$04/$0A/$0B/$0E/$36 -- and the shared kit types $02/$0C are excluded)
@@ -63,6 +66,10 @@ def main():
         if t in types or t > 0x7F:
             continue
         types.append(t)
+        for c in range(5):                    # contact results are types too
+            r = ROM[CONTACT_TBL + 5 * t + c]  # (stomp/ball/star chains)
+            if 0 < r <= 0x7F:
+                todo.append(r)
         b = script_bytes(t)
         i = 0
         while i < len(b):
@@ -72,7 +79,7 @@ def main():
                 if op == 0xF8:
                     params.add(arg)
                 if op in (0xF1, 0xF3) and arg <= 0x7F:
-                    todo.append(arg)
+                    todo.append(arg)          # morph / spawn-child targets
                 i += 2
             else:
                 i += 1
@@ -101,6 +108,9 @@ def main():
         f.write("w3_phys0:\n    .byte " + ",".join(f"${ROM[PHYS_TBL+3*t]:02X}" for t in types) + "\n")
         f.write("w3_phys1:\n    .byte " + ",".join(f"${ROM[PHYS_TBL+3*t+1]:02X}" for t in types) + "\n")
         f.write("w3_phys2:\n    .byte " + ",".join(f"${ROM[PHYS_TBL+3*t+2]:02X}" for t in types) + "\n")
+        f.write("; contact table $3186 column +0: the type to MORPH INTO when\n")
+        f.write("; stomped ($00 = not stompable -- Mario passes through the head)\n")
+        f.write("w3_stomp:\n    .byte " + ",".join(f"${ROM[CONTACT_TBL+5*t]:02X}" for t in types) + "\n")
         # display lists: index by param through a compact table
         f.write(f"W3_NPARAM = {len(params)}\n")
         f.write("w3_paramtab:\n    .byte " + ",".join(f"${p:02X}" for p in params) + "\n")

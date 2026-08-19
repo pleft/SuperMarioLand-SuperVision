@@ -2269,10 +2269,10 @@ quad_rows: .byte 0, 0, 8, 8
     lda ending13                 ; 2 = the 2-3 flavor: the fake Daisy becomes
     dea                          ; the WORLD-2 creature -- overwrite the moth
     beq @w1moth                  ; tiles (RAM copy) with the bank-6 sheet
-    lda #(6 << 5) | (SYSCTRL_NMI_EN | SYSCTRL_TIMER_IRQ | SYSCTRL_LCD)
-    sta SYS_CTRL
-    ldx #0
-:   lda $B900,x                  ; pack_banks pins creature23.svt here
+    lda #(5 << 5) | (SYSCTRL_NMI_EN | SYSCTRL_TIMER_IRQ | SYSCTRL_LCD)
+    sta SYS_CTRL                 ; 2-3's OWN bank (the ending runs with bank 1
+    ldx #0                       ; mapped for the room overlay)
+:   lda $BF00,x                  ; pack_banks pins creature23.svt here
     sta moth_tiles,x
     inx
     bpl :-

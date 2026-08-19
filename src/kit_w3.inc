@@ -18,13 +18,14 @@
 ; ===========================================================================
 .include "w3data.inc"            ; generated: typetab/scripts/phys/display lists
 
-W3SCRB   = $B980                 ; bank 6 pins (pack_banks writes all three):
-W3DLB    = $BBD0                 ;   scripts / metasprite display lists /
-W3TILB   = $BD20                 ;   the compact W3 tile slice
+W3SCRB   = $B000                 ; bank 6 pins (pack_banks writes all three):
+W3DLB    = $B520                 ;   scripts / metasprite display lists /
+W3TILB   = $B780                 ;   the compact W3 tile slice
 W3SYSC   = $2026
 W3FLG    = $0B                   ; NMI | TIMER_IRQ | LCD (load_level's mask)
 
 ; --- spawn: A = GB type, Y = spawn entry offset. C=0 consumed. -------------
+.segment "W2FAR"
 .proc w3_spawn
     ldx #W3_NTYPES-1
 :   cmp w3_typetab,x
@@ -45,6 +46,7 @@ W3FLG    = $0B                   ; NMI | TIMER_IRQ | LCD (load_level's mask)
 @full:
     rts
 .endproc
+.segment "W2C"
 
 .proc w3_init                    ; X = slot: a fresh VM context
     stz w3_pc,x
@@ -88,6 +90,13 @@ W3FLG    = $0B                   ; NMI | TIMER_IRQ | LCD (load_level's mask)
 .endproc
 
 .proc w3_move                    ; apply this tick's velocity (X = slot)
+    jsr w3_touch
+    ldx oi
+    lda o_type,x                 ; a stomp morph may have retyped/freed the slot
+    cmp #OBJ_W3
+    beq :+
+    rts
+:
     lda o_vx,x
     and #$0F
     beq @ystep
@@ -228,6 +237,7 @@ W3FLG    = $0B                   ; NMI | TIMER_IRQ | LCD (load_level's mask)
 .endproc
 
 ; --- F0: direction control (disasm $2711-$2789) ---------------------------
+.segment "W2FAR"
 .proc w3_face                    ; tmpL3 = argument
     lda tmpL3
     and #$C0
@@ -235,7 +245,9 @@ W3FLG    = $0B                   ; NMI | TIMER_IRQ | LCD (load_level's mask)
     lda tmpL3
     and #$40                     ; bit6: face Mario horizontally
     beq @tv
-    jsr w3_screenx               ; A = the object's screen x
+    lda o_xl,x                   ; the object's screen x
+    sec
+    sbc cam_x
     cmp spr_x
     lda o_vy,x
     ora #$01                     ; object right of Mario -> ... set below
@@ -290,7 +302,9 @@ W3FLG    = $0B                   ; NMI | TIMER_IRQ | LCD (load_level's mask)
 @rts:
     rts
 .endproc
+.segment "W2C"
 
+.segment "W2FAR"
 .proc w3_morph                   ; F3: become another type, fresh context
     lda tmpL3
     ldy #W3_NTYPES-1
@@ -305,21 +319,32 @@ W3FLG    = $0B                   ; NMI | TIMER_IRQ | LCD (load_level's mask)
     sta w3_ti,x
     jmp w3_init
 .endproc
+.segment "W2C"
 
 ; --- terrain probes (the port's own tile semantics) -----------------------
 .proc w3_floor                   ; C=1 when the tile under the object is SOLID
-    lda o_xl,x
+    lda o_xl,x                   ; column = (world x + 4) >> 3
     clc
     adc #4
     sta feet_col
     lda o_xh,x
     adc #0
     sta feet_col+1
-    jsr w3_colshift
+    lsr feet_col+1
+    ror feet_col
+    lsr feet_col+1
+    ror feet_col
+    lsr feet_col+1
+    ror feet_col
     lda o_y,x                    ; GB ffc2+8 == port o_y+8+8 (the visual-8 law)
     clc
     adc #16
-    jsr w3_rowset
+    lsr
+    lsr
+    lsr
+    sec
+    sbc #2
+    sta mrow
     phx
     jsr read_solid               ; A = 1 solid / 0 open
     plx
@@ -327,32 +352,52 @@ W3FLG    = $0B                   ; NMI | TIMER_IRQ | LCD (load_level's mask)
     rts
 .endproc
 
-.proc w3_colshift                ; feet_col (a raw world x) >>= 3
-    lsr feet_col+1
-    ror feet_col
-    lsr feet_col+1
-    ror feet_col
-    lsr feet_col+1
-    ror feet_col
+; --- contact: the GB's own rules. $3186 column +0 is the STOMP result: $00
+; means "not stompable" and the shared l3_hurt already models that exactly
+; (side contact hurts; landing on it does NOTHING and Mario keeps falling --
+; the GB's stone-head zone). A non-zero column morphs the slot into that type,
+; which is just another VM script (the kill/puff chains are types too).
+.segment "W2FAR"
+.proc w3_touch                   ; the shared helpers CLOBBER X: reload it from oi
+    jsr l3_cull                  ; after every call (the kit-wide convention)
+    bcs @rts
+    jsr l3_box
+    ldx oi
+    bcc @rts
+    ldy w3_ti,x
+    lda w3_stomp,y
+    beq @hurt                    ; not stompable
+    sta tmpL2
+    jsr l3_above                 ; Mario coming down onto it?
+    ldx oi
+    bcc @hurt
+    lda tmpL2                    ; -> the GB's stomp morph, run by the VM
+    sta tmpL3
+    jsr w3_morph
+    ldx oi
+    lda #1                       ; Mario's fixed stomp bounce
+    sta jump_state
+    lda #14
+    sta arc_idx
+    stz fall_v
+    stz ride
+    ldx oi
+    ldy w3_ti,x                  ; score class = phys byte2 >> 6 (0:100 1:400 2:800)
+    lda w3_phys2,y
+    rol
+    rol
+    rol
+    and #3
+    tay
+    lda @val,y
+    jmp award_stomp
+@val: .byte $01, $04, $08, $10
+@hurt:
+    jmp l3_hurt
+@rts:
     rts
 .endproc
-
-.proc w3_rowset                  ; A = a y coordinate -> mrow
-    lsr
-    lsr
-    lsr
-    sec
-    sbc #2
-    sta mrow
-    rts
-.endproc
-
-.proc w3_screenx                 ; A = the object's screen x (slot X)
-    lda o_xl,x
-    sec
-    sbc cam_x
-    rts
-.endproc
+.segment "W2C"
 
 ; --- draw: walk the GB metasprite display list ----------------------------
 ; control byte: bit3 y-8, bit2 y+8, bit1 x-8, bit0 x+8, bit4 -> x-flip;
