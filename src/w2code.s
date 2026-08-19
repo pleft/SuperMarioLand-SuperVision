@@ -86,6 +86,7 @@ vec_tab:
 W3SYS   = $2026
 W3FLAGS = $0B                    ; NMI | TIMER_IRQ | LCD
 .proc w3_read
+    jsr w3_goal                  ; 3-3's sphere gate (the kit's per-frame hook)
     lda mrow
     cmp #16
     bcs @off

@@ -18,6 +18,7 @@
 ; ===========================================================================
 .include "w3data.inc"            ; generated: typetab/scripts/phys/display lists
 
+MUS_CLEAR3 = 3                   ; the course-clear jingle (build/audio/music.inc)
 W3SCRB   = $B000                 ; bank 6 pins (pack_banks writes all three):
 W3DLB    = $B520                 ;   scripts / metasprite display lists /
 W3TILB   = $B780                 ;   the compact W3 tile slice
@@ -351,6 +352,50 @@ W3FLG    = $0B                   ; NMI | TIMER_IRQ | LCD (load_level's mask)
     lsr                          ; -> C
     rts
 .endproc
+
+; --- 3-3's SPHERE: the x-3 rescue ending, armed exactly like 1-3's (docs/25).
+; 3-3's arena is geometrically identical to 1-3's -- the sphere is $E1 at world
+; col 297 with the rope $EC at col 298 rows 6-9 -- so the existing ending
+; machine runs unchanged; only the arming and the creature flavour are new.
+; This runs from the map reader (the kit's only per-frame hook).
+.segment "W2FAR"
+.proc w3_goal
+    lda cur_level
+    cmp #8                       ; 3-3 only
+    bne @rts
+    lda goal_phase
+    bne @rts
+    lda cam_x+1                  ; the pedestal sits at the camera's maximum
+    cmp cam_max+1
+    bne @rts
+    lda cam_x
+    cmp cam_max
+    bne @rts
+    lda jump_state               ; from the ground, like the 1-3 gate
+    bne @rts
+    lda spr_x
+    cmp #126
+    bcc @rts
+    lda #1
+    sta goal_phase
+    lda #3                       ; ending13 = 3: the W3 rescue flavour
+    sta ending13
+    lda #<298                    ; 3-3's rope column (same as 1-3's)
+    sta e_cap
+    lda #240
+    sta goal_tmr
+    stz goal_top
+    stz mario_frame
+    stz ride
+    lda #3
+    sta mus_rate
+    jsr mus_stop
+    lda #MUS_CLEAR3
+    jmp mus_start
+@rts:
+    rts
+.endproc
+.segment "W2C"
 
 ; --- contact: the GB's own rules. $3186 column +0 is the STOMP result: $00
 ; means "not stompable" and the shared l3_hurt already models that exactly

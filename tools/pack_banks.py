@@ -405,6 +405,11 @@ def pack_w3(img, sym):
     w3c_sz = int(re.search(r"^W2C\s+\S+\s+\S+\s+([0-9A-F]+)", m3, re.M).group(1), 16)
     fm = re.search(r"^W2FAR\s+([0-9A-F]+)\s+\S+\s+([0-9A-F]+)", m3, re.M)
     far3_at, far3 = (int(fm.group(1), 16), full3[w3c_sz:w3c_sz + int(fm.group(2), 16)]) if fm else (0, b"")
+    cre3 = open("build/gfx/creature33.svt", "rb").read()
+    assert len(cre3) == 128, "creature33.svt must be 8 tiles"
+    coff3 = BNK6 + 0xBB80 - BASE
+    assert all(b == 0xFF for b in img[coff3:coff3 + 128]), "bank 6 $BB80 busy"
+    img[coff3:coff3 + 128] = cre3
     win = full3[:w3c_sz]
     assert len(win) <= 0x800, "W3 kit exceeds the $800 window"
     assert all(b == 0xFF for b in img[BNK6 + W3WIN - BASE:BNK6 + W3WIN - BASE + 0x800]), \

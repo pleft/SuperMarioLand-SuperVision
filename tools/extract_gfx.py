@@ -153,6 +153,14 @@ def main():
         creat += decode_tiles(d, off, 1)
     with open(os.path.join(out, "creature23.svt"), "wb") as f:
         f.write(sv_pack(creat))
+    # 3-3's rescue creature: same 2x2 metasprite ($A0/$A1/$B0/$B1, x-flipped
+    # pair), sourced from WORLD 3's bank -- VRAM-dumped at 3-3's state $26 and
+    # byte-matched to bank 3 0xC032 (tops) / 0xC132 (bottoms).
+    creat3 = []
+    for off in (0xC032, 0xC042, 0xC052, 0xC062, 0xC132, 0xC142, 0xC152, 0xC162):
+        creat3 += decode_tiles(d, off, 1)
+    with open(os.path.join(out, "creature33.svt"), "wb") as f:
+        f.write(sv_pack(creat3))
     # ONE-WAY PLATFORM caps (GB $1A93 per-world jump-through lists; ceiling AND
     # wall checks pass them, floor stands): the port remaps the cap tile ids to
     # $F9-$FF (extract_levels.py) so the raw <$60/>=F4 threshold checks do the

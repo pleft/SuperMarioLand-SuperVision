@@ -2266,16 +2266,27 @@ quad_rows: .byte 0, 0, 8, 8
     jsr sfx_play
 :   jmp l3e_swirl
 @pdone:
-    lda ending13                 ; 2 = the 2-3 flavor: the fake Daisy becomes
-    dea                          ; the WORLD-2 creature -- overwrite the moth
-    beq @w1moth                  ; tiles (RAM copy) with the bank-6 sheet
+    ldy ending13                 ; the fake Daisy's creature is per WORLD: 1-3
+    dey                          ; keeps the moth already in RAM; 2-3 and 3-3
+    beq @w1moth                  ; overwrite those tiles from their own sheets
     lda #(5 << 5) | (SYSCTRL_NMI_EN | SYSCTRL_TIMER_IRQ | SYSCTRL_LCD)
-    sta SYS_CTRL                 ; 2-3's OWN bank (the ending runs with bank 1
-    ldx #0                       ; mapped for the room overlay)
-:   lda $BF00,x                  ; pack_banks pins creature23.svt here
-    sta moth_tiles,x
-    inx
-    bpl :-
+    ldx #<$BF00                  ; 2-3: its own bank ($BF00)
+    stx tmpL
+    ldx #>$BF00
+    dey
+    beq :+
+    lda #(6 << 5) | (SYSCTRL_NMI_EN | SYSCTRL_TIMER_IRQ | SYSCTRL_LCD)
+    ldx #<$BB80                  ; 3-3: the shared data bank ($BB80)
+    stx tmpL
+    ldx #>$BB80
+:   stx tmpH
+    sta SYS_CTRL
+    ldy #0
+:   lda (tmpL),y
+    sta moth_tiles,y
+    iny
+    cpy #128
+    bne :-
     lda #(1 << 5) | (SYSCTRL_NMI_EN | SYSCTRL_TIMER_IRQ | SYSCTRL_LCD)
     sta SYS_CTRL                 ; back to bank 1 (enter_bonus expects it)
 @w1moth:
