@@ -20,7 +20,7 @@ ROM     = build/super-mario-land.sv
 
 all: $(ROM)
 
-$(ROM): $(OBJS) $(CFG) tools/pack_banks.py tools/gen_w2abi.py src/w2code.s src/kit_mar23.inc src/w2stub.s src/w3stub.s cfg/w2code.cfg cfg/w2stub.cfg cfg/w3stub.cfg $(W2GFX) build/gfx/w3_ovl_9310.svt
+$(ROM): $(OBJS) $(CFG) tools/pack_banks.py tools/gen_w2abi.py src/w2code.s src/kit_mar23.inc src/kit_w3.inc src/w2stub.s src/w3stub.s tools/gen_w3data.py cfg/w2code.cfg cfg/w2stub.cfg cfg/w3stub.cfg $(W2GFX) build/gfx/w3_ovl_9310.svt
 	$(LD) -C $(CFG) $(OBJS) -o $@ -m build/rom.map -Ln build/rom.lbl --dbgfile build/rel.dbg
 	python3 tools/gen_w2abi.py build/rel.dbg build/w2abi.inc
 	$(AS) $(ASFLAGS) -I build src/w2code.s -o build/w2code.o
@@ -31,6 +31,7 @@ $(ROM): $(OBJS) $(CFG) tools/pack_banks.py tools/gen_w2abi.py src/w2code.s src/k
 	$(LD) -C cfg/w2code.cfg build/w2code23.o -o build/w2code23.bin -m build/w2code23.map
 	$(AS) $(ASFLAGS) -I build src/w2stub.s -o build/w2stub.o
 	$(LD) -C cfg/w2stub.cfg build/w2stub.o -o build/w2stub.bin
+	python3 tools/gen_w3data.py
 	$(AS) $(ASFLAGS) -I build -D EAS3 src/w2code.s -o build/w3code.o
 	$(LD) -C cfg/w2code.cfg build/w3code.o -o build/w3code.bin -m build/w3code.map
 	$(AS) $(ASFLAGS) -I build src/w3stub.s -o build/w3stub.o

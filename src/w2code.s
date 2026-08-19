@@ -30,6 +30,9 @@ OBJ_HCORP  = 33                  ; their ball/stomp corpses (dead-flip hop+fall)
 OBJ_LCORP  = 34
 OBJ_WBALL  = 35                  ; Yurarin Boo's shot: tile $E2 (the common
                                  ; fireball), aimed at Mario once at launch
+.ifdef EAS3
+OBJ_W3     = 36                  ; W3: every AI-VM enemy shares one port id
+.endif                           ; (its GB type index lives in w3_ti, docs/34)
 OBJ_MEK    = 36                  ; $16 MEKABON (2-2; user-ID'd): walks, THROWS ITS HEAD
 OBJ_MHEAD    = 37                  ; $17: the thrown head (out-and-back loop)
 OBJ_MSQ    = 38                  ; $1C: the stomped squash (harmless, ~93f)
@@ -73,6 +76,8 @@ vec_tab:
     .addr w2_spawn, w2_update, w2_token, w2_gift, w2_draw, w2_width
 
 .ifdef EAS3
+.include "kit_w3.inc"
+
 ; --- read_map_tile, served from the window (W3): identical semantics to the
 ; FIXED reader, but the pool/pointer read happens with BANK 6 mapped. The
 ; mod/multi-coin transforms and the past-edge template run after the bank is
@@ -83,9 +88,8 @@ W3FLAGS = $0B                    ; NMI | TIMER_IRQ | LCD
 .proc w3_read
     lda mrow
     cmp #16
-    bcc :+
-    jmp @off
-:   lda feet_col+1               ; past the level's right edge? open space
+    bcs @off
+    lda feet_col+1               ; past the level's right edge? open space
     cmp lvl_cols+1
     bcc :+
     bne @off
@@ -117,78 +121,9 @@ W3FLAGS = $0B                    ; NMI | TIMER_IRQ | LCD
     lda (map_ptr),y
     ldx #(1 << 5) | W3FLAGS      ; resident bank back BEFORE prefix work
     stx W3SYS
-    pha
-    jsr mod_test                 ; clobbers map_ptr/tmpL/X
-    bne @mod
-    pla
-    cmp #$80                     ; unmodified ?-block: the ACTIVE multi-coin
-    beq @mcchk                   ; block reads as a brick after its 1st bonk
-    cmp #$81
-    beq @mcchk
-    cmp #$5F
-    bne @ret
-@mcchk:
-    pha
-    lda mc_colh
-    cmp feet_col+1
-    bne @nomc
-    lda mc_coll
-    cmp feet_col
-    bne @nomc
-    lda mc_row
-    cmp mrow
-    bne @nomc
-    pla
-    lda #$82
-    rts
-@nomc:
-    pla
-@ret:
-    rts
-@mod:
-    pla
-    cmp #$82
-    beq @broke
-    cmp #$F4
-    beq @broke
-    cmp #$EC
-    beq @broke                   ; opened rope (the 3-3 ending)
-    cmp #$5F
-    beq @used
-    cmp #$80
-    bcc @keep
-@used:
-    lda #$7F                     ; (no vehicle in W3: bonked = used-solid)
-@keep:
-    rts
-@broke:
-    lda #$2C
-    rts
-@off:
-    lda ending13                 ; the virtual rescue room right of the map
-    beq @off0
-    lda mrow
-    cmp #2
-    bcc @ckA
-    cmp #13
-    bcs :+
-    lda #$2C
-    rts
-:   lda mrow
-    ina
-    bra @ck
-@ckA:
-    lda mrow
-@ck:
-    clc
-    adc feet_col
-    and #1
-    clc
-    adc #$8E
-    rts
-@off0:
-    lda #$2C
-    rts
+    jmp map_transform            ; the mod/multi-coin rules live in FIXED: ONE
+@off:                            ; copy, so the two readers can never drift
+    jmp map_offmap
 .endproc
 .endif
 
@@ -224,12 +159,16 @@ W3FLAGS = $0B                    ; NMI | TIMER_IRQ | LCD
     lda #OBJ_ROCK
     bra @go
 .endif
+.ifndef EAS3
 :   cmp #$10
     bne :+
     lda #OBJ_HONEN
     bra @go
 .endif
-:   cmp #$24
+.endif
+:
+.ifndef EAS3
+    cmp #$24
 .ifdef MAR23
     bne @mar23                   ; the 2-3 types dispatch in kit_mar23.inc
 .else
@@ -241,8 +180,12 @@ W3FLAGS = $0B                    ; NMI | TIMER_IRQ | LCD
     jsr aim_leap
     clc                          ; consumed (aim's cmp may leave C set)
     rts
+.endif
 @go = w2_go
 @consume:
+.ifdef EAS3
+    jmp w3_spawn                 ; W3: the AI-VM owns every remaining type
+.endif
     clc                          ; unknown W2 types consume
 @full:
     rts
@@ -296,8 +239,14 @@ w2_updtab:
     .word w2_nop-1, upd_leap-1, w2_nop-1, w2_nop-1, upd_wball-1
     .word upd_mek-1, upd_mhead-1, upd_msq-1, upd_mcorp-1
 .else
+.ifdef EAS3
+    .word w2_rts-1, upd_suu-1, upd_rock-1     ; W3 spawns no honen/leaper:
+    .word w2_nop-1, w2_nop-1, w2_nop-1, w2_nop-1, w2_nop-1
+    .word w3_step-1              ; OBJ_W3: the AI-VM
+.else
     .word w2_rts-1, upd_suu-1, upd_rock-1
     .word upd_honen-1, upd_leap-1, w2_nop-1, w2_nop-1, upd_wball-1
+.endif
 .endif
 
 .proc w2_draw                    ; A = o_type (engine convention), X = slot
@@ -326,8 +275,14 @@ w2_drwtab:
     .word w2_nop-1, draw_leap-1, w2_nop-1, w2_nop-1, draw_wball-1
     .word draw_mek-1, draw_mhead-1, draw_msq-1, draw_mcorp-1
 .else
+.ifdef EAS3
+    .word w2_rts-1, draw_suu-1, draw_rock-1
+    .word w2_nop-1, w2_nop-1, w2_nop-1, w2_nop-1, w2_nop-1
+    .word w3_draw-1              ; OBJ_W3
+.else
     .word w2_rts-1, draw_suu-1, draw_rock-1
     .word draw_honen-1, draw_leap-1, w2_nop-1, w2_nop-1, draw_wball-1
+.endif
 .endif
 
 w2_rts:
@@ -339,6 +294,7 @@ w2_rts:
 ; hang; DOWN mirrored, clamped at the base line (o_vy); then ~36f rest.
 ; arc_step: X = slot. tmpH3 = this frame's |dy| (the leaper moves x by it).
 ; On a phase transition tmpL2 = the NEW phase; else tmpL2 = $FF.
+.ifndef EAS3                     ; W3 spawns neither $10 nor $24
 .proc arc_step
     lda #$FF
     sta tmpL2
@@ -407,6 +363,7 @@ w2_rts:
     inc o_tmr,x
     rts
 .endproc
+.endif
 
 .proc foe_frame                  ; X = slot -> A = 0/1 (the ~15f wing flap)
     lda o_tmr,x
@@ -418,6 +375,7 @@ w2_rts:
     rts
 .endproc
 
+.ifndef EAS3                     ; W3 spawns neither $10 nor $24
 .proc aim_leap                   ; o_hp = +1 if Mario is right of slot X, else -1
     lda cam_x
     clc
@@ -439,6 +397,7 @@ w2_rts:
 :   sta o_hp,x                   ; (o_hp is free for kit foes; o_pdr is the
     rts                          ;  ENGINE'S was-drawn flag -- hands off)
 .endproc
+.endif
 
 ; foe contact: star -> corpse+points at the victim; stomp side -> corpse +
 ; Mario's fixed bounce + combo-chained points; side -> hurt. A = value code.
@@ -497,6 +456,7 @@ w2_rts:
 .endproc
 
 .ifndef YUR22                    ; 2-2 has no Honen -- reclaim the bytes
+.ifndef EAS3                     ; W3 spawns neither $10 nor $24
 .proc upd_honen
     jsr l3_cull
     bcc :+
@@ -512,7 +472,9 @@ w2_rts:
     jmp w2_foe
 .endproc
 .endif
+.endif
 
+.ifndef EAS3                     ; W3 spawns neither $10 nor $24
 .proc upd_leap                   ; YURARIN BOO: the mover's velocity low nibble
     jsr l3_cull                  ; is 0 -> NO x movement ever (GB $2879 masks
     bcc :+                       ; $0F for x); F0's track-Mario bit sets FACING
@@ -529,6 +491,7 @@ w2_rts:
 @foe:
     jmp w2_foe
 .endproc
+.endif
 
 .proc spawn_wball                ; child type $23: single-aimed slow ball
     lda #OBJ_WBALL
@@ -555,6 +518,7 @@ w2_rts:
 ; the ball: GB-captured motion -- x 0.5px/f, y = the aimed Bresenham slope
 ; (rc_wball_move), no gravity, lives until it leaves the screen; ANY contact
 ; hurts (a projectile).
+.ifndef EAS3                     ; W3 spawns neither $10 nor $24
 .proc upd_wball
     jsr rc_wball_move
     lda o_y,x
@@ -577,7 +541,9 @@ w2_rts:
     stz o_type,x
     rts
 .endproc
+.endif
 
+.ifndef EAS3                     ; W3 spawns neither $10 nor $24
 .proc draw_wball                 ; one 8x8: the common fireball tile
     ldx oi
     lda o_y,x
@@ -589,6 +555,7 @@ w2_rts:
     ldx #FIRE_T
     jmp draw_quad
 .endproc
+.endif
 
 ; GB-EXACT ball-vs-Mario box (2026-08-17 PyBoy sweep + $0aaf RE, docs/12):
 ; Mario's contact band is tiny -- X: a ~6px strip ([c202-3..c202+2]), Y:
@@ -619,6 +586,7 @@ w2_rts:
 ; (pair16/quad16 live in the engine's RCODE now -- shared, RAM-resident)
 
 .ifndef YUR22
+.ifndef EAS3                     ; W3 spawns neither $10 nor $24
 .proc draw_honen                 ; 8x16 fishbone, flap frame
     ldx oi
     jsr foe_frame
@@ -630,14 +598,17 @@ w2_rts:
     jmp pair16
 .endproc
 .endif
+.endif
 
 .ifdef MAR23
 .segment "W2FAR"
 .endif
+.ifndef EAS3                     ; W3 spawns neither $10 nor $24
 .proc draw_leap
     lda #LEAP_TA
     ; falls through
 .endproc
+.endif
 .proc draw_16q                   ; A = frame-A TL tile: 16x16 flap quad + TRUE
     sta tmpH3                    ; mirror when facing right (GB OAM: columns
     ldx oi                       ; swapped AND each tile x-flipped; tiles face
@@ -783,6 +754,21 @@ w2_nop: rts                      ; dead dispatch rows (corpse types unused)
     lda #3                       ; child/squash/corpse: 16 wide, 8 tall
     rts
 @wbase:
+.endif
+.ifdef EAS3
+    cpy #OBJ_W3
+    bne :+
+    lda o_pvx,x                  ; W3 metasprites reach 8px LEFT of the anchor
+    sec                          ; (Batadon's [wing|head|wing] band). The pipeline
+    sbc #8                       ; stores o_pvx BEFORE calling us, so widening the
+    bcs :++                      ; erase here is what keeps the sprite from
+    lda #0                       ; smearing; clamp at the screen edge.
+:   sta o_pvx,x
+    lda #$C5                     ; 5 cols, EXTRA-TALL: a 16px sprite at an arbitrary
+                                 ; y straddles THREE 8px rows, and Batadon climbs
+                                 ; 3px per tick -- two rows leaves a sliver behind
+    rts
+:
 .endif
     cpy #OBJ_SUU
     beq @w82

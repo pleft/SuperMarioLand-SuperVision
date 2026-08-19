@@ -245,6 +245,8 @@ pipe_cnt:    .res 1          ; pipe entries in pipe_tab
 pipe_tab:    .res 15         ; RAM copy: 5 bytes/pipe, up to 3 pipes
 block_tab:   .res 40         ; RAM copy: 4 bytes/block, up to 10 ?-block entries
 spawn_tab:   .res 384        ; RAM copy: 5 bytes/spawn + $FFFF sentinel
+w3_pc:       .res 10         ; W3 AI-VM: per-slot script PC (docs/34)
+w3_ti:       .res 10         ; W3 AI-VM: per-slot GB-type index
 bgc:         .res 2          ; bg charset base (header +22/23; W3 = bank-1 copy)
 mapread_vec: .res 2          ; hi!=0: the kit window serves read_map_tile (W3)
 bud_base:    .res 1          ; p1 mover budget (3; vehicle levels raise it --
@@ -818,31 +820,28 @@ main_loop:
     jmp (mapread_vec)            ; it in and back around the read -- docs/33)
 :   lda mrow
     cmp #16
-    bcc :+
-    jmp @off
-:
-    lda feet_col+1               ; past the level's right edge? open space -- the goal door
-    cmp lvl_cols+1            ; leads off the map (the walk-through would otherwise read
-    bcc :+                       ; garbage past the level data and block Mario)
+    bcs @off
+    lda feet_col+1               ; past the level's right edge? open space -- the goal
+    cmp lvl_cols+1               ; door leads off the map (the walk-through would
+    bcc :+                       ; otherwise read garbage past the level data)
     bne @off
     lda feet_col
     cmp lvl_cols
     bcs @off
-:
-    lda feet_col                 ; maps are unique-COLUMN POOLS now (docs/33):
-    asl                          ; map_base -> a 2B/col table of absolute
-    sta map_ptr                  ; column addresses; the pool holds each
-    lda feet_col+1               ; distinct 16-byte column once
+:   lda feet_col                 ; maps are unique-COLUMN POOLS (docs/33): map_base
+    asl                          ; is a 2B/col table of absolute column addresses
+    sta map_ptr
+    lda feet_col+1
     rol
     sta map_ptr+1
-    lda map_ptr                  ; map_ptr = map_base + col*2
+    lda map_ptr
     clc
     adc map_base
     sta map_ptr
     lda map_ptr+1
     adc map_base+1
     sta map_ptr+1
-    lda (map_ptr)                ; -> this column's pool address
+    lda (map_ptr)
     tax
     ldy #1
     lda (map_ptr),y
@@ -850,9 +849,15 @@ main_loop:
     stx map_ptr
     ldy mrow
     lda (map_ptr),y
-    ; --- used-tile transform (surface AND rooms): bonked ?-block -> used block, broken brick
-    ;     -> blank, collected coin -> blank. Tile-specific, so a coin/brick mark never turns an
-    ;     unrelated tile solid (lets the mod bitmap be shared without corruption). ---
+    jmp map_transform
+@off:
+    jmp map_offmap
+.endproc
+
+; map_transform: A = a RAW map tile -> the effective tile. The used-block /
+; broken-brick / collected-coin rules and the live multi-coin exception, in ONE
+; place: the FIXED reader and the W3 window reader (bank-6 pool) both land here.
+.proc map_transform
     pha
     jsr mod_test                 ; A = mod bit for (feet_col, mrow); clobbers map_ptr/tmpL/X
     bne @mod
@@ -902,7 +907,11 @@ main_loop:
 @broke:
     lda #$2C
     rts
-@off:
+.endproc
+
+; map_offmap: columns past the level's right edge (or rows off the map): blank,
+; except during the x-3 ending where they stream the rescue-room template.
+.proc map_offmap
     lda ending13                 ; the virtual room right of the map
     beq @off0
     lda mrow

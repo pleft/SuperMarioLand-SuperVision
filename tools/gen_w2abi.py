@@ -43,7 +43,7 @@ NEED = [
     "ending13", "e_cap", "mario_frame", "quad_cols", "quad_rows",
     # W3 (docs/33): the window map reader + the stub
     "map_ptr", "map_base", "lvl_cols", "mc_colh", "mc_coll", "mc_row",
-    "mapread_vec",
+    "mapread_vec", "w3_pc", "w3_ti", "map_transform", "map_offmap",
     "wcol", "redraw_one", "award_coin", "hit_qblock", "break_brick",
     "read_map_tile", "add_score", "calc_feet_col", "mario_vx", "scroll_s", "bud_base", "find_block", "spawn_walker", "spawn_flower", "spawn_star",
     # kit constants live in code, not symbols -- redefined in w2code.s

@@ -400,6 +400,18 @@ def pack_w3(img, sym):
     assert all(b == 0xFF for b in img[BNK6 + W3SPT - BASE:BNK6 + W3WIN - BASE]), \
         "bank 6 spawn-table slot not free"
     img[BNK6 + W3SPT - BASE:BNK6 + W3SPT - BASE + len(spt)] = spt
+    # scripts / display lists / the compact tile slice, at the kit's pins
+    for pin, path in ((0xB980, "build/w3scripts.bin"), (0xBBD0, "build/w3dlists.bin")):
+        d = open(path, "rb").read()
+        off = BNK6 + pin - BASE
+        assert all(b == 0xFF for b in img[off:off + len(d)]), f"bank 6 ${pin:04X} busy"
+        img[off:off + len(d)] = d
+    ovl = open("build/gfx/w3_ovl_8A00.svt", "rb").read()
+    order = [int(t, 16) for t in open("build/w3tiles.txt").read().split()]
+    slice_ = b"".join(ovl[(t - 0xA0) * 16:(t - 0xA0 + 1) * 16] for t in order)
+    off = BNK6 + 0xBD20 - BASE
+    assert all(b == 0xFF for b in img[off:off + len(slice_)]), "bank 6 $BD20 busy"
+    img[off:off + len(slice_)] = slice_
     win = open("build/w3code.bin", "rb").read()
     m3 = open("build/w3code.map").read()
     w3c_sz = int(re.search(r"^W2C\s+\S+\s+\S+\s+([0-9A-F]+)", m3, re.M).group(1), 16)
@@ -444,7 +456,8 @@ def pack_w3(img, sym):
         hdr.append(pieces[(i, "pipes")][1])
         hdr += bytes((pieces[(i, "blocks")][0] & 0xFF, pieces[(i, "blocks")][0] >> 8))
         hdr.append(pieces[(i, "blocks")][1])
-        for v in (sent_at, sym["chardata"], stub_at, bgc_at):
+        quad_base = 0xBD20 - 0xA0 * 16          # port ids $A0.. -> the slice
+        for v in (sent_at, quad_base, stub_at, bgc_at):
             hdr += bytes((v & 0xFF, v >> 8))
         assert len(hdr) == HDR_SIZE
         tail[i * HDR_SIZE:(i + 1) * HDR_SIZE] = hdr
