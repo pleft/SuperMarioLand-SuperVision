@@ -67,7 +67,8 @@ init:                            ; $1500: bind our vector table
     sta mapread_vec              ; map data lives in BANK 6 and only this RAM
     lda #>w3_read                ; code can juggle the mapping (docs/33)
     sta mapread_vec+1
-    rts
+    stz W3CMB                    ; a fresh level starts with an empty column cache
+    jmp w3_cinval
 .else
     rts
 .endif
@@ -97,8 +98,58 @@ W3FLAGS = $0B                    ; NMI | TIMER_IRQ | LCD
     lda feet_col
     cmp lvl_cols
     bcs @off
-:   lda feet_col                 ; map_ptr = map_base + col*2 (the pointer
-    asl                          ; table; docs/33)
+:   lda map_base+1               ; a room swap reuses low column numbers, so the
+    cmp W3CMB                    ; cache must be dropped when the map changes
+    beq :+
+    sta W3CMB
+    jsr w3_cinval
+:   ldx #0                       ; --- probe the column cache ---
+@srch:
+    lda W3CACHE,x
+    cmp feet_col
+    bne @nxt
+    lda W3CACHE+1,x
+    cmp feet_col+1
+    beq @hit
+@nxt:
+    txa
+    clc
+    adc #32
+    tax
+    cpx #W3CSLOTS*32
+    bne @srch
+    jmp @miss
+@hit:
+    jsr @slotptr
+@read:
+    ldy mrow
+    lda (tmpL2),y
+    jmp map_transform            ; the mod/multi-coin rules live in FIXED
+@off:
+    jmp map_offmap
+@slotptr:                        ; X = slot base -> tmpL2 = its tile bytes
+    txa
+    clc
+    adc #<(W3CACHE+2)
+    sta tmpL2
+    lda #>(W3CACHE+2)
+    adc #0
+    sta tmpH2
+    rts
+@miss:                           ; refill the round-robin victim
+    lda W3CNEXT
+    clc
+    adc #32
+    and #(W3CSLOTS-1)*32
+    sta W3CNEXT
+    tax
+    lda feet_col
+    sta W3CACHE,x
+    lda feet_col+1
+    sta W3CACHE+1,x
+    jsr @slotptr
+    lda feet_col                 ; map_ptr = map_base + col*2 (the pointer table)
+    asl
     sta map_ptr
     lda feet_col+1
     rol
@@ -110,22 +161,74 @@ W3FLAGS = $0B                    ; NMI | TIMER_IRQ | LCD
     lda map_ptr+1
     adc map_base+1
     sta map_ptr+1
-    lda #(6 << 5) | W3FLAGS      ; the tables + pool live in bank 6
-    sta W3SYS
+    lda #(6 << 5) | W3FLAGS      ; ONE bank switch per COLUMN, not per read:
+    sta W3SYS                    ; every SYS_CTRL write restarts the LCD scan
     lda (map_ptr)
     tax
     ldy #1
     lda (map_ptr),y
     sta map_ptr+1
     stx map_ptr
-    ldy mrow
-    lda (map_ptr),y
-    ldx #(1 << 5) | W3FLAGS      ; resident bank back BEFORE prefix work
-    stx W3SYS
-    jmp map_transform            ; the mod/multi-coin rules live in FIXED: ONE
-@off:                            ; copy, so the two readers can never drift
-    jmp map_offmap
+    ldy #15
+:   lda (map_ptr),y
+    sta (tmpL2),y
+    dey
+    bpl :-
+    lda #(1 << 5) | W3FLAGS
+    sta W3SYS
+    bra @read
 .endproc
+
+.segment "W2FAR"                 ; (neither runs with bank 6 mapped)
+; The pipeline stores o_pvx/o_pvy BEFORE asking us for the width, so this is
+; where a metasprite reaching outside the default box gets its erase rectangle
+; corrected -- otherwise it smears the background as it moves.
+.proc w3_width                   ; X = slot -> A = the engine's width byte
+    lda o_st,x                   ; the metasprite param drawn last
+    ldy #W3_NEXC-1
+:   cmp w3_excp,y
+    beq @big
+    dey
+    bpl :-
+    jsr @left8                   ; default box: 8px left, 24px tall, 40px wide
+    lda #$C5
+    rts
+@big:
+    lda o_pvy,x                  ; a taller metasprite: lift the erase origin
+    sec
+    sbc w3_excy,y
+    bcs :+
+    lda #0
+:   sta o_pvy,x
+    phy
+    jsr @left8
+    ply
+    lda w3_excw,y
+    rts
+@left8:
+    lda o_pvx,x                  ; every W3 metasprite reaches 8px left of the
+    sec                          ; anchor (Batadon's [wing|head|wing] band)
+    sbc #8
+    bcs :+
+    lda #0
+:   sta o_pvx,x
+    rts
+.endproc
+
+.proc w3_cinval                  ; drop every cached column
+    ldx #0
+    lda #$FF                     ; col-hi $FF never matches a real column
+:   sta W3CACHE+1,x
+    txa
+    clc
+    adc #32
+    tax
+    cpx #W3CSLOTS*32
+    bne :-
+    stz W3CNEXT
+    rts
+.endproc
+.segment "W2C"
 .endif
 
 .proc w2_gift                    ; content $F0 (GB $18C0, READ this time): the
@@ -759,16 +862,7 @@ w2_nop: rts                      ; dead dispatch rows (corpse types unused)
 .ifdef EAS3
     cpy #OBJ_W3
     bne :+
-    lda o_pvx,x                  ; W3 metasprites reach 8px LEFT of the anchor
-    sec                          ; (Batadon's [wing|head|wing] band). The pipeline
-    sbc #8                       ; stores o_pvx BEFORE calling us, so widening the
-    bcs :++                      ; erase here is what keeps the sprite from
-    lda #0                       ; smearing; clamp at the screen edge.
-:   sta o_pvx,x
-    lda #$C5                     ; 5 cols, EXTRA-TALL: a 16px sprite at an arbitrary
-                                 ; y straddles THREE 8px rows, and Batadon climbs
-                                 ; 3px per tick -- two rows leaves a sliver behind
-    rts
+    jmp w3_width                 ; per-metasprite erase box (bank-resident)
 :
 .endif
     cpy #OBJ_SUU

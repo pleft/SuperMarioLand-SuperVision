@@ -57,6 +57,22 @@ def dlist(param, base):
     return ROM[off:i + 1]
 
 
+def ents(p, base=DL_RIGHT):
+    """decoded (dy, dx) entries of a display list, for extent maths"""
+    q = base + p * 2
+    a = ROM[q] | (ROM[q + 1] << 8)
+    dy = dx = 0
+    out = []
+    i = a
+    while ROM[i] != 0xFF and i - a < 48:
+        b = ROM[i]; i += 1
+        if b & 0x80:
+            out.append((dy, dx))
+        else:
+            dy += (-8 if b & 8 else 0) + (8 if b & 4 else 0)
+            dx += (-8 if b & 2 else 0) + (8 if b & 1 else 0)
+    return out
+
 def main():
     # transitive closure over morph ($F3) / spawn-child ($F1) targets
     types, todo = [], list(SEED)
@@ -131,20 +147,52 @@ def main():
                 else:
                     out.append(b)
             return out
+        # each param's RIGHT list is followed immediately by its LEFT list, so
+        # one pointer serves both: the draw walks past the $FF terminator to
+        # reach the left-facing form (that saves a whole pointer table, and the
+        # RAM window has no room to spare)
         body = bytearray()
-        starts, startsL = [], []
-        for p in params:                      # RIGHT list then LEFT list
-            starts.append(len(body));  body += conv(dlist(p, DL_RIGHT))
+        starts = []
         for p in params:
-            startsL.append(len(body)); body += conv(dlist(p, DL_LEFT))
+            starts.append(len(body))
+            body += conv(dlist(p, DL_RIGHT))
+            body += conv(dlist(p, DL_LEFT))
         open("build/w3tiles.txt", "w").write(" ".join(f"{t:02X}" for t in order))
         assert len(order) <= 0x3D, "W3 tile slice exceeds the $A0-$DC window"
         f.write("; display lists live in BANK 6 at W3DLB (pack_banks pin)\n")
         f.write("w3_dlo:\n    .byte " + ",".join(f"<(W3DLB+{s})" for s in starts) + "\n")
         f.write("w3_dhi:\n    .byte " + ",".join(f">(W3DLB+{s})" for s in starts) + "\n")
-        f.write("w3_dloL:\n    .byte " + ",".join(f"<(W3DLB+{s})" for s in startsL) + "\n")
-        f.write("w3_dhiL:\n    .byte " + ",".join(f">(W3DLB+{s})" for s in startsL) + "\n")
+        # the left-facing pointers live in the bank-RESIDENT far segment: the
+        # RAM window needs its space for the hot code (they are read before
+        # any bank switch, so residency is safe)
+
         open("build/w3dlists.bin", "wb").write(bytes(body))
+        # --- erase exceptions -------------------------------------------
+        # The kit erases W3 objects with a default box (8px left of the
+        # anchor, 24px tall). A few metasprites are bigger; list ONLY those,
+        # with the y-origin adjust (in 8px rows) and the engine's width byte
+        # (bit7 = +1 row, bit6 = +1, bit5 = +2, low bits = 8px columns).
+        exc = []
+        for p in params:
+            e = ents(p)
+            if not e:
+                continue
+            miny = min(y for y, _ in e); maxy = max(y for y, _ in e) + 8
+            minx = min(x for _, x in e); maxx = max(x for _, x in e) + 8
+            if miny >= -8 and maxy <= 16 and minx >= -8 and maxx <= 32:
+                continue                      # inside the default box
+            yadj = (-miny - 8) // 8           # extra 8px rows above the default
+            rows = (maxy - miny) // 8 + 1     # +1: an unaligned y straddles a row
+            cols = (maxx - minx) // 8 + 1
+            wb = 0x80 | cols                  # tall
+            if rows >= 3: wb |= 0x40
+            if rows >= 4: wb |= 0x20          # bit5 = +2 rows
+            exc.append((p, yadj, wb))
+        f.write(f"W3_NEXC = {len(exc)}\n")
+        f.write("w3_excp:\n    .byte " + ",".join(f"${p:02X}" for p, _, _ in exc) + "\n")
+        f.write("w3_excy:\n    .byte " + ",".join(f"{y*8}" for _, y, _ in exc) + "\n")
+        f.write("w3_excw:\n    .byte " + ",".join(f"${w:02X}" for _, _, w in exc) + "\n")
+
     print(f"gen_w3data: {len(types)} scripts ({len(blob)}B), {len(params)} params "
           f"({len(body)}B lists), {len(order)} tiles -> {OUT_INC}")
 

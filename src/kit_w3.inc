@@ -16,9 +16,22 @@
 ;   o_vy  = direction flags       (ffc5): bit0 = moving RIGHT, bit1 = FALLING
 ;   w3_pc[slot] = script PC, w3_ti[slot] = VM type index
 ; ===========================================================================
-.include "w3data.inc"            ; generated: typetab/scripts/phys/display lists
+.include "w3data.inc"            ; every table here is read BEFORE the reader or
+                                 ; the draw maps bank 6, so some may live in the
+                                 ; bank-RESIDENT far segment (see w3data.inc)
 
 MUS_CLEAR3 = 3                   ; the course-clear jingle (build/audio/music.inc)
+; --- the map-column cache -------------------------------------------------
+; Reading a map tile means mapping bank 6, and EVERY SYS_CTRL write restarts
+; the LCD scan on real hardware (docs/27: doing it once per frame already made
+; a build unplayable -- banding). W3 was doing it ~22 times a frame. This
+; caches whole 16-byte columns in the RAM tail the retired 2-3 loader stub
+; used to borrow, so repeat probes (and the 16 reads the column streamer does)
+; cost no switch at all. 4 slots x 32B stride = cheap (n<<5) indexing.
+W3CACHE  = $1F80
+W3CSLOTS = 4
+W3CNEXT  = $1F9E                 ; round-robin victim (slot 0's slack)
+W3CMB    = $1F9F                 ; map_base hi when the cache was filled
 W3SCRB   = $B000                 ; bank 6 pins (pack_banks writes all three):
 W3DLB    = $B520                 ;   scripts / metasprite display lists /
 W3TILB   = $B780                 ;   the compact W3 tile slice
@@ -359,34 +372,33 @@ W3FLG    = $0B                   ; NMI | TIMER_IRQ | LCD (load_level's mask)
 ; machine runs unchanged; only the arming and the creature flavour are new.
 ; This runs from the map reader (the kit's only per-frame hook).
 .segment "W2FAR"
-.proc w3_goal
-    lda cur_level
-    cmp #8                       ; 3-3 only
+.proc w3_goal                    ; 3-3's SPHERE. The engine's own goal_check can
+    lda cur_level                ; never fire here (its trigger sits past the rope,
+    cmp #8                       ; which is solid until the ending opens it), so the
+    bne @rts                     ; kit arms the clear itself -- the same gate 1-3
+    lda goal_phase               ; uses, plus the x-3 rescue flavour.
     bne @rts
-    lda goal_phase
-    bne @rts
-    lda cam_x+1                  ; the pedestal sits at the camera's maximum
+    lda cam_x+1
     cmp cam_max+1
     bne @rts
     lda cam_x
     cmp cam_max
     bne @rts
-    lda jump_state               ; from the ground, like the 1-3 gate
+    lda jump_state
     bne @rts
     lda spr_x
     cmp #126
     bcc @rts
+    lda #3                       ; ending13 = 3: the World-3 creature
+    sta ending13
+    lda #<298                    ; 3-3's rope column (1-3's geometry)
+    sta e_cap
     lda #1
     sta goal_phase
-    lda #3                       ; ending13 = 3: the W3 rescue flavour
-    sta ending13
-    lda #<298                    ; 3-3's rope column (same as 1-3's)
-    sta e_cap
     lda #240
     sta goal_tmr
     stz goal_top
     stz mario_frame
-    stz ride
     lda #3
     sta mus_rate
     jsr mus_stop
@@ -458,18 +470,9 @@ W3FLG    = $0B                   ; NMI | TIMER_IRQ | LCD (load_level's mask)
     bpl :-
     rts
 @found:
-    lda o_vy,x                   ; bit0 = moving right -> the RIGHT list
-    and #$01
-    beq @left
-    lda w3_dlo,y
+    lda w3_dlo,y                 ; the RIGHT list; the LEFT one follows it
     sta tmpL
     lda w3_dhi,y
-    bra @have
-@left:
-    lda w3_dloL,y
-    sta tmpL
-    lda w3_dhiL,y
-@have:
     sta tmpH
     stz tmpL2                    ; dy accumulator
     stz tmpH2                    ; dcol accumulator (bytes)
@@ -477,6 +480,14 @@ W3FLG    = $0B                   ; NMI | TIMER_IRQ | LCD (load_level's mask)
     lda #(6 << 5) | W3FLG        ; the lists AND the tile sheet live in bank 6;
     sta W3SYSC                   ; every routine the walk calls is FIXED/RAM,
     ldy #0                       ; so one map around the whole draw is safe
+    ldx oi                       ; facing left? skip past the RIGHT list's $FF
+    lda o_vy,x
+    and #$01
+    bne @walk
+:   lda (tmpL),y
+    iny
+    cmp #$FF
+    bne :-
 @walk:
     lda (tmpL),y
     cmp #$FF

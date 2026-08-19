@@ -117,3 +117,32 @@ with the creature tiles byte-asserted.
   column); superball kills on W3 enemies do nothing yet.
 - $36's engine-side stone and the shared types are inherited, not re-verified
   against W3 specifically.
+
+## Hardware playtest round 1 (user-reported, 2026-08-19)
+
+Three reports; two had confirmable mechanisms, found by measurement:
+
+1. **HUD unstable while scrolling, W3 only.** MEASURED: W1/W2 levels perform
+   ZERO SYS_CTRL writes per frame during play; W3 was doing **22 on average
+   and up to 54**, because its map data lives in bank 6 and the reader mapped
+   the bank per tile read. Every SYS_CTRL write restarts the LCD scan
+   (docs/27: doing it once per frame already produced unplayable banding).
+   FIX: a 4-slot map-COLUMN cache in the RAM tail the retired 2-3 loader stub
+   used to occupy ($1F80), invalidated when map_base changes (rooms reuse low
+   column numbers). Result: **1.0 writes/frame** (max 14). Not zero -- new
+   columns must still be fetched -- so if a residual wobble remains, batch the
+   refills to a fixed point in the frame.
+2. **Background not erased around new enemies.** MEASURED: four metasprites
+   exceed the erase box that was sized from Batadon alone -- $54/$55
+   (Hiyoihoi, 3-3) and $4E/$4F, which appear when 3-2's dominant enemy $25 is
+   stomped ($25 -> $1C -> $19). FIX: a generated exception table gives those
+   params their own erase origin and row count, and the engine's width byte
+   gained bit5 = two extra rows (max 5 rows = 40px) for the 32px cases.
+3. **Garbled level-select text**: NOT diagnosed. Ruled out the obvious cause
+   by measurement -- 3-1's live GB font tiles ($00-$2B) match the port's
+   shared charset 44/44, so the character set is intact. (Note w3_bg_9000 and
+   w3_obj_8000 are extraction red herrings: the GB loads W1's base sheets plus
+   the per-world overlay, confirmed 68/128 + the $31-$6F overlay.) Needs a
+   screenshot.
+
+Space after the fixes: W3 window 2030/2048, W3 far 398/448, FIXED ~1 byte.

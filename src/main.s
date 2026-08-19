@@ -8444,8 +8444,13 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     asl                          ; bit6 = EXTRA-TALL (24px: Totomesu) -> one more
     bpl :+
     iny
-:   lsr                          ; A = (o_pw<<1)>>1 = o_pw & $7F
-    and #$3F
+:   asl                          ; bit5 = TWO more (W3's 32px metasprites, docs/34)
+    bpl :+
+    iny
+    iny
+:   lsr                          ; recover the width: A = o_pw & $3F ...
+    lsr
+    and #$1F                     ; ... and the count now lives in bits 4:0
     sta rb_cols
     lda o_pvy,x
     sec
