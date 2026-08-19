@@ -244,14 +244,20 @@ pipe_cnt:    .res 1          ; pipe entries in pipe_tab
 pipe_tab:    .res 15         ; RAM copy: 5 bytes/pipe, up to 3 pipes
 block_tab:   .res 40         ; RAM copy: 4 bytes/block, up to 10 ?-block entries
 spawn_tab:   .res 384        ; RAM copy: 5 bytes/spawn + $FFFF sentinel
+bud_base:    .res 1          ; p1 mover budget (3; vehicle levels raise it --
+                             ; Mario doesn't draw there, the frame has slack)
 revpix:      .res 256        ; reverse the 4 2bpp pixels in a byte (built at boot)
 flipbuf:     .res 16         ; row-reversed tile scratch for the Y-flipped corpse draw
-tile_mod:    .res 680        ; "modified" bitmap, 1 bit per (col,row): used ?-block / broken
-                             ; brick / taken coin. Cols 0-319 = the surface; the LAST 40
-                             ; bytes = the ROOM's 20 cols (offset +640): room keys collided
-                             ; with surface cols 0-19 (bonks/coins leaked into room bricks
-                             ; -- the U-ring gaps, user-caught). Cleared at room entry: GB
-                             ; rooms are FRESH each visit.
+tile_mod:    .res 720        ; "modified" bitmap, 1 bit per (col,row): used ?-block / broken
+                             ; brick / taken coin. Cols 0-359: 2-3 is 360 cols wide -- at
+                             ; 680 its arena cols 340-359 indexed PAST the array into the
+                             ; object slots (probes read live enemy fields as mod bits; a
+                             ; broken arena brick OR'd bits into a slot). The ROOM's 20
+                             ; cols key as cols 320-339 (offset +640): no room level
+                             ; exceeds 320 surface cols and 2-3 has no rooms, so the
+                             ; aliasing is dead. (Room keys at +0 collided with surface
+                             ; cols 0-19 -- the U-ring gaps, user-caught.) Cleared at
+                             ; room entry: GB rooms are FRESH each visit.
 ; --- object slots (items / coin-pop / brick debris / enemies). SoA, 10 entries like the
 ;     GB ($D100-$D190): 1-2's goal area runs 2 bees + 4 arrows + platform + 2 stones. ---
 OBJ_MAX = 10
@@ -955,7 +961,7 @@ main_loop:
     rts
 .endproc
 
-; clear_tile_mod: zero the 640-byte modified-tile bitmap (level restart).
+; clear_tile_mod: zero the 720-byte modified-tile bitmap (level restart).
 .proc clear_tile_mod
     lda #<tile_mod
     sta map_ptr
@@ -2018,10 +2024,10 @@ MARIO_INX = 60                   ; Mario's walk-in stop (GB 61; he must not
     clc
     adc #16                      ; dy = (row+2)*8
     sta dy
-    lda #<298
-    sta feet_col
-    lda #>298
-    sta feet_col+1
+    lda e_cap                    ; rope column LOW byte: the ARM site sets it
+    sta feet_col                 ; (<298 for 1-3, <358 for 2-3; both hi = 1;
+    lda #>298                    ; e_cap is then re-purposed at @towalk for
+    sta feet_col+1               ; the captive gate -- the rope is done by then)
     jsr mod_set
     jsr set_dst
     jmp blit_blank
@@ -2113,8 +2119,9 @@ quad_rows: .byte 0, 0, 8, 8
 @l: lda o_type,x
     cmp #OBJ_SUU
     bcc @next
-    cmp #OBJ_GCORP+1
-    bcs @next
+    cmp #47                      ; ..OBJ_DRGB: covers the 2-3 kit types 36-46
+    bcs @next                    ; too (torp/boss shot burst like the GB's; the
+                                 ; 16x32 dragon pair = two stacked puffs)
     cmp #OBJ_BAT
     php                          ; (Z = it's the tall boss)
     lda o_y,x
@@ -2244,6 +2251,19 @@ quad_rows: .byte 0, 0, 8, 8
     jsr sfx_play
 :   jmp l3e_swirl
 @pdone:
+    lda ending13                 ; 2 = the 2-3 flavor: the fake Daisy becomes
+    dea                          ; the WORLD-2 creature -- overwrite the moth
+    beq @w1moth                  ; tiles (RAM copy) with the bank-6 sheet
+    lda #(6 << 5) | (SYSCTRL_NMI_EN | SYSCTRL_TIMER_IRQ | SYSCTRL_LCD)
+    sta SYS_CTRL
+    ldx #0
+:   lda $B900,x                  ; pack_banks pins creature23.svt here
+    sta moth_tiles,x
+    inx
+    bpl :-
+    lda #(1 << 5) | (SYSCTRL_NMI_EN | SYSCTRL_TIMER_IRQ | SYSCTRL_LCD)
+    sta SYS_CTRL                 ; back to bank 1 (enter_bonus expects it)
+@w1moth:
     jsr l3e_moth_blank_at_capt   ; clear the last swirl frame
     lda #CAPT_X                  ; ...and the moth takes her place
     sta e_mx
@@ -6126,7 +6146,7 @@ ovl_width:  jmp (ovl_vec+10)     ; A = erase width for kit types
 :   sta rot1
     sta oi
     stz p1c
-    lda #3                       ; movers redrawn per frame, at most (Mario exempt);
+    lda bud_base                 ; movers redrawn per frame (3; vehicles 5);
     ldy shift_px                 ; the shift frame already carries blank+stream+fold —
     beq :+                       ; take 1 mover and push the rest to the pend frames,
     lda #1                       ; which run at 60-75% (a 30Hz mover deferred once =
@@ -9184,6 +9204,8 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
 ; bank, so it stays valid across a bank switch.
 .segment "LEVELS"
 .proc load_level
+    lda #3                       ; the walker default; a vehicle blob raises it
+    sta bud_base
     stz ending13                 ; a fresh level never inherits ending state
     stz e_phase
     stz e_own
@@ -11351,6 +11373,8 @@ water_alt: .incbin "build/gfx/water_alt.svt"   ; tile $5D, high plane = ROM $3fc
     lda #1
     sta goal_phase
     sta ending13                 ; the rescue ending follows the tally
+    lda #<298                    ; the 1-3 rope column (l3e_rope_tile reads
+    sta e_cap                    ; the low byte from e_cap; hi is fixed 1)
     lda #240
     sta goal_tmr
     stz goal_top

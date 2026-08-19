@@ -160,9 +160,9 @@ vec_tab:
 .endproc
 w2_updtab:
 .ifdef MAR23
-    .word w2_rts-1, w2_nop-1, w2_nop-1
+    .word sub_step-1, w2_nop-1, w2_nop-1
     .word upd_honen-1, upd_leap-1, w2_nop-1, w2_nop-1, upd_wball-1
-    .word w2_rts-1, upd_torp-1, upd_torion-1, upd_gunion-1
+    .word sub_step-1, upd_torp-1, upd_torion-1, upd_gunion-1
     .word upd_ghalf-1, upd_yura2-1, upd_yfire-1, upd_tamao-1
     .word upd_dragon-1, upd_dshot-1, upd_drgb-1
 .elseif .defined(YUR22)

@@ -156,7 +156,7 @@ def main():
             assert len(win23_img) <= 0x800, "2-3 window kit exceeds the $800 window"
             far23 = full23[w2c_sz:w2c_sz + far_sz]
             carve23 = full23[w2c_sz + far_sz:w2c_sz + far_sz + fv_sz]
-            assert far_at == 0xA260, "W2FARM moved -- update pack_banks"
+            assert far_at == 0xA268, "W2FARM moved -- update pack_banks"
             if fv_sz:
                 # the carve = bank5 chardata tiles $20-$4F (Mario poses; he
                 # never draws in the sub level). Guard the address drift.
@@ -268,7 +268,7 @@ def main():
 
         region = hdr
         if level == 5:
-            region += b"\xFF" * (0xA260 - (lvl_hdr_addr + HDR_SIZE)) + far23
+            region += b"\xFF" * (0xA268 - (lvl_hdr_addr + HDR_SIZE)) + far23
         region += blobs["map"] + rooms[0] + rooms[1] + rooms[2] \
                      + blobs["pipes"] + blobs["blocks"] + blobs["spawns"]
         if level >= 3:
@@ -289,7 +289,16 @@ def main():
             "bank 6 $B000 region not free for the 2-3 window kit"
         img[off:off + len(win23_img)] = win23_img
         img[off + 0x800:off + 0x800 + len(spawns23)] = spawns23
-        print(f"pack_banks: 2-3 window kit ({len(win23_img)}B) + spawns ({len(spawns23)}B) -> bank 6 $B000")
+        # the 2-3 rescue creature sheet at bank 6 $B900: the L13E room machine
+        # copies it over the moth tiles when ending13 == 2 (main.s @pdone)
+        creat = open("build/gfx/creature23.svt", "rb").read()
+        assert len(creat) == 128, "creature23.svt must be 8 tiles (128B)"
+        coff = 6 * BANK + 0x3900
+        assert all(b == 0xFF for b in img[coff:coff + 128]), \
+            "bank 6 $B900 region not free for the creature sheet"
+        img[coff:coff + 128] = creat
+        print(f"pack_banks: 2-3 window kit ({len(win23_img)}B) + spawns ({len(spawns23)}B) "
+              f"+ creature (128B) -> bank 6 $B000/$B900")
     open(img_path, "wb").write(bytes(img))
 
 if __name__ == "__main__":

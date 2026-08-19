@@ -64,6 +64,8 @@ vthp:   .res 10                  ; per-slot torpedo HP (GB slot+$0C & $3F)
     sta cam_max+1
     lda #1
     sta vfire
+    lda #5                       ; 56% of combat frames carry 4-8 movers: the
+    sta bud_base                 ; 3-cap deferral holes were the user's flashing
     rts
 .endproc
 .segment "W2FAR"
@@ -1293,11 +1295,11 @@ vbox:                            ; GB phys byte1 per type (docs/12 table)
     ldx oi
     lda o_y,x
     clc
-    adc dg_dy,y
-    sta dy
+    adc quad_rows,y              ; the FIXED 2x2 quadrant tables (bank5 diet:
+    sta dy                       ; dg_dy/dg_dc were byte-identical copies)
     lda spr_col
     clc
-    adc dg_dc,y
+    adc quad_cols,y
     sta dcol
     tya
     clc
@@ -1309,8 +1311,6 @@ vbox:                            ; GB phys byte1 per type (docs/12 table)
     cpy #4
     bne @t
     rts
-dg_dy: .byte 0,0,8,8
-dg_dc: .byte 0,2,0,2
 .endproc
 
 ; ---------------------------------------------------------------------------
@@ -1322,6 +1322,7 @@ dg_dc: .byte 0,2,0,2
     lda #240
     sta goal_tmr
     stz goal_top
+    jsr veh_arm                  ; ...and the x-3 rescue follows it (docs/25)
     lda #3
     sta mus_rate
     jsr mus_stop
@@ -1330,6 +1331,41 @@ dg_dc: .byte 0,2,0,2
 .endproc
 .segment "W2FAR"
 
+.proc veh_arm                    ; sphere touched: arm the rescue machine
+    lda #2                       ; ending13=2 = the 2-3 flavor (the room
+    sta ending13                 ; machine swaps in the W2 creature tiles)
+    lda #<358                    ; the 2-3 rope column, rows 6-9 (GB-captured:
+    sta e_cap                    ; $EC->$2C bottom-up in state $1E, SFX $0B;
+    rts                          ; l3e_rope_tile reads the low byte from e_cap)
+.endproc
+
+; sub_step: the hull slot's step. Idle through play and the jingle/tally; at
+; the LAST phase-4 frame the kit hands the player back -- the GB swaps the
+; sub for standing Mario exactly at $06 -> $1C (OAM-captured: the sub quad
+; persists through $07 and the whole tally).
+.proc sub_step
+    lda goal_phase
+    beq @rts                     ; play: idle (real GIFT pickups share this row)
+    cmp #2
+    bne :+
+    lda goal_tmr                 ; the LAST hold frame: dodge the tally burst --
+    cmp #1                       ; OBJ_GIFT (22) sits below l3e_boom's range and
+    bne @rts                     ; stops drawing, so the hull's pixels freeze on
+    lda #OBJ_GIFT                ; screen (GB: the sub is static and visible
+    sta o_type,x                 ; through the whole tally). The GIFT dispatch
+    rts                          ; row also runs sub_step: the handover below
+:   cmp #4                       ; still fires from the re-typed slot.
+    bne @rts
+    lda goal_tmr
+    cmp #1
+    bne @rts
+    stz veh_vec+1                ; draw_player resumes: standing, facing right
+    stz mario_frame
+    stz mario_facing
+    stz o_type,x                 ; the hull despawns (pipeline-erased: the swap
+@rts:                            ; lands exactly at the GB's $06 -> $1C)
+    rts
+.endproc
 
 ; mar_spawn: the 2-3 spawn cases (A = GB type, Y = entry offset). Same C
 ; contract as w2_spawn: C=0 consumed, C=1 = pool full (the spawner retries).

@@ -142,6 +142,17 @@ def main():
         moth += decode_tiles(d, off, 1)
     with open(os.path.join(out, "moth.svt"), "wb") as f:
         f.write(sv_pack(moth))
+    # The 2-3 rescue creature (what the fake Daisy becomes in world 2): same
+    # $A0-$A3/$B0-$B3 metasprite layout, per-world pixel data. Located by
+    # dumping VRAM at 2-3's state $26 and byte-matching ROM: bank 1, file
+    # 0x4032 + (tile-$A0)*16 (tops) / 0x4132 + (tile-$B0)*16 (bottoms).
+    # Same 8-tile port draw order as the moth; the room machine copies this
+    # sheet over the moth tiles (bank 6 $B900) when ending13 == 2.
+    creat = []
+    for off in (0x4032, 0x4042, 0x4052, 0x4062, 0x4132, 0x4142, 0x4152, 0x4162):
+        creat += decode_tiles(d, off, 1)
+    with open(os.path.join(out, "creature23.svt"), "wb") as f:
+        f.write(sv_pack(creat))
     # ONE-WAY PLATFORM caps (GB $1A93 per-world jump-through lists; ceiling AND
     # wall checks pass them, floor stands): the port remaps the cap tile ids to
     # $F9-$FF (extract_levels.py) so the raw <$60/>=F4 threshold checks do the

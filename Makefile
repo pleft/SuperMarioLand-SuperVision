@@ -9,7 +9,7 @@ ASFLAGS = --cpu 65C02 -g -I src
 CFG     = cfg/supervision.cfg
 ROM_IN  = super-mario-land-gb.gb
 SVT     = build/gfx/w1_obj_8000.svt
-W2GFX   = build/gfx/w2_ovl_8A00.svt build/gfx/w2_ovl_9310.svt
+W2GFX   = build/gfx/w2_ovl_8A00.svt build/gfx/w2_ovl_9310.svt build/gfx/creature23.svt
 LVL     = build/levels/level_01.bin
 ARC     = build/data/jumparc.bin
 TABLES  = build/data/jumparc.bin build/data/speedtab.bin build/data/mario_poses.bin build/data/mario_big_poses.bin build/data/statusbar.bin
@@ -52,7 +52,7 @@ build/datatables.o: src/datatables.s $(TABLES)
 	$(AS) $(ASFLAGS) src/datatables.s -o $@
 
 # Extract + convert assets from the user's ROM.
-$(SVT): tools/extract_gfx.py $(ROM_IN)
+$(SVT) $(W2GFX): tools/extract_gfx.py $(ROM_IN)
 	python3 tools/extract_gfx.py
 $(LVL): tools/extract_levels.py $(ROM_IN)
 	python3 tools/extract_levels.py
