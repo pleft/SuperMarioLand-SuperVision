@@ -515,6 +515,11 @@ probe_stripes:                   ; the full proven liturgy + stripes, FIXED-ROM
     inc ptr+1
     dex
     bne @clr2
+    lda #<bg_chardata            ; the BG charset base is a VARIABLE now (W3 points
+    sta bgc                      ; it at its own patched copy; docs/33). The TITLE
+    lda #>bg_chardata            ; draws its level-select digits through it BEFORE
+    sta bgc+1                    ; any level loads, so seed it here -- after the
+                                 ; WRAM clear, before anything draws.
     lda #<__RCODE_LOAD__         ; --- install the always-resident RAM code at
     sta ptr                      ; $1200 (ring helpers + hud_flush; docs/27):
     lda #>__RCODE_LOAD__         ; copied from this same bank-6 window ---
