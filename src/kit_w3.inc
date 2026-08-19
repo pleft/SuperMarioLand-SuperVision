@@ -368,9 +368,9 @@ W3FLG    = $0B                   ; NMI | TIMER_IRQ | LCD (load_level's mask)
     lda w3_stomp,y
     beq @hurt                    ; not stompable
     sta tmpL2
-    jsr l3_above                 ; Mario coming down onto it?
-    ldx oi
-    bcc @hurt
+    jsr l3_above                 ; C=0 means Mario is 4+px ABOVE = the stomp side
+    ldx oi                       ; (l3_above's contract; C=1 is side contact)
+    bcs @hurt
     lda tmpL2                    ; -> the GB's stomp morph, run by the VM
     sta tmpL3
     jsr w3_morph
