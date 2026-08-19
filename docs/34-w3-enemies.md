@@ -79,9 +79,41 @@ EF EF EF | F0 20 | EF EF EF EF | FF` = set param $22, tick every 2f, face
 one way, X speed 1, patrol ~59 ticks, face back, ~60 ticks, loop -- a plain
 patroller. Batadon's 92-frame hop is the same machinery with Y velocities.
 
-## Port plan
+## THE PORT (shipped)
 
-Batadon and the pillar first (3-1's signature pair), then $3A/$3B/$31, then
-3-2's $25, then 3-3 + the boss. Tiles land in the W3 slice of the per-level
-OBJ overlay (pack_banks W2_TILES, EAS3 branch): Batadon needs $AA/$AB/$AC/
-$BA/$BB, the pillar $87/$88, the burst $A4-$A7/$B4-$B7 + $AC/$AD.
+kit_w3.inc runs the VM; gen_w3data.py extracts 36 scripts (1285B), 44
+metasprite display lists and a compact 58-tile slice into bank 6; the hot code
+lives in the $1500 window and the cold half in a bank-RESIDENT far segment in
+bank 1 (W3's own bank, so no bank juggling).
+
+**Per-type gate** (tools-side: /tmp/w3verify.py): force the GB and the port to
+the same script offset, then compare TICK EVENTS (pc, velocity, param, dy,
+|dx|). Results so far:
+- `$3C` Batadon: 21 events, **0 mismatches**
+- `$49` rising moai pillar: 20 events, **0 mismatches**
+Types deeper in the levels ($3A/$3B/$31/$25/$35) could not be reached by the
+GB autoplay bot (it dies or stalls before their spawn columns) -- they run the
+same interpreter and appear correct in play, but they are NOT individually
+gated. Say so rather than implying they are.
+
+**Contact** comes from the ROM's contact table ($3186, FIVE bytes per type):
+column +0 is the stomp result, reached from the GB's stomp test at $08C7.
+$00 there means "not stompable" (the shared l3_hurt behaviour: side contact
+hurts, landing does nothing). Non-zero morphs the slot into that type, and
+since kill chains are just more VM types the whole chain runs for free
+(Batadon -> $3D squashed -> $3E puff -> $0D falling corpse).
+
+**Level soaks**: 3-1/3-2/3-3 each run 4000 frames across the whole level with
+enemies live -- no wedge, no corruption, canaries clean. 3-3's ending (sphere
+gate -> rope -> room -> the World-3 creature -> bonus) verifies end to end
+with the creature tiles byte-asserted.
+
+## What is NOT done in W3
+
+- **Hiyoihoi ($32) is not a boss yet**: it spawns and the VM runs its script
+  (it throws its child $33), but there is no HP/defeat handling, so it cannot
+  be killed -- the level is finished by reaching the sphere, which works.
+- Ball/star kill columns of the contact table are not wired (only the stomp
+  column); superball kills on W3 enemies do nothing yet.
+- $36's engine-side stone and the shared types are inherited, not re-verified
+  against W3 specifically.
