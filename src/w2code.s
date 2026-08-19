@@ -114,9 +114,9 @@ W3FLAGS = $0B                    ; NMI | TIMER_IRQ | LCD
 @nxt:
     txa
     clc
-    adc #32
+    adc #W3CSTRIDE
     tax
-    cpx #W3CSLOTS*32
+    cpx #W3CSLOTS*W3CSTRIDE
     bne @srch
     jmp @miss
 @hit:
@@ -137,11 +137,13 @@ W3FLAGS = $0B                    ; NMI | TIMER_IRQ | LCD
     sta tmpH2
     rts
 @miss:                           ; refill the round-robin victim
-    lda W3CNEXT
+    lda W3CNEXT                  ; next victim = the following slot BASE
     clc
-    adc #32
-    and #(W3CSLOTS-1)*32
-    sta W3CNEXT
+    adc #W3CSTRIDE
+    cmp #W3CSLOTS*W3CSTRIDE
+    bcc :+
+    lda #0
+:   sta W3CNEXT
     tax
     lda feet_col
     sta W3CACHE,x
@@ -221,9 +223,9 @@ W3FLAGS = $0B                    ; NMI | TIMER_IRQ | LCD
 :   sta W3CACHE+1,x
     txa
     clc
-    adc #32
+    adc #W3CSTRIDE
     tax
-    cpx #W3CSLOTS*32
+    cpx #W3CSLOTS*W3CSTRIDE
     bne :-
     stz W3CNEXT
     rts
@@ -512,9 +514,14 @@ w2_rts:
 :   ldx oi
     lda mario_starT
     bne @kill
+.ifdef MAR23                     ; VEHICLE LEVEL (law B1): nothing is stompable,
+    jsr sub_off                  ; contact always hurts whatever the vertical
+    jmp hurt_mario               ; relation, and the hull dies with the hit
+.else
     jsr l3_above
     bcc @stomp
     jmp hurt_mario
+.endif
 @stomp:
     jsr foe_code                 ; class code from the type, BEFORE the despawn
     pha                          ; (a tmp would die under mario_dx's scratch)

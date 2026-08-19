@@ -28,10 +28,11 @@ MUS_CLEAR3 = 3                   ; the course-clear jingle (build/audio/music.in
 ; caches whole 16-byte columns in the RAM tail the retired 2-3 loader stub
 ; used to borrow, so repeat probes (and the 16 reads the column streamer does)
 ; cost no switch at all. 4 slots x 32B stride = cheap (n<<5) indexing.
-W3CACHE  = $1F80
-W3CSLOTS = 4
-W3CNEXT  = $1F9E                 ; round-robin victim (slot 0's slack)
-W3CMB    = $1F9F                 ; map_base hi when the cache was filled
+W3CACHE  = $1F80                 ; 7 slots x [col16][16 tiles] = 126 bytes; the
+W3CSLOTS = 7                     ; victim counter holds a slot BASE (0,18,..108)
+W3CSTRIDE = 18                   ; so the probe needs no multiply
+W3CNEXT  = $1FFE
+W3CMB    = $1FFF                 ; map_base hi when the cache was filled
 W3SCRB   = $B000                 ; bank 6 pins (pack_banks writes all three):
 W3DLB    = $B520                 ;   scripts / metasprite display lists /
 W3TILB   = $B780                 ;   the compact W3 tile slice

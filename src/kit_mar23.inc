@@ -1002,8 +1002,10 @@ vbox:                            ; GB phys byte1 per type (docs/12 table)
     dec o_xh,x
 :   dec o_xl,x
     lda o_tmr,x
-    cmp #144
-    bcc @foe
+    cmp #112                     ; GB-measured: the left leg turns after 112f
+    bcc @foe                     ; (144 ran it off the screen edge -- it was
+                                 ; CULLED before the turn, so the sweep looked
+                                 ; like a plain right-to-left swim)
 @adv:
     stz o_tmr,x
     inc o_st,x
@@ -1022,7 +1024,7 @@ vbox:                            ; GB phys byte1 per type (docs/12 table)
     adc o_vy,x
     sta o_y,x
     lda o_tmr,x
-    cmp #24
+    cmp #32                      ; GB-measured: the vertical leg is 32px, not 24
     bcs @adv
     bra @foe
 @right:

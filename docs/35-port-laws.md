@@ -32,9 +32,11 @@ shows a shifted screen and has twice sent me chasing phantom bugs.
 ## B. Contact and kills
 
 **B1. Vehicle levels have NO stomping.** In 2-3 (and any future vehicle
-level) contact ALWAYS hurts, whatever the vertical relation. The shared
-walker helpers (`l3_hurt`, `enemy_contact`) implement the walker rule and must
-not be reused unmodified there.
+level) contact ALWAYS hurts, whatever the vertical relation, AND the lethal
+hit must despawn the hull (`sub_off`) or Mario's corpse plays beside a
+submarine that is still on screen. The walker rule lives in `w2_foe` (the
+shared W2 resolver) as well as `l3_hurt` -- gate BOTH. *(Cost: the sub
+"stomping" a skeleton fish from above, and the hull surviving the death.)*
 
 **B2. `l3_above` returns C=0 when Mario is on the STOMP side** (4+px above).
 Branch on `bcs` to hurt, `bcc` to stomp. Getting it backwards stomps enemies
@@ -105,6 +107,16 @@ motion, and convert to WORLD coordinates ($C0AB/$C0AC are 16px columns).
 
 **E5. When a measurement disagrees with the port, suspect the instrument
 first** -- twice the "bug" was my sampling box or my reference capture.
+
+**E6. Sim state pickles embed the RAM-resident kit.** A saved state carries
+the $1500 window image, so after ANY kit change the pickle must be
+regenerated (`mkstate23.py`) or the test silently exercises the OLD kit and
+"proves" the bug is still there.
+
+**E7. Enemy timings must be measured from SPAWN, in world coordinates, with
+the object's own cull in mind.** 2-3's school fish had a 144-frame left leg
+against the GB's 112: the extra 32 frames pushed it past the cull margin, so
+it was FREED before its turn and looked like a plain right-to-left swim.
 
 ## F. GB capture recipes
 
