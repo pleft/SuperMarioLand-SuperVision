@@ -70,8 +70,18 @@ play** -- not per tile read, not per sprite draw. Data a level touches every
 frame must be RESIDENT in the bank that is mapped while it runs. If it cannot
 be, the switches must be batched to a single bracketed window per frame, and
 even that is a compromise the user can see.
-*(Cost: W3's HUD instability -- 22/frame, then still 9/frame after a partial
-fix, because the DRAW path also switched.)*
+*(Cost: W3's HUD instability -- 22.5/frame, then still 9/frame after a partial
+fix, because the DRAW path also switched. Now **5.5/frame** with the map-column
+cache at $1F80.)*
+
+**D1b. W3's remaining 5.5 switches/frame are a LAYOUT problem, not a coding
+one.** 13.5 of the 18 map reads per frame come from the RENDERER (erase +
+column streaming), not from gameplay, and they switch because W3's map, tiles
+and charset live in bank 6 while its code runs elsewhere. No amount of caching
+removes them: the honest fix is to make a level's map + tiles + charset
+RESIDENT in the bank that is mapped while it runs, which needs the 8833-byte
+shared prefix shrunk so levels can share banks. Until then W3's HUD is
+measurably less stable than W1/W2's, and saying otherwise is not honest.
 
 **D2. Measure the switch rate in REAL play** (enemies on screen, no camera
 teleport) before claiming a switching fix works. A quiet test frame proves

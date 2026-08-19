@@ -1398,8 +1398,11 @@ vbox:                            ; GB phys byte1 per type (docs/12 table)
                                  ; never gets another chance to erase it (user:
                                  ; "sub remains, mario's death animation plays").
     lda mario_big                ; a hit while BIG only shrinks the sub -- it
-    bne @rts                     ; keeps playing, so the hull must stay
-    lda #1
+    ora hurt_inv                 ; keeps playing, so the hull must stay. Same for
+    ora mario_grow               ; a hit that hurt_mario will THROW AWAY (i-frames,
+    ora mario_shrink             ; mid grow/shrink): despawning the hull there left
+    bne @rts                     ; Mario alive with no sub at all, for the rest of
+    lda #1                       ; the level -- caught by the 2-3 ending regression
     sta subdead                  ; and sub_ensure must not bring it back
     ldy #9
 @scan:

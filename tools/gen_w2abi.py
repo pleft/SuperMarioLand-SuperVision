@@ -28,6 +28,8 @@ NEED = [
     "spawn_tab", "find_free_obj", "obj_alloc_typed", "spawn_tabx",
     # world state
     "cam_x", "spr_x", "spr_y", "mario_big", "frame_count", "oi",
+    "hurt_inv", "mario_grow", "mario_shrink",   # sub_off must mirror hurt_mario's
+                                                # "this hit is thrown away" guard
     # drawing
     "draw_quad", "draw_tile_yflip", "dcol", "dy", "spr_subx", "do_flip",
     # combat / scoring
