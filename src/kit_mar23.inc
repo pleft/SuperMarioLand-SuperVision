@@ -47,6 +47,8 @@ VAUTO_LO = <2720
 
 ; --- blob-local state (the window is RAM) ---
 vfire:  .byte 1                  ; hold-A autofire countdown (GB $c0ae, /12)
+subdead: .byte 0                 ; 1 = the hull died with Mario; sub_ensure must
+                                 ; not bring it back for the death animation
 vthp:   .res 10                  ; per-slot torpedo HP (GB slot+$0C & $3F)
 
 .segment "W2FAR"
@@ -64,6 +66,7 @@ vthp:   .res 10                  ; per-slot torpedo HP (GB slot+$0C & $3F)
     sta cam_max+1
     lda #1
     sta vfire
+    stz subdead                  ; a fresh life starts with the hull alive
     lda #5                       ; 56% of combat frames carry 4-8 movers: the
     sta bud_base                 ; 3-cap deferral holes were the user's flashing
     rts
@@ -320,20 +323,13 @@ vthp:   .res 10                  ; per-slot torpedo HP (GB slot+$0C & $3F)
 
 ; ---------------------------------------------------------------------------
 ; the sub sprite: one slot glued to Mario, draw-only (contact stays Mario's).
-.proc sub_off                    ; the lethal hit despawns the hull
-    ldy #9
-:   lda o_type,y
-    cmp #OBJ_SUBV
-    bne :+
-    lda #0
-    sta o_type,y
-:   dey
-    bpl :--
-    rts
-.endproc
+
 
 .proc sub_ensure
-    ldx #9
+    lda subdead                  ; killed this life? stay gone (the death hop
+    beq :+                       ; plays alone, GB-true)
+    rts
+:   ldx #9
 :   lda o_type,x
     cmp #OBJ_SUBV
     beq @glue
@@ -1047,23 +1043,47 @@ vbox:                            ; GB phys byte1 per type (docs/12 table)
 
 
 .segment "W2FAR"
-.segment "W2C"
 .proc draw_yura2                 ; the school fish: a 16x8 pair, side by side
     ldx oi                       ; (GB param $2C/$2E = [a8][a9]/[b8][b9]); the
-    jsr foe_frame                ; flap picks the pair
+    stz do_flip                  ; flap picks the pair. The tiles face LEFT
+    lda o_type,x                 ; natively; the SCHOOL fish ($30) turns round for
+    cmp #OBJ_YFIRE               ; its return leg -- GB-measured, its direction
+    bne @faced                   ; byte flips HALFWAY through the 32f vertical leg
+    lda o_st,x                   ; (leg starts f112, $02 -> $03 at f128) and stays
+    beq @faced                   ; right for the whole right-hand leg. The spitter
+    cmp #2                       ; ($2F) shares this draw and never turns, so the
+    bcs @flip                    ; test is gated on the type.
+    lda o_tmr,x
+    cmp #16
+    bcc @faced
+@flip:
+    lda #1
+    sta do_flip
+@faced:
+    ldx oi
+    jsr foe_frame
     asl
     clc
     adc #YUR2_T
+    ldy do_flip
+    beq @first
+    ina                          ; mirrored: the two halves swap sides as well, or
+@first:                          ; the head lands where the tail should be
     tax
     phx
-    jsr draw_one                 ; sets dy = o_y+8; the right half rides it
+    jsr draw_one                 ; sets dy = o_y+8; the other half rides it
     ldx oi
     lda spr_col
     ina
     ina
     sta dcol
     plx
+    ldy do_flip
+    bne @mirror
     inx
+    jmp draw_quad
+@mirror:
+    dex
     jmp draw_quad
 .endproc
 .segment "W2FAR"
@@ -1371,6 +1391,50 @@ vbox:                            ; GB phys byte1 per type (docs/12 table)
 
 ; mar_spawn: the 2-3 spawn cases (A = GB type, Y = entry offset). Same C
 ; contract as w2_spawn: C=0 consumed, C=1 = pool full (the spawner retries).
+.segment "W2FAR"
+.proc sub_off                    ; the LETHAL hit despawns the hull AND wipes its
+                                 ; pixels: once death_anim is set the main loop
+                                 ; runs only death_frame, so the object pipeline
+                                 ; never gets another chance to erase it (user:
+                                 ; "sub remains, mario's death animation plays").
+    lda mario_big                ; a hit while BIG only shrinks the sub -- it
+    bne @rts                     ; keeps playing, so the hull must stay
+    lda #1
+    sta subdead                  ; and sub_ensure must not bring it back
+    ldy #9
+@scan:
+    lda o_type,y
+    cmp #OBJ_SUBV
+    bne @next
+    lda #0
+    sta o_type,y
+    lda o_pvx,y                  ; the rect the pipeline last drew it into
+    sec
+    sbc #4
+    bcs @xok
+    lda #0
+@xok:
+    sta rb_vx
+    lda o_pvy,y
+    sec
+    sbc #8
+    bcs @yok
+    lda #0
+@yok:
+    sta rb_y
+    lda #4                       ; 16px hull + a margin, in 8px cells
+    sta rb_cols
+    sta rb_rows
+    phy
+    jsr restore_bg
+    ply
+@next:
+    dey
+    bpl @scan
+@rts:
+    rts
+.endproc
+
 .proc mar_spawn                  ; A = GB type, Y = entry offset. Table-driven
     sty tmpL3                    ; (bank5 diet). C contract = w2_spawn's.
     ldy #4

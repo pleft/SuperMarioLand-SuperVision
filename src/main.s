@@ -4472,29 +4472,6 @@ TIMER_RATE = 40                  ; frames per clock unit (SML's $da00 sub-counte
 .endproc
 
 ; ---------------------------------------------------------------------------
-; erase_player: clear the 16x16 region at (prev_col, prev_y) to background ($00).
-.proc erase_player
-    lda prev_col
-    sta dcol
-    lda prev_y
-    sta dy
-    jsr set_dst                  ; dst_ptr = top-left of the old sprite
-    ldx #16                      ; 16 rows
-@row:
-    lda #0
-    ldy #0
-    sta (dst_ptr),y              ; 16 px wide = 4 bytes
-    iny
-    sta (dst_ptr),y
-    iny
-    sta (dst_ptr),y
-    iny
-    sta (dst_ptr),y
-    jsr ring_next_dst            ; dst += stride, ring-wrapped (docs/27)
-    dex
-    bne @row
-    rts
-.endproc
 
 ; Camera constants. PIN_X = Mario's screen X (left edge) at which the camera starts
 ; following him; cam_max (runtime, per level) = max scroll = (lvl_cols - 20) * 8 px.
@@ -8473,6 +8450,17 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     jsr restore_bg
     ldx oi
     stz o_pdr,x
+    lda o_nfl,x                  ; FUSE: draw the sprite the instant it is erased,
+    and #2                       ; rather than leave it blank until pass 4 reaches
+    beq @p3n                     ; it. Erase-all-then-draw-all left every sprite
+    jsr p4_one                   ; blank for a MEASURED 97 scanlines; the render
+    ldx oi                       ; runs long past vblank, so the beam sweeps those
+    lda o_nfl,x                  ; blanks -- that IS the flicker (docs/36).
+    and #8
+    bne @p3n                     ; ENTANGLED: leave it dirty so pass 4 redraws it
+    lda o_nfl,x                  ; after the later erases (and Mario's) have run
+    and #$FA                     ; over it -- that keeps the draw ORDER, and so the
+    sta o_nfl,x                  ; layering, exactly as it was
 @p3n:
     inc oi
     lda oi
@@ -8507,6 +8495,152 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
 @p4skip:
     jmp @p4n
 @p4go:
+    jsr p4_one
+@p4n:
+    inc oi
+    lda oi
+    cmp #OBJ_MAX
+    beq :+
+    jmp @p4
+:   lda m_dirty
+    beq @out
+    jsr draw_player
+    lda mario_vx
+    sta prev_vx
+    lda spr_y
+    sta prev_y
+    lda mario_frame
+    sta prev_frame
+    lda mario_facing
+    eor mario_duck
+    eor mario_big
+    sta prev_vis
+@out:
+    rts
+; @spread: one propagation round -- every dirty sprite's OLD rect vs every clean drawn
+; sprite's OLD rect (coarse boxes: |dx|<32, |dy|<28); hits become dirty. Mario included.
+@spread:
+    stz oi2
+@sp_i:
+    ldx oi2
+    lda o_nfl,x
+    and #1
+    beq @sp_in                   ; i not dirty
+    lda o_pdr,x
+    beq @sp_in                   ; i has no old image -> its erase can't wipe anyone
+    stz tmpL3                    ; j loop
+@sp_j:
+    ldy tmpL3
+    cpy oi2
+    beq @sp_jn
+    lda o_pdr,y
+    beq @sp_jn                   ; j not drawn (the box test below runs even when j
+                                 ; is ALREADY dirty: an overlapping dirty PAIR must
+                                 ; be found too, so neither of them fuses)
+    lda o_pw,x                   ; box width by the pair's real widths: two narrow
+    and #$7F                     ; (8px) sprites need only a 20px box — the wide 32px
+    cmp #3                       ; box was chaining arrows to everything nearby
+    bcs @sp_wide
+    lda o_pw,y
+    and #$7F
+    cmp #3
+    bcs @sp_wide
+    lda o_pvx,x
+    sec
+    sbc o_pvx,y
+    bpl :+
+    eor #$FF
+    ina
+:   cmp #20
+    bcs @sp_jn
+    bra @sp_ychk
+@sp_wide:
+    lda o_pvx,x
+    sec
+    sbc o_pvx,y
+    bpl :+
+    eor #$FF
+    ina
+:   cmp #32
+    bcs @sp_jn
+@sp_ychk:
+    lda o_pvy,x
+    sec
+    sbc o_pvy,y
+    bpl :+
+    eor #$FF
+    ina
+:   cmp #28
+    bcs @sp_jn
+    cpy oi2                      ; slots are erased+drawn in ASCENDING order, so only
+    bcs @sp_je                   ; the LOWER of an overlapping pair can be damaged --
+    lda o_nfl,y                  ; the higher one is drawn after the lower one's erase.
+    ora #8                       ; Bit3 = "a later erase will run over you": pass 4
+    sta o_nfl,y                  ; redraws it (the paired-per-slot wipe bug, avoided
+@sp_je:                          ; without erasing everything up front)
+    lda o_nfl,y
+    and #1
+    bne @sp_jn                   ; j was already dirty: nothing more to mark
+    jsr mark_slot_y              ; overlap: j must redraw (erase too if it moved)
+@sp_jn:
+    inc tmpL3
+    lda tmpL3
+    cmp #OBJ_MAX
+    bne @sp_j
+@sp_in:
+    inc oi2
+    lda oi2
+    cmp #OBJ_MAX
+    beq @sp_mario                ; (the i loop outgrew a relative branch)
+    jmp @sp_i
+@sp_mario:
+    ; Mario vs slots (both directions)
+    stz tmpL3
+@sp_m:
+    ldy tmpL3
+    lda o_pdr,y
+    beq @sp_mn
+    lda prev_vx
+    sec
+    sbc o_pvx,y
+    bpl :+
+    eor #$FF
+    ina
+:   cmp #32
+    bcs @sp_mn
+    lda prev_y
+    sec
+    sbc o_pvy,y
+    bpl :+
+    eor #$FF
+    ina
+:   cmp #28
+    bcs @sp_mn
+    lda o_nfl,y                  ; overlaps MARIO: his erase runs after every slot
+    ora #8                       ; erase and his draw is last of all, so this slot
+    sta o_nfl,y                  ; cannot fuse either
+    lda m_dirty                  ; overlapping pair: if either is dirty, both are
+    bne @sp_mset
+    lda o_nfl,y
+    and #1
+    beq @sp_mn
+    lda #1
+    sta m_dirty
+    bra @sp_mn
+@sp_mset:
+    jsr mark_slot_y
+@sp_mn:
+    inc tmpL3
+    lda tmpL3
+    cmp #OBJ_MAX
+    bne @sp_m
+    rts
+.endproc
+
+; p4_one: draw slot X=oi and record its drawn state (position, erase width,
+; anim token). Split out of pass 4 so pass 3 can call it the instant it has
+; erased an UNENTANGLED sprite -- see the fusing note in pass 3.
+.proc p4_one
     lda o_nvx,x
     sta ovx
     jsr draw_obj_sprite
@@ -8569,131 +8703,6 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     sta o_pfr,x                  ; arrows/stones never anim-dirty)
     lda #1
     sta o_pdr,x
-@p4n:
-    inc oi
-    lda oi
-    cmp #OBJ_MAX
-    beq :+
-    jmp @p4
-:   lda m_dirty
-    beq @out
-    jsr draw_player
-    lda mario_vx
-    sta prev_vx
-    lda spr_y
-    sta prev_y
-    lda mario_frame
-    sta prev_frame
-    lda mario_facing
-    eor mario_duck
-    eor mario_big
-    sta prev_vis
-@out:
-    rts
-; @spread: one propagation round -- every dirty sprite's OLD rect vs every clean drawn
-; sprite's OLD rect (coarse boxes: |dx|<32, |dy|<28); hits become dirty. Mario included.
-@spread:
-    stz oi2
-@sp_i:
-    ldx oi2
-    lda o_nfl,x
-    and #1
-    beq @sp_in                   ; i not dirty
-    lda o_pdr,x
-    beq @sp_in                   ; i has no old image -> its erase can't wipe anyone
-    stz tmpL3                    ; j loop
-@sp_j:
-    ldy tmpL3
-    cpy oi2
-    beq @sp_jn
-    lda o_nfl,y
-    and #1
-    bne @sp_jn                   ; j already dirty
-    lda o_pdr,y
-    beq @sp_jn                   ; j not drawn
-    lda o_pw,x                   ; box width by the pair's real widths: two narrow
-    and #$7F                     ; (8px) sprites need only a 20px box — the wide 32px
-    cmp #3                       ; box was chaining arrows to everything nearby
-    bcs @sp_wide
-    lda o_pw,y
-    and #$7F
-    cmp #3
-    bcs @sp_wide
-    lda o_pvx,x
-    sec
-    sbc o_pvx,y
-    bpl :+
-    eor #$FF
-    ina
-:   cmp #20
-    bcs @sp_jn
-    bra @sp_ychk
-@sp_wide:
-    lda o_pvx,x
-    sec
-    sbc o_pvx,y
-    bpl :+
-    eor #$FF
-    ina
-:   cmp #32
-    bcs @sp_jn
-@sp_ychk:
-    lda o_pvy,x
-    sec
-    sbc o_pvy,y
-    bpl :+
-    eor #$FF
-    ina
-:   cmp #28
-    bcs @sp_jn
-    jsr mark_slot_y              ; overlap: j must redraw (erase too if it moved)
-@sp_jn:
-    inc tmpL3
-    lda tmpL3
-    cmp #OBJ_MAX
-    bne @sp_j
-@sp_in:
-    inc oi2
-    lda oi2
-    cmp #OBJ_MAX
-    bne @sp_i
-    ; Mario vs slots (both directions)
-    stz tmpL3
-@sp_m:
-    ldy tmpL3
-    lda o_pdr,y
-    beq @sp_mn
-    lda prev_vx
-    sec
-    sbc o_pvx,y
-    bpl :+
-    eor #$FF
-    ina
-:   cmp #32
-    bcs @sp_mn
-    lda prev_y
-    sec
-    sbc o_pvy,y
-    bpl :+
-    eor #$FF
-    ina
-:   cmp #28
-    bcs @sp_mn
-    lda m_dirty                  ; overlapping pair: if either is dirty, both are
-    bne @sp_mset
-    lda o_nfl,y
-    and #1
-    beq @sp_mn
-    lda #1
-    sta m_dirty
-    bra @sp_mn
-@sp_mset:
-    jsr mark_slot_y
-@sp_mn:
-    inc tmpL3
-    lda tmpL3
-    cmp #OBJ_MAX
-    bne @sp_m
     rts
 .endproc
 
@@ -9971,123 +9980,16 @@ hf_n1:       .res 1
 
 
 ; ---------------------------------------------------------------------------
-; sprite_blit_tile: like blit_tile but TRANSPARENT (GB colour 0 = see-through).
-; Per byte: mask = pixels-that-are-nonzero; dst = (dst & ~mask) | src.
-.proc sprite_blit_tile
-    lda src_ptr
-    sta cur_src
-    lda src_ptr+1
-    sta cur_src+1
-    lda dst_ptr
-    sta cur_dst
-    lda dst_ptr+1
-    sta cur_dst+1
-    ldx #8
-@row:
-    ldy #0
-    jsr @merge
-    iny
-    jsr @merge
-    lda cur_src                  ; src += 2
-    clc
-    adc #2
-    sta cur_src
-    bcc :+
-    inc cur_src+1
-:   jsr ring_next_cur            ; dst += stride, ring-wrapped (docs/27)
-:   dex
-    bne @row
-    rts
-@merge:
-    lda (cur_src),y
-    sta tmp_src
-    lsr                          ; src >> 1
-    ora tmp_src                  ; src | src>>1
-    and #$55                     ; f (per-pixel nonzero flag at low bit)
-    sta tmp_mask
-    asl                          ; f << 1
-    ora tmp_mask                 ; mask = f | f<<1
-    eor #$FF                     ; ~mask
-    and (cur_dst),y              ; dst & ~mask
-    ora tmp_src                  ; | src  (transparent px contribute 0)
-    sta (cur_dst),y
-    rts
-.endproc
 
 ; ---------------------------------------------------------------------------
 ; build_revpix: revpix[b] = b with its four 2bpp pixels reversed (px0<->px3, px1<->px2).
 ; (build_revpix moved to BOOT6: one-shot boot code runs from bank 6)
 
 ; ---------------------------------------------------------------------------
-; merge_byte_A: transparent merge of source byte A into (cur_dst),y.
-.proc merge_byte_A
-    sta tmp_src
-    lsr
-    ora tmp_src
-    and #$55
-    sta tmp_mask
-    asl
-    ora tmp_mask
-    eor #$FF
-    and (cur_dst),y
-    ora tmp_src
-    sta (cur_dst),y
-    rts
-.endproc
 
 ; ---------------------------------------------------------------------------
-; sprite_blit_tile_flip: transparent blit, HORIZONTALLY FLIPPED. Per row, the two
-; bytes swap and each is pixel-reversed: dst[0]=revpix[src[1]], dst[1]=revpix[src[0]].
-.proc sprite_blit_tile_flip
-    lda src_ptr
-    sta cur_src
-    lda src_ptr+1
-    sta cur_src+1
-    lda dst_ptr
-    sta cur_dst
-    lda dst_ptr+1
-    sta cur_dst+1
-    lda #8
-    sta blit_row
-@row:
-    ldy #1                       ; src right byte -> flipped -> dst left
-    lda (cur_src),y
-    tax
-    lda revpix,x
-    ldy #0
-    jsr merge_byte_A
-    ldy #0                       ; src left byte -> flipped -> dst right
-    lda (cur_src),y
-    tax
-    lda revpix,x
-    ldy #1
-    jsr merge_byte_A
-    lda cur_src                  ; src += 2
-    clc
-    adc #2
-    sta cur_src
-    bcc :+
-    inc cur_src+1
-:   jsr ring_next_cur            ; dst += stride, ring-wrapped (docs/27)
-:   dec blit_row
-    beq @out
-    bra @row
-@out:
-    rts
-.endproc
 
 ; ---------------------------------------------------------------------------
-; calc_mask_A: A = byte -> A = transparency mask (the 2bpp pixels that are nonzero).
-.proc calc_mask_A
-    sta tmp_src
-    lsr
-    ora tmp_src
-    and #$55
-    sta tmp_mask
-    asl
-    ora tmp_mask
-    rts
-.endproc
 
 ; ---------------------------------------------------------------------------
 ; sprite_blit_subpx: transparent sprite blit at a SUB-PIXEL X (spr_subx = 0..3),
@@ -10121,6 +10023,73 @@ hf_n1:       .res 1
     sta m1
 :   lda #8
     sta blit_row
+    lda spr_subx                 ; FAST PATH -- byte-aligned and transparent (over
+    ora blit_opaque              ; half of all in-play calls, flipped or not). Then
+    beq @arow                    ; s2/m2 are 0, so the third byte's merge would write
+    jmp @row                     ; it back UNCHANGED -- skip it, and skip any wholly
+@arow:                           ; transparent byte as well. Bit-identical.
+    lda do_flip
+    bne @afl
+    ldy #0
+    lda (cur_src),y
+    sta s0
+    ldy #1
+    lda (cur_src),y
+    sta s1
+    bra @amrg
+@afl:
+    ldy #1                       ; flipped: the two bytes swap and each is reversed
+    lda (cur_src),y
+    tax
+    lda revpix,x
+    sta s0
+    ldy #0
+    lda (cur_src),y
+    tax
+    lda revpix,x
+    sta s1
+@amrg:
+    ldy #0
+    lda s0
+    beq @a1                      ; wholly transparent byte -> mask 0 -> dst untouched
+    sta tmp_src
+    lsr
+    ora tmp_src
+    and #$55                     ; M(src), inlined (same spread the slow path uses)
+    sta tmp_mask
+    asl
+    ora tmp_mask
+    eor #$FF
+    and (cur_dst),y
+    ora tmp_src
+    sta (cur_dst),y
+@a1:
+    ldy #1
+    lda s1
+    beq @a2
+    sta tmp_src
+    lsr
+    ora tmp_src
+    and #$55
+    sta tmp_mask
+    asl
+    ora tmp_mask
+    eor #$FF
+    and (cur_dst),y
+    ora tmp_src
+    sta (cur_dst),y
+@a2:
+    lda cur_src
+    clc
+    adc #2
+    sta cur_src
+    bcc @anoc
+    inc cur_src+1
+@anoc:
+    jsr ring_next_cur
+    dec blit_row
+    bne @arow
+    rts
 @row:
     lda do_flip
     beq @noflip
@@ -10162,15 +10131,21 @@ hf_n1:       .res 1
     lda blit_opaque
     bne @merge                   ; opaque: masks preset
     lda s0                       ; transparency: M(shifted), inlined — M spreads each
-    sta tmp_src                  ; nonzero 2-bit pixel to a full 2-bit mask and
-    lsr                          ; commutes with the 2-bit-aligned shift
-    ora tmp_src
-    and #$55
+    beq @z0                      ; nonzero 2-bit pixel to a full 2-bit mask and
+    sta tmp_src                  ; commutes with the 2-bit-aligned shift. A wholly
+    lsr                          ; transparent byte masks to 0, so both the spread
+    ora tmp_src                  ; and its merge below are skipped -- sprite edges
+    and #$55                     ; and the spill byte are empty most rows.
     sta m0
     asl
     ora m0
     sta m0
+    bra @k1
+@z0:
+    stz m0
+@k1:
     lda s1
+    beq @z1
     sta tmp_src
     lsr
     ora tmp_src
@@ -10179,7 +10154,12 @@ hf_n1:       .res 1
     asl
     ora m1
     sta m1
+    bra @k2
+@z1:
+    stz m1
+@k2:
     lda s2
+    beq @z2
     sta tmp_src
     lsr
     ora tmp_src
@@ -10188,25 +10168,34 @@ hf_n1:       .res 1
     asl
     ora m2
     sta m2
+    bra @merge
+@z2:
+    stz m2
 @merge:
     ldy #0                       ; dst = (dst & ~mask) | shifted
     lda m0
+    beq @g1                      ; mask 0 -> the byte would be written back unchanged
     eor #$FF
     and (cur_dst),y
     ora s0
     sta (cur_dst),y
+@g1:
     iny
     lda m1
+    beq @g2
     eor #$FF
     and (cur_dst),y
     ora s1
     sta (cur_dst),y
+@g2:
     iny
     lda m2
+    beq @g3
     eor #$FF
     and (cur_dst),y
     ora s2
     sta (cur_dst),y
+@g3:
     lda cur_src                  ; src += 2
     clc
     adc #2

@@ -45,6 +45,7 @@ NEED = [
     "map_ptr", "map_base", "lvl_cols", "mc_colh", "mc_coll", "mc_row",
     "mapread_vec", "w3_pc", "w3_ti", "map_transform", "map_offmap",
     "wcol", "redraw_one", "award_coin", "hit_qblock", "break_brick",
+    "restore_bg", "rb_vx", "rb_y", "rb_cols", "rb_rows",
     "read_map_tile", "add_score", "calc_feet_col", "mario_vx", "scroll_s", "bud_base", "find_block", "spawn_walker", "spawn_flower", "spawn_star",
     # kit constants live in code, not symbols -- redefined in w2code.s
 ]

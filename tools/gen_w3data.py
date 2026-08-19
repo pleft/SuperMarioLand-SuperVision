@@ -24,8 +24,11 @@ CONTACT_TBL = 0x3186                      # 5 bytes per type; +0 = the STOMP res
 
 # every GB type W3's spawn lists name (types the ENGINE already handles --
 # $00/$04/$0A/$0B/$0E/$36 -- and the shared kit types $02/$0C are excluded)
-SEED = [0x03, 0x05, 0x25, 0x31, 0x32, 0x35, 0x38, 0x39,
-        0x3A, 0x3B, 0x3C, 0x47, 0x49, 0x56]
+# exactly the VM types W3's spawn lists name (measured from the packed
+# spawn binaries -- $05 and $56 are NOT among them; seeding them dragged in
+# whole chains of scripts, params and tiles that can never appear)
+SEED = [0x03, 0x25, 0x31, 0x32, 0x35, 0x38, 0x39,
+        0x3A, 0x3B, 0x3C, 0x47, 0x49]
 
 
 def flat(addr):

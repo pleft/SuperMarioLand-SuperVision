@@ -108,10 +108,22 @@ motion, and convert to WORLD coordinates ($C0AB/$C0AC are 16px columns).
 **E5. When a measurement disagrees with the port, suspect the instrument
 first** -- twice the "bug" was my sampling box or my reference capture.
 
-**E6. Sim state pickles embed the RAM-resident kit.** A saved state carries
-the $1500 window image, so after ANY kit change the pickle must be
-regenerated (`mkstate23.py`) or the test silently exercises the OLD kit and
-"proves" the bug is still there.
+**E6. Sim state pickles embed the WHOLE 64K -- the fixed bank included.** A
+saved state restores $C000-$FFFF as well as the $1500 kit window, and the
+harness only re-maps $8000-$BFFF from the new ROM. So after ANY rebuild --
+kit, engine, blitter, anything -- the pickle must be regenerated
+(`mkstate23.py`) or the test silently runs the OLD code. This has burned twice:
+once "proving" a fixed bug was still there, once reporting three optimisations
+in a row as having changed nothing (the numbers were byte-identical, which was
+the tell).
+
+**E8. A sprite is invisible while it is erased, and the beam does not wait.**
+Frame cost above ~38% of the budget (the vblank fraction) means the renderer is
+drawing while the beam is over the playfield. Any sprite whose erase and draw
+straddle the beam is simply MISSING that frame. Measure the erase->draw gap
+(`/tmp/gap23.py`) and the beam-caught count (`/tmp/beam23.py`) -- do not
+measure only frame cost, which does not distinguish "slow" from "flickering".
+See docs/36.
 
 **E7. Enemy timings must be measured from SPAWN, in world coordinates, with
 the object's own cull in mind.** 2-3's school fish had a 144-frame left leg
