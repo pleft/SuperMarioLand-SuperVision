@@ -59,12 +59,138 @@ init:                            ; $1500: bind our vector table
     bpl :-
 .ifdef MAR23
     jmp veh_init                 ; 2-3: install the vehicle player (veh_vec)
+.elseif .defined(EAS3)
+    lda #<w3_read                ; W3: the window serves read_map_tile -- the
+    sta mapread_vec              ; map data lives in BANK 6 and only this RAM
+    lda #>w3_read                ; code can juggle the mapping (docs/33)
+    sta mapread_vec+1
+    rts
 .else
     rts
 .endif
 
 vec_tab:
     .addr w2_spawn, w2_update, w2_token, w2_gift, w2_draw, w2_width
+
+.ifdef EAS3
+; --- read_map_tile, served from the window (W3): identical semantics to the
+; FIXED reader, but the pool/pointer read happens with BANK 6 mapped. The
+; mod/multi-coin transforms and the past-edge template run after the bank is
+; restored (they touch prefix-resident state). Mirrors main.s byte-for-byte
+; in behavior; any change THERE must land HERE too. ---
+W3SYS   = $2026
+W3FLAGS = $0B                    ; NMI | TIMER_IRQ | LCD
+.proc w3_read
+    lda mrow
+    cmp #16
+    bcc :+
+    jmp @off
+:   lda feet_col+1               ; past the level's right edge? open space
+    cmp lvl_cols+1
+    bcc :+
+    bne @off
+    lda feet_col
+    cmp lvl_cols
+    bcs @off
+:   lda feet_col                 ; map_ptr = map_base + col*2 (the pointer
+    asl                          ; table; docs/33)
+    sta map_ptr
+    lda feet_col+1
+    rol
+    sta map_ptr+1
+    lda map_ptr
+    clc
+    adc map_base
+    sta map_ptr
+    lda map_ptr+1
+    adc map_base+1
+    sta map_ptr+1
+    lda #(6 << 5) | W3FLAGS      ; the tables + pool live in bank 6
+    sta W3SYS
+    lda (map_ptr)
+    tax
+    ldy #1
+    lda (map_ptr),y
+    sta map_ptr+1
+    stx map_ptr
+    ldy mrow
+    lda (map_ptr),y
+    ldx #(1 << 5) | W3FLAGS      ; resident bank back BEFORE prefix work
+    stx W3SYS
+    pha
+    jsr mod_test                 ; clobbers map_ptr/tmpL/X
+    bne @mod
+    pla
+    cmp #$80                     ; unmodified ?-block: the ACTIVE multi-coin
+    beq @mcchk                   ; block reads as a brick after its 1st bonk
+    cmp #$81
+    beq @mcchk
+    cmp #$5F
+    bne @ret
+@mcchk:
+    pha
+    lda mc_colh
+    cmp feet_col+1
+    bne @nomc
+    lda mc_coll
+    cmp feet_col
+    bne @nomc
+    lda mc_row
+    cmp mrow
+    bne @nomc
+    pla
+    lda #$82
+    rts
+@nomc:
+    pla
+@ret:
+    rts
+@mod:
+    pla
+    cmp #$82
+    beq @broke
+    cmp #$F4
+    beq @broke
+    cmp #$EC
+    beq @broke                   ; opened rope (the 3-3 ending)
+    cmp #$5F
+    beq @used
+    cmp #$80
+    bcc @keep
+@used:
+    lda #$7F                     ; (no vehicle in W3: bonked = used-solid)
+@keep:
+    rts
+@broke:
+    lda #$2C
+    rts
+@off:
+    lda ending13                 ; the virtual rescue room right of the map
+    beq @off0
+    lda mrow
+    cmp #2
+    bcc @ckA
+    cmp #13
+    bcs :+
+    lda #$2C
+    rts
+:   lda mrow
+    ina
+    bra @ck
+@ckA:
+    lda mrow
+@ck:
+    clc
+    adc feet_col
+    and #1
+    clc
+    adc #$8E
+    rts
+@off0:
+    lda #$2C
+    rts
+.endproc
+.endif
 
 .proc w2_gift                    ; content $F0 (GB $18C0, READ this time): the
     jmp mark_used                ; hidden cell MATERIALIZES as a solid block (GB

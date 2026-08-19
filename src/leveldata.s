@@ -10,10 +10,12 @@
 .segment "LEVEL0"
 
 .import chardata
+.import bg_chardata
 .export level_hdr
 level_hdr:                                    ; 22-byte level header
-    .addr level0_map                          ; +0  surface map (column-major, 16 B/col)
-    .word (level0_end - level0_map) / 16      ; +2  column count
+    .addr level0_map                          ; +0  surface map: the column POINTER
+    .word L12_COLS                            ; +2  table (2B/col -> unique-col pool;
+                                              ;     docs/33) + column count
     .word 0                                   ; +4  room 0 map (0 = none — 1-2's two ROM
     .word 0                                   ; +6  room 1 map   rooms are unreachable
     .word 0                                   ; +8  room 2 map   leftovers: empty pipe list)
@@ -24,10 +26,9 @@ level_hdr:                                    ; 22-byte level header
     .addr spawn_table                         ; +16 enemy spawns ($FFFF-terminated)
     .addr chardata                            ; +18 quad-tile $A0-$DC base (W1: FIXED)
     .word 0                                   ; +20 overlay blob address (W1: none)
+    .addr bg_chardata                         ; +22 bg charset base (W3: bank-1 copy)
 
-level0_map:
-    .incbin "build/levels/level_01.bin"      ; World 1-2, 16 tiles/column
-level0_end:
+    .include "levels/level_01_dedup.inc"     ; World 1-2: ptr table + column pool
 
 ; (1-2's two room blobs are dropped: its pipe list is empty in the ROM, so they are
 ;  unreachable leftovers — see docs/24. The header's room ptrs are 0.)

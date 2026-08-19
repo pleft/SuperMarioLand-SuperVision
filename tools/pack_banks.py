@@ -36,7 +36,7 @@ import os, re, json, sys
 BANK = 0x4000
 BASE = 0x8000
 NBANKS = 8                                  # 128K cart: banks 0-6 + FIXED (last)
-HDR_SIZE = 22
+HDR_SIZE = 24                               # +22/23 = bg charset base (docs/33)
 W1_THEME_OFF = 304                          # track $07's offset in music_data
 W1_THEME_SIZE = 511                         # its byte-space (the W2 donor slot)
 
@@ -53,6 +53,36 @@ def exports(mapf):
             if len(p) == 3 and p[0] == "al":
                 syms.setdefault(p[2].lstrip("."), int(p[1], 16))
     return syms
+
+def dedup_maps(maps, base):
+    """Unique-column pool format (docs/33): each map becomes a 2-bytes-per-
+    column table of ABSOLUTE column addresses; the pool holds every distinct
+    16-byte column once, shared across the given maps (surface + rooms).
+    `base` = the address where the first table will be placed. Returns
+    (tables, pool); the pool follows the tables contiguously."""
+    ncols = [len(m) // 16 for m in maps]
+    pool_at = base + sum(n * 2 for n in ncols)
+    pool = bytearray()
+    index = {}
+    tabs = []
+    for m, n in zip(maps, ncols):
+        t = bytearray()
+        for c in range(n):
+            col = bytes(m[c * 16:(c + 1) * 16])
+            if col not in index:
+                index[col] = pool_at + len(pool)
+                pool += col
+            a = index[col]
+            t += bytes((a & 0xFF, a >> 8))
+        tabs.append(bytes(t))
+    # decode-back byte-assert: the packed form must reproduce the raw maps
+    for m, t, n in zip(maps, tabs, ncols):
+        for c in range(n):
+            a = t[c * 2] | (t[c * 2 + 1] << 8)
+            off = a - pool_at
+            assert bytes(pool[off:off + 16]) == bytes(m[c * 16:(c + 1) * 16]), \
+                "dedup decode mismatch"
+    return tabs, bytes(pool)
 
 def main():
     img_path, map_path = sys.argv[1], sys.argv[2]
@@ -114,6 +144,8 @@ def main():
     win23_img = None
     carve23 = b""
     spawns23 = b""
+    w3_jobs = [j for j in jobs if j[0] >= 6]
+    jobs = [j for j in jobs if j[0] < 6]
     for level, bank in jobs:
         pre = prefix
         preblob = l3 if bank == 2 else l11 if bank == 1 else b""
@@ -156,7 +188,7 @@ def main():
             assert len(win23_img) <= 0x800, "2-3 window kit exceeds the $800 window"
             far23 = full23[w2c_sz:w2c_sz + far_sz]
             carve23 = full23[w2c_sz + far_sz:w2c_sz + far_sz + fv_sz]
-            assert far_at == 0xA268, "W2FARM moved -- update pack_banks"
+            assert far_at == 0xA2C0, "W2FARM moved -- update pack_banks"
             if fv_sz:
                 # the carve = bank5 chardata tiles $20-$4F (Mario poses; he
                 # never draws in the sub level). Guard the address drift.
@@ -180,11 +212,15 @@ def main():
                 pre[co:co + len(carve23)] = carve23
                 pre = bytes(pre)
         place = {}
-        for key, data in [("map", blobs["map"]), ("room0", rooms[0]), ("room1", rooms[1]),
-                          ("room2", rooms[2]), ("pipes", blobs["pipes"]),
-                          ("blocks", blobs["blocks"]), ("spawns", blobs["spawns"])]:
-            place[key] = addr if data else 0
-            addr += len(data)
+        maps = [blobs["map"], rooms[0], rooms[1], rooms[2]]
+        tabs, pool = dedup_maps(maps, addr)
+        for key, raw, tab in zip(("map", "room0", "room1", "room2"), maps, tabs):
+            place[key] = addr if raw else 0
+            addr += len(tab)
+        addr += len(pool)
+        for key in ("pipes", "blocks", "spawns"):
+            place[key] = addr if blobs[key] else 0
+            addr += len(blobs[key])
         w2blob = b""
         if level >= 3:
             # per-world quad tiles $A0-$DC: ship only the slice current enemies
@@ -264,12 +300,14 @@ def main():
         hdr += bytes((place["spawns"] & 0xFF, place["spawns"] >> 8))
         hdr += bytes((quad_base & 0xFF, quad_base >> 8))
         hdr += bytes((ovl_code_at & 0xFF, ovl_code_at >> 8))
+        bgc = sym["bg_chardata"]                # W1/W2: the prefix charset
+        hdr += bytes((bgc & 0xFF, bgc >> 8))
         assert len(hdr) == HDR_SIZE
 
         region = hdr
         if level == 5:
-            region += b"\xFF" * (0xA268 - (lvl_hdr_addr + HDR_SIZE)) + far23
-        region += blobs["map"] + rooms[0] + rooms[1] + rooms[2] \
+            region += b"\xFF" * (0xA2C0 - (lvl_hdr_addr + HDR_SIZE)) + far23
+        region += b"".join(tabs) + pool \
                      + blobs["pipes"] + blobs["blocks"] + blobs["spawns"]
         if level >= 3:
             region += sl + w2blob
@@ -278,6 +316,16 @@ def main():
         assert len(bank_img) <= BANK, \
             f"level {level}: bank {bank} overflows by {len(bank_img) - BANK} bytes"
         bank_img += b"\xFF" * (BANK - len(bank_img))
+        # final-image decode assert: every map read back from the BANK IMAGE
+        # must equal the raw extract (assert the CONTENT landed, not the build)
+        for key, raw in zip(("map", "room0", "room1", "room2"), maps):
+            if not raw:
+                continue
+            ta = place[key] - BASE
+            for c in range(len(raw) // 16):
+                a = bank_img[ta + c * 2] | (bank_img[ta + c * 2 + 1] << 8)
+                assert bytes(bank_img[a - BASE:a - BASE + 16]) == bytes(raw[c * 16:(c + 1) * 16]), \
+                    f"level {level} {key} col {c}: image decode mismatch"
         img[bank * BANK:(bank + 1) * BANK] = bank_img
         print(f"pack_banks: level {level} -> bank {bank} "
               f"({cols} cols, {len(region)} bytes at ${hdr_addr:04X}, "
@@ -299,7 +347,114 @@ def main():
         img[coff:coff + 128] = creat
         print(f"pack_banks: 2-3 window kit ({len(win23_img)}B) + spawns ({len(spawns23)}B) "
               f"+ creature (128B) -> bank 6 $B000/$B900")
+    if w3_jobs:
+        pack_w3(img, sym)
     open(img_path, "wb").write(bytes(img))
+
+W3HDR = 0xB540                                  # main.s W3HDR (load_level pin)
+W3WIN = 0xA800                                  # bank 6: kit window image (w3stub pin)
+W3SPT = 0xA7C0                                  # bank 6: 3x .addr spawn lists (w3stub pin)
+
+def pack_w3(img, sym):
+    """World 3 (docs/33): levels 6-8 are RESIDENT on bank 1 -- headers, pipes,
+    blocks, the stub and a W3-patched full bg charset live in its tail (from
+    W3HDR) -- while the cold data (map pools/tables, the 2 shared room grids,
+    spawn lists, the kit window image) lives in BANK 6, reached only through
+    the stub at load and the window map reader at play."""
+    BNK6 = 6 * BANK
+    # --- bank 6 cold data: maps + rooms + spawns + kit image ---
+    surfs, rooms_raw, spawns = [], {}, []
+    room_ids = []
+    import hashlib
+    for lv in (6, 7, 8):
+        p = f"build/levels/level_{lv:02d}"
+        surfs.append(open(p + ".bin", "rb").read())
+        spawns.append(open(p + "_spawns.bin", "rb").read())
+        ids = []
+        for r in range(3):
+            d = open(f"{p}_room{r}.bin", "rb").read()
+            h = hashlib.md5(d).hexdigest()
+            rooms_raw.setdefault(h, d)
+            ids.append(h)
+        room_ids.append(ids)
+    grids = list(rooms_raw)                     # unique room grids (2 for W3)
+    maps = surfs + [rooms_raw[h] for h in grids]
+    addr = BASE + 0x400                         # past the boot-staged RCODE/BOOT6
+                                                # images at bank 6 $8000-$83CB
+    tabs, pool = dedup_maps(maps, addr)
+    tab_at = []
+    for t in tabs:
+        tab_at.append(addr)
+        addr += len(t)
+    addr += len(pool)
+    spawn_at = []
+    for sp in spawns:
+        assert len(sp) <= 256, "W3 spawn list exceeds the stub copy"
+        spawn_at.append(addr)
+        addr += len(sp)
+    assert addr <= W3SPT, f"W3 cold data overruns ${W3SPT:04X} by {addr - W3SPT}"
+    cold = b"".join(tabs) + pool + b"".join(spawns)
+    assert all(b == 0xFF for b in img[BNK6 + 0x400:BNK6 + 0x400 + len(cold)]), "bank 6 head not free"
+    img[BNK6 + 0x400:BNK6 + 0x400 + len(cold)] = cold
+    spt = b"".join(bytes((a & 0xFF, a >> 8)) for a in spawn_at)
+    assert all(b == 0xFF for b in img[BNK6 + W3SPT - BASE:BNK6 + W3WIN - BASE]), \
+        "bank 6 spawn-table slot not free"
+    img[BNK6 + W3SPT - BASE:BNK6 + W3SPT - BASE + len(spt)] = spt
+    win = open("build/w3code.bin", "rb").read()
+    m3 = open("build/w3code.map").read()
+    w3c_sz = int(re.search(r"^W2C\s+\S+\s+\S+\s+([0-9A-F]+)", m3, re.M).group(1), 16)
+    win = win[:w3c_sz]
+    assert len(win) <= 0x800, "W3 kit exceeds the $800 window"
+    assert all(b == 0xFF for b in img[BNK6 + W3WIN - BASE:BNK6 + W3WIN - BASE + 0x800]), \
+        "bank 6 $A400 window slot not free"
+    img[BNK6 + W3WIN - BASE:BNK6 + W3WIN - BASE + len(win)] = win
+
+    # --- bank 1 tail: headers, pipes/blocks, sentinel, stub, bg charset ---
+    tail = bytearray()
+    t_at = lambda: W3HDR + len(tail)
+    tail += b"\x00" * (3 * HDR_SIZE)           # headers written below
+    pieces = {}
+    for i, lv in enumerate((6, 7, 8)):
+        p = f"build/levels/level_{lv:02d}"
+        for key, suf, per in (("pipes", "_pipes.bin", 5), ("blocks", "_blocks.bin", 4)):
+            d = open(p + suf, "rb").read()
+            pieces[(i, key)] = (t_at() if d else 0, len(d) // per)
+            tail += d
+    sent_at = t_at()
+    tail += b"\xFF\xFF"                        # the header spawn sentinel
+    stub = open("build/w3stub.bin", "rb").read()
+    stub_at = t_at()
+    tail += stub
+    # W3 bg charset: the full prefix charset with the W3 overlay over $31-$6F
+    bgc_at = t_at()
+    bg_off = sym["bg_chardata"] - BASE
+    bgset = bytearray(img[1 * BANK + bg_off:1 * BANK + bg_off + 0x800])
+    ovl = open("build/gfx/w3_ovl_9310.svt", "rb").read()
+    assert len(ovl) == 63 * 16, "w3_ovl_9310.svt: expected 63 tiles"
+    bgset[0x31 * 16:0x31 * 16 + len(ovl)] = ovl
+    tail += bgset
+    assert W3HDR + len(tail) <= BASE + BANK, \
+        f"W3 bank-1 tail overflows by {W3HDR + len(tail) - BASE - BANK}"
+    for i, lv in enumerate((6, 7, 8)):
+        cols = len(surfs[i]) // 16
+        r = [tab_at[3 + grids.index(h)] for h in room_ids[i]]
+        hdr = bytearray()
+        for v in (tab_at[i], cols, r[0], r[1], r[2], pieces[(i, "pipes")][0]):
+            hdr += bytes((v & 0xFF, v >> 8))
+        hdr.append(pieces[(i, "pipes")][1])
+        hdr += bytes((pieces[(i, "blocks")][0] & 0xFF, pieces[(i, "blocks")][0] >> 8))
+        hdr.append(pieces[(i, "blocks")][1])
+        for v in (sent_at, sym["chardata"], stub_at, bgc_at):
+            hdr += bytes((v & 0xFF, v >> 8))
+        assert len(hdr) == HDR_SIZE
+        tail[i * HDR_SIZE:(i + 1) * HDR_SIZE] = hdr
+    toff = 1 * BANK + (W3HDR - BASE)
+    assert all(b == 0xFF for b in img[toff:toff + len(tail)]), \
+        "bank 1 tail not free for W3 (1-1 region grew past W3HDR?)"
+    img[toff:toff + len(tail)] = tail
+    print(f"pack_banks: W3 -> bank 6 cold {len(cold) + len(spt) + len(win)}B, "
+          f"bank 1 tail {len(tail)}B at ${W3HDR:04X} "
+          f"({BASE + BANK - W3HDR - len(tail)} free)")
 
 if __name__ == "__main__":
     main()

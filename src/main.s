@@ -230,7 +230,8 @@ shtab_lo:    .res 1024      ; 4 pages: subx 0..3
 shtab_hi:    .res 1024
 ; --- per-level bindings, set by load_level from the current bank's level_hdr ---
 cur_level:   .res 1          ; level id 0.. (GB $ffe4); selects the ROM bank
-hdr_buf:     .res 22         ; RAM copy of the current bank's level header
+hdr_buf:     .res 24         ; RAM copy of the current bank's level header
+                             ; (+22/23 = bg charset base -> bgc)
                              ; (+18/19: base for quad tiles $A0-$DC -- chardata for
                              ; W1; the in-bank overlay blob minus $A00 for W2+)
 p1c:         .res 1          ; render pass-1 loop counter (rotated scan)
@@ -244,6 +245,8 @@ pipe_cnt:    .res 1          ; pipe entries in pipe_tab
 pipe_tab:    .res 15         ; RAM copy: 5 bytes/pipe, up to 3 pipes
 block_tab:   .res 40         ; RAM copy: 4 bytes/block, up to 10 ?-block entries
 spawn_tab:   .res 384        ; RAM copy: 5 bytes/spawn + $FFFF sentinel
+bgc:         .res 2          ; bg charset base (header +22/23; W3 = bank-1 copy)
+mapread_vec: .res 2          ; hi!=0: the kit window serves read_map_tile (W3)
 bud_base:    .res 1          ; p1 mover budget (3; vehicle levels raise it --
                              ; Mario doesn't draw there, the frame has slack)
 revpix:      .res 256        ; reverse the 4 2bpp pixels in a byte (built at boot)
@@ -810,7 +813,10 @@ main_loop:
 ; as the rescue-room template (checker bands + blank) -- the transition is the
 ; engine's own camera scroll streaming those virtual columns in (GB $22/$23).
 .proc read_map_tile
-    lda mrow
+    lda mapread_vec+1            ; W3: the kit window serves map reads (the
+    beq :+                       ; data lives in bank 6; the window code maps
+    jmp (mapread_vec)            ; it in and back around the read -- docs/33)
+:   lda mrow
     cmp #16
     bcc :+
     jmp @off
@@ -823,25 +829,25 @@ main_loop:
     cmp lvl_cols
     bcs @off
 :
-    lda feet_col                 ; map_ptr = map_base + feet_col*16
-    sta map_ptr
-    lda feet_col+1
+    lda feet_col                 ; maps are unique-COLUMN POOLS now (docs/33):
+    asl                          ; map_base -> a 2B/col table of absolute
+    sta map_ptr                  ; column addresses; the pool holds each
+    lda feet_col+1               ; distinct 16-byte column once
+    rol
     sta map_ptr+1
-    asl map_ptr
-    rol map_ptr+1
-    asl map_ptr
-    rol map_ptr+1
-    asl map_ptr
-    rol map_ptr+1
-    asl map_ptr
-    rol map_ptr+1
-    lda map_ptr
+    lda map_ptr                  ; map_ptr = map_base + col*2
     clc
     adc map_base
     sta map_ptr
     lda map_ptr+1
     adc map_base+1
     sta map_ptr+1
+    lda (map_ptr)                ; -> this column's pool address
+    tax
+    ldy #1
+    lda (map_ptr),y
+    sta map_ptr+1
+    stx map_ptr
     ldy mrow
     lda (map_ptr),y
     ; --- used-tile transform (surface AND rooms): bonked ?-block -> used block, broken brick
@@ -3679,7 +3685,10 @@ music_data:
 ; start it FRESH from column 0. Score, coins, lives and Mario's power-ups
 ; (big/superball) PERSIST; everything level-local resets. Levels shipped so far:
 ; 1-1 and 1-2 — the wrap constant grows as more of World 1 comes online.
-NUM_LEVELS = 6
+NUM_LEVELS = 9                   ; 1-1..3-3 (W3 = docs/33)
+W3HDR = $B540                    ; W3 headers: PINNED bank-1 tail (pack_banks
+                                 ; asserts 1-1's region ends below, and lays
+                                 ; the W3 far/stub/bg-charset after)
 .proc next_level
     stz goal_phase
     stz room_mode
@@ -3697,16 +3706,8 @@ NUM_LEVELS = 6
     sta map_base+1
     stz cam_x                    ; a completed level always restarts at the very start
     stz cam_x+1                  ; (checkpoints are a DEATH mechanic — do_respawn's)
-    lda cam_x                    ; fb_col0 = cam/8
-    sta fb_col0
-    lda cam_x+1
-    sta fb_col0+1
-    lsr fb_col0+1
-    ror fb_col0
-    lsr fb_col0+1
-    ror fb_col0
-    lsr fb_col0+1
-    ror fb_col0
+    stz fb_col0                  ; fb_col0 = cam/8 = 0 (cam was just zeroed)
+    stz fb_col0+1
     stz spawn_idx                ; fast-forward the spawn list to the checkpoint (else all
 @sff:                            ; earlier entries would fire at once on the first frame)
     lda spawn_idx
@@ -4426,12 +4427,12 @@ TIMER_RATE = 40                  ; frames per clock unit (SML's $da00 sub-counte
     sta src_ptr
     txa
     bmi @obj                     ; tile >= $80 -> $8800 region (OBJ block)
-    lda src_ptr                  ; BG set
-    clc
-    adc #<bg_chardata
+    lda src_ptr                  ; BG set: base from the header (+22/23) -- the
+    clc                          ; prefix charset normally; W3 points it at the
+    adc bgc                      ; bank-1 W3-patched full-charset copy (docs/33)
     sta src_ptr
     lda src_ptr+1
-    adc #>bg_chardata
+    adc bgc+1
     sta src_ptr+1
     rts
 @obj:
@@ -9234,17 +9235,41 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     sty lvl_ptr+1
     bra @hcopy
 :   cmp #0                       ; bank 1: the BONUS blob (L11CODE) precedes the header
-    bne @hcopy
+    beq @bank1
+    cmp #6                       ; W3 (levels 6-8): headers at the PINNED bank-1
+    bcc @hcopy                   ; tail (pack_banks W3HDR; 24B apart)
+    sec
+    sbc #6
+    asl
+    asl
+    asl                          ; *8
+    sta lvl_ptr
+    asl                          ; *16
+    clc
+    adc lvl_ptr                  ; *24
+    clc
+    adc #<W3HDR
+    sta lvl_ptr
+    lda #>W3HDR
+    adc #0
+    sta lvl_ptr+1
+    bra @hcopy
+@bank1:
     ldy #<(__TITLE0_LOAD__+__L11CODE_SIZE__+__L13E_SIZE__)
     sty lvl_ptr
     ldy #>(__TITLE0_LOAD__+__L11CODE_SIZE__+__L13E_SIZE__)
     sty lvl_ptr+1
 @hcopy:
-    ldy #21                      ; header -> RAM (22 bytes; +20/21 = overlay blob)
-:   lda (lvl_ptr),y
+    ldy #23                      ; header -> RAM (24 bytes; +20/21 = overlay blob,
+:   lda (lvl_ptr),y              ;  +22/23 = bg charset base)
     sta hdr_buf,y
     dey
     bpl :-
+    stz mapread_vec+1            ; a fresh level serves map reads locally until
+    lda hdr_buf+22               ; its kit blob installs the W3 vector
+    sta bgc
+    lda hdr_buf+23
+    sta bgc+1
     lda hdr_buf+0                ; surface map
     sta surf_map
     lda hdr_buf+1
@@ -10693,10 +10718,13 @@ bit_masks: .byte $01,$02,$04,$08,$10,$20,$40,$80
 MUS_T13 = 7                      ; track $03's index in the extractor's TRACKS list
 lvl_track_tab:  .byte MUS_LEVEL, MUS_LEVEL, MUS_T13   ; GB per-level table $07CE
                 .byte MUS_LEVEL, MUS_LEVEL, MUS_LEVEL  ; W2: slot 0 IS the world
+                .byte MUS_LEVEL, MUS_T13, MUS_T13      ; W3 (GB $07CE: 07 03 03;
+                                                       ; bank 1 keeps the real $07)
                                                        ; theme (per-bank music patch)
 ; level id -> ROM bank, PRE-SHIFTED into SYS_CTRL bits 7:5 (saves the asl chain
 ; in load_level -- this table lives in the byte-frozen LEVELS prefix).
 lvl_bank_tab:   .byte 1<<5, 0<<5, 2<<5, 3<<5, 4<<5, 5<<5
+                .byte 1<<5, 1<<5, 1<<5  ; W3 resident = bank 1 (cold data in 6)
 
 .proc lvl_music                  ; start the current level's tune
     ldx cur_level
