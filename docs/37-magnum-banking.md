@@ -154,8 +154,28 @@ Two bugs this shook out, both invisible to a build that links cleanly:
 Order of work: (1) harness model [done], (2) 512K + selection converted [done],
 (3) W3 residency -- now a PERFORMANCE task, not a HUD one, (4) W4.
 
-NOTE for the SuperPico: the image is 524288 bytes, so the UF2 size law in
-memory (128K = 283648) no longer applies to this build.
+## Image size: 256K, and why not less
+
+The image is **262144 bytes** (8 banks on pages 0-7, FIXED in the high half of
+page 7). Content is ~124K of that; the rest is the odd 16K halves, empty by
+construction because every bank sits on the LOW half of its page so $2026 bit5
+never changes. That is what buys scan-safe banking, and it costs 2x the file.
+
+Of the ~124K of content, roughly HALF is the common prefix duplicated into the
+seven prefix-bearing banks (~8.9K each). The unique content is ~62K. For
+comparison the GB original is 64K -- but it has a PPU: it stores tile MAPS and
+lets hardware draw them, while this port stores pre-converted SV tile data and
+software-renders every pixel.
+
+Going past bank 7 (W4 will) means either a 512K image, or putting banks on the
+odd halves too. The latter keeps 256K but needs a PARITY RULE: every bank a
+level touches DURING PLAY must share bit0, or the half bit changes, $2026 gets
+written, and the LCD scan restart -- and the HUD wobble -- comes back. If that
+route is taken, make the packer ASSERT the parity per level rather than trust
+it.
+
+NOTE for the SuperPico: the image is 262144 bytes, so the UF2 size law in
+memory (128K = 283648) does not apply to this build.
 
 Do NOT grow the image before the selection is converted: past 131072 bytes
 Potator switches to MAGNUM and the existing 3-bit writes stop banking, so the

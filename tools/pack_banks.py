@@ -35,7 +35,7 @@ import os, re, json, sys
 
 BANK = 0x4000
 BASE = 0x8000
-NPAGES = 16                                 # MAGNUM (docs/37): 16 x 32K pages.
+NPAGES = 8                                  # MAGNUM (docs/37): 8 x 32K pages.
 STRIDE = 0x8000                             # bank b sits on the LOW half of page b,
                                             # so $2026 bit5 stays 0 and banking never
                                             # writes the register that restarts the
@@ -93,10 +93,12 @@ def main():
     jobs = [tuple(int(x) for x in a.split(":")) for a in sys.argv[3:]]
     img = bytearray(open(img_path, "rb").read())
     assert len(img) == NPAGES * STRIDE, \
-        f"pack_banks: image is {len(img)} bytes, expected {NPAGES * STRIDE} (512K) — " \
+        f"pack_banks: image is {len(img)} bytes, expected {NPAGES * STRIDE} (256K) — " \
         "linker config out of sync (FIXED must be the LAST 16K of the file)"
     for level, bank in jobs:
-        assert 0 <= bank < NPAGES - 1, f"level {level}: bank {bank} is not a switchable bank"
+        assert 0 <= bank < NPAGES, f"level {level}: bank {bank} is not a switchable bank"
+        # (FIXED is no longer a bank: it sits in the HIGH half of the last page,
+        #  which banking never selects, so every page 0..NPAGES-1 is usable)
     mapf = open(map_path).read()
     sym = exports(mapf)
     chardata = sym["chardata"]
