@@ -148,8 +148,11 @@ W3FLAGS = $0B                    ; NMI | TIMER_IRQ | LCD
     lda map_ptr+1
     adc map_base+1
     sta map_ptr+1
-    lda #(6 << 5) | W3FLAGS      ; ONE bank switch per COLUMN, not per read:
-    sta W3SYS                    ; every SYS_CTRL write restarts the LCD scan
+    stz W3LINKV      ; ONE bank switch per COLUMN, not per read:
+    lda #6                    ; every SYS_CTRL write restarts the LCD scan
+    sta W3LINK
+    lda #$0F
+    sta W3LINKV
     lda (map_ptr)
     tax
     ldy #1
@@ -161,8 +164,11 @@ W3FLAGS = $0B                    ; NMI | TIMER_IRQ | LCD
     sta (tmpL2),y
     dey
     bpl :-
-    lda #(1 << 5) | W3FLAGS
-    sta W3SYS
+    stz W3LINKV
+    lda #1
+    sta W3LINK
+    lda #$0F
+    sta W3LINKV
     bra @read
 .endproc
 

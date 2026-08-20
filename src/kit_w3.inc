@@ -43,6 +43,10 @@ W3SCRB   = $B000                 ; bank 6 pins (pack_banks writes all three):
 W3DLB    = $B520                 ;   scripts / metasprite display lists /
 W3TILB   = $B780                 ;   the compact W3 tile slice
 W3SYSC   = $2026
+W3LINK   = $2021                 ; MAGNUM page (docs/37): banking here does
+W3LINKV  = $2022                 ;   NOT restart the LCD scan. $2022 must read
+                                 ;   0 at the $2021 write; $0F is the panel's
+                                 ;   drive value, handed straight back.
 W3FLG    = $0B                   ; NMI | TIMER_IRQ | LCD (load_level's mask)
 
 ; --- spawn: A = GB type, Y = spawn entry offset. C=0 consumed. -------------
@@ -246,13 +250,19 @@ W3FLG    = $0B                   ; NMI | TIMER_IRQ | LCD (load_level's mask)
     bcc :+
     inc tmpH
 :   inc w3_pc,x
-    lda #(6 << 5) | W3FLG
-    sta W3SYSC
+    stz W3LINKV
+    lda #6
+    sta W3LINK
+    lda #$0F
+    sta W3LINKV
     ldy #0
     lda (tmpL),y
     tay
-    lda #(1 << 5) | W3FLG        ; back to the W3 resident bank
-    sta W3SYSC
+    stz W3LINKV        ; back to the W3 resident bank
+    lda #1
+    sta W3LINK
+    lda #$0F
+    sta W3LINKV
     tya
     rts
 .endproc
@@ -484,8 +494,11 @@ W3FLG    = $0B                   ; NMI | TIMER_IRQ | LCD (load_level's mask)
     stz tmpL2                    ; dy accumulator
     stz tmpH2                    ; dcol accumulator (bytes)
     stz do_flip
-    lda #(6 << 5) | W3FLG        ; the lists AND the tile sheet live in bank 6;
-    sta W3SYSC                   ; every routine the walk calls is FIXED/RAM,
+    stz W3LINKV        ; the lists AND the tile sheet live in bank 6;
+    lda #6                   ; every routine the walk calls is FIXED/RAM,
+    sta W3LINK
+    lda #$0F
+    sta W3LINKV
     ldy #0                       ; so one map around the whole draw is safe
     ldx oi                       ; facing left? skip past the RIGHT list's $FF
     lda o_vy,x
@@ -558,8 +571,11 @@ W3FLG    = $0B                   ; NMI | TIMER_IRQ | LCD (load_level's mask)
     iny
     bra @walk
 @done:
-    lda #(1 << 5) | W3FLG        ; back to the W3 resident bank
-    sta W3SYSC
+    stz W3LINKV        ; back to the W3 resident bank
+    lda #1
+    sta W3LINK
+    lda #$0F
+    sta W3LINKV
     stz do_flip
     rts
 .endproc

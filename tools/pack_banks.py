@@ -35,7 +35,11 @@ import os, re, json, sys
 
 BANK = 0x4000
 BASE = 0x8000
-NBANKS = 8                                  # 128K cart: banks 0-6 + FIXED (last)
+NPAGES = 16                                 # MAGNUM (docs/37): 16 x 32K pages.
+STRIDE = 0x8000                             # bank b sits on the LOW half of page b,
+                                            # so $2026 bit5 stays 0 and banking never
+                                            # writes the register that restarts the
+                                            # LCD scan. Usable banks: 0-14.
 HDR_SIZE = 24                               # +22/23 = bg charset base (docs/33)
 W1_THEME_OFF = 304                          # track $07's offset in music_data
 W1_THEME_SIZE = 511                         # its byte-space (the W2 donor slot)
@@ -88,11 +92,11 @@ def main():
     img_path, map_path = sys.argv[1], sys.argv[2]
     jobs = [tuple(int(x) for x in a.split(":")) for a in sys.argv[3:]]
     img = bytearray(open(img_path, "rb").read())
-    assert len(img) == NBANKS * BANK, \
-        f"pack_banks: image is {len(img)} bytes, expected {NBANKS * BANK} (128K) — " \
+    assert len(img) == NPAGES * STRIDE, \
+        f"pack_banks: image is {len(img)} bytes, expected {NPAGES * STRIDE} (512K) — " \
         "linker config out of sync (FIXED must be the LAST 16K of the file)"
     for level, bank in jobs:
-        assert 0 <= bank < NBANKS - 1, f"level {level}: bank {bank} is not a switchable bank"
+        assert 0 <= bank < NPAGES - 1, f"level {level}: bank {bank} is not a switchable bank"
     mapf = open(map_path).read()
     sym = exports(mapf)
     chardata = sym["chardata"]
@@ -100,13 +104,13 @@ def main():
     # out below as [prefix][L3 blob @ TITLE0][header][level data] — load_level
     # finds the header at TITLE0 + __L3CODE_SIZE__
     mm = re.search(r"L3CODE\s+[0-9A-Fa-f]{6}\s+[0-9A-Fa-f]{6}\s+([0-9A-Fa-f]{6})", mapf)
-    l3 = bytes(img[2 * BANK:2 * BANK + int(mm.group(1), 16)]) if mm else b""
+    l3 = bytes(img[2 * STRIDE:2 * STRIDE + int(mm.group(1), 16)]) if mm else b""
     # same scheme for bank 1: the L11CODE blob (the bonus game) precedes the header
     mm = re.search(r"L11CODE\s+[0-9A-Fa-f]{6}\s+[0-9A-Fa-f]{6}\s+([0-9A-Fa-f]{6})", mapf)
-    l11 = bytes(img[1 * BANK:1 * BANK + int(mm.group(1), 16)]) if mm else b""
+    l11 = bytes(img[1 * STRIDE:1 * STRIDE + int(mm.group(1), 16)]) if mm else b""
     # the x-3 ending blob follows L11CODE in bank 1 (copied to the RAM window at the wipe)
     mm = re.search(r"L13E\s+[0-9A-Fa-f]{6}\s+[0-9A-Fa-f]{6}\s+([0-9A-Fa-f]{6})", mapf)
-    l11 += bytes(img[1 * BANK + len(l11):1 * BANK + len(l11) + int(mm.group(1), 16)]) if mm else b""
+    l11 += bytes(img[1 * STRIDE + len(l11):1 * STRIDE + len(l11) + int(mm.group(1), 16)]) if mm else b""
     # banks 1+ place their level region where bank 0 keeps the TITLE0 segment (the
     # title runs only with bank 0 mapped, so its range is free in every other bank)
     hdr_addr = sym["__TITLE0_LOAD__"]
@@ -320,7 +324,7 @@ def main():
                 a = bank_img[ta + c * 2] | (bank_img[ta + c * 2 + 1] << 8)
                 assert bytes(bank_img[a - BASE:a - BASE + 16]) == bytes(raw[c * 16:(c + 1) * 16]), \
                     f"level {level} {key} col {c}: image decode mismatch"
-        img[bank * BANK:(bank + 1) * BANK] = bank_img
+        img[bank * STRIDE:bank * STRIDE + BANK] = bank_img
         print(f"pack_banks: level {level} -> bank {bank} "
               f"({cols} cols, {len(region)} bytes at ${hdr_addr:04X}, "
               f"{BANK - hdr_off - len(region)} free)")
@@ -330,7 +334,7 @@ def main():
         # the L13E room machine copies it over the moth tiles (main.s @pdone)
         creat = open("build/gfx/creature23.svt", "rb").read()
         assert len(creat) == 128, "creature23.svt must be 8 tiles (128B)"
-        coff = 5 * BANK + 0xBF00 - BASE
+        coff = 5 * STRIDE + 0xBF00 - BASE
         assert all(b == 0xFF for b in img[coff:coff + 128]), \
             "bank 5 $BF00 not free for the creature sheet"
         img[coff:coff + 128] = creat
@@ -349,7 +353,7 @@ def pack_w3(img, sym):
     W3HDR) -- while the cold data (map pools/tables, the 2 shared room grids,
     spawn lists, the kit window image) lives in BANK 6, reached only through
     the stub at load and the window map reader at play."""
-    BNK6 = 6 * BANK
+    BNK6 = 6 * STRIDE
     # --- bank 6 cold data: maps + rooms + spawns + kit image ---
     surfs, rooms_raw, spawns = [], {}, []
     room_ids = []
@@ -435,7 +439,7 @@ def pack_w3(img, sym):
     # W3 bg charset: the full prefix charset with the W3 overlay over $31-$6F
     bgc_at = t_at()
     bg_off = sym["bg_chardata"] - BASE
-    bgset = bytearray(img[1 * BANK + bg_off:1 * BANK + bg_off + 0x800])
+    bgset = bytearray(img[1 * STRIDE + bg_off:1 * STRIDE + bg_off + 0x800])
     ovl = open("build/gfx/w3_ovl_9310.svt", "rb").read()
     assert len(ovl) == 63 * 16, "w3_ovl_9310.svt: expected 63 tiles"
     bgset[0x31 * 16:0x31 * 16 + len(ovl)] = ovl
@@ -456,13 +460,13 @@ def pack_w3(img, sym):
             hdr += bytes((v & 0xFF, v >> 8))
         assert len(hdr) == HDR_SIZE
         tail[i * HDR_SIZE:(i + 1) * HDR_SIZE] = hdr
-    toff = 1 * BANK + (W3HDR - BASE)
+    toff = 1 * STRIDE + (W3HDR - BASE)
     assert all(b == 0xFF for b in img[toff:toff + len(tail)]), \
         "bank 1 tail not free for W3 (1-1 region grew past W3HDR?)"
     img[toff:toff + len(tail)] = tail
     if far3:
         assert far3_at == 0xBE40, "W3FAR moved -- update pack_banks"
-        foff = 1 * BANK + far3_at - BASE
+        foff = 1 * STRIDE + far3_at - BASE
         assert all(b == 0xFF for b in img[foff:foff + len(far3)]), \
             f"bank 1 ${far3_at:04X} not free for the W3 far kit"
         img[foff:foff + len(far3)] = far3

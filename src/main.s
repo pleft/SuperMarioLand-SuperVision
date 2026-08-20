@@ -381,8 +381,10 @@ probe_stripes:                   ; the full proven liturgy + stripes, FIXED-ROM
     bne @m0f
 @m0: bra @m0
 .endif
-    stz SYS_CTRL             ; map BANK 0 (display/ints off): the one-shot boot
-                             ; bulk is COPIED TO RAM and run there -- real hw
+    stz LINK_DATA            ; map BANK 0 (display/ints off): MAGNUM page 0,
+    stz LINK_DDR             ; INLINE because the power-on bank is unknown, so
+    stz SYS_CTRL             ; we cannot yet call a banked routine. The one-shot
+                             ; boot bulk is COPIED TO RAM and run there -- real hw
     lda #<__BOOT6_LOAD__     ; proved long boot loops fetching through the cart
     sta lvl_ptr              ; window die on marginal contacts; RAM execution
     lda #>__BOOT6_LOAD__     ; is immune (the copy itself is short exposure)
@@ -2283,20 +2285,26 @@ quad_rows: .byte 0, 0, 8, 8
     ldx #>$BF00
     dey
     beq :+
-    lda #(6 << 5) | (SYSCTRL_NMI_EN | SYSCTRL_TIMER_IRQ | SYSCTRL_LCD)
+    lda #6                       ; MAGNUM page 6 = the W3 data bank (docs/37)
     ldx #<$BB80                  ; 3-3: the shared data bank ($BB80)
     stx tmpL
     ldx #>$BB80
 :   stx tmpH
-    sta SYS_CTRL
+    stz LINK_DATA                ; INLINE (this blob runs from the $1500 RAM
+    sta LINK_DDR                 ; window, which survives the switch; bank 6
+    lda #$0F                     ; carries no prefix so set_bank cannot go there)
+    sta LCD_DRIVE
     ldy #0
 :   lda (tmpL),y
     sta moth_tiles,y
     iny
     cpy #128
     bne :-
-    lda #(1 << 5) | (SYSCTRL_NMI_EN | SYSCTRL_TIMER_IRQ | SYSCTRL_LCD)
-    sta SYS_CTRL                 ; back to bank 1 (enter_bonus expects it)
+    lda #1                       ; back to bank 1 (enter_bonus expects it)
+    stz LINK_DATA
+    sta LINK_DDR
+    lda #$0F
+    sta LCD_DRIVE
 @w1moth:
     jsr l3e_moth_blank_at_capt   ; clear the last swirl frame
     lda #CAPT_X                  ; ...and the moth takes her place
@@ -2646,8 +2654,8 @@ moth_tiles: .incbin "../build/gfx/moth.svt"
     sta lvl_ptr+1
 .endproc                         ; fall through
 .proc copy_overlay               ; bank 1 -> 8 pages from (lvl_ptr) to $1500
-    lda #(1 << 5) | (SYSCTRL_NMI_EN | SYSCTRL_TIMER_IRQ | SYSCTRL_LCD)
-    sta SYS_CTRL
+    lda #1
+    jsr set_bank
 .endproc                         ; falls through
 .proc copy_win8                  ; 8 pages from (lvl_ptr) to the $1500 window
     lda #$15
@@ -9256,8 +9264,8 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     lda lvl_bank_tab,x           ; beside the title -- the smallest W1 level; 1-1 = bank
                                  ; 1). Safe mid-proc: load_level sits in the common
                                  ; prefix, byte-identical at this address in every bank.
-    ora #(SYSCTRL_NMI_EN | SYSCTRL_TIMER_IRQ | SYSCTRL_LCD)
-    sta SYS_CTRL
+    jsr set_bank                 ; MAGNUM: $2021 only -- SYS_CTRL (and the LCD
+                                 ; scan) is left alone
     lda #<level_hdr              ; header base: bank 0 = the linked address; banks 1+
     sta lvl_ptr                  ; keep theirs where bank 0 has the TITLE (the packer
     lda #>level_hdr              ; overlays it — the title runs only with bank 0 mapped)
@@ -9276,9 +9284,7 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     ldy #>(__TITLE0_LOAD__+__L3CODE_SIZE__)
     sty lvl_ptr+1
     bra @hcopy
-:   cmp #0                       ; bank 1: the BONUS blob (L11CODE) precedes the header
-    beq @bank1
-    cmp #6                       ; W3 (levels 6-8): headers at the PINNED bank-1
+:   cmp #6                       ; W3 (levels 6-8): headers at the PINNED bank-1
     bcc @hcopy                   ; tail (pack_banks W3HDR; 24B apart)
     sec
     sbc #6
@@ -9296,11 +9302,8 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     adc #0
     sta lvl_ptr+1
     bra @hcopy
-@bank1:
-    ldy #<(__TITLE0_LOAD__+__L11CODE_SIZE__+__L13E_SIZE__)
-    sty lvl_ptr
-    ldy #>(__TITLE0_LOAD__+__L11CODE_SIZE__+__L13E_SIZE__)
-    sty lvl_ptr+1
+                                 ; (1-1 no longer needs a special case: it has bank 7
+                                 ; to itself now, so no blob precedes its header)
 @hcopy:
     ldy #23                      ; header -> RAM (24 bytes; +20/21 = overlay blob,
 :   lda (lvl_ptr),y              ;  +22/23 = bg charset base)
@@ -10729,10 +10732,14 @@ mus3_data:                       ; the game-over tune ($10): FIXED is full, so
 ; ---------------------------------------------------------------------------
 
 ; ---------------------------------------------------------------------------
-.segment "RODATA"
-; GB-bit X is set from this SV-input mask:
+.segment "LEVELS"                ; in the PREFIX, not FIXED: both tables are read
+; GB-bit X is set from this SV-input mask:   only while a prefix-bearing bank is
+; mapped (the pad read runs in the main loop; bit_masks is used by mod_ptr, which
+; the W3 map reader calls only AFTER it has switched back). That buys FIXED the
+; bytes the MAGNUM reset sequence needs -- docs/37.
 sv_masks:  .byte PAD_A, PAD_B, PAD_SELECT, PAD_START, PAD_RIGHT, PAD_LEFT, PAD_UP, PAD_DOWN
 bit_masks: .byte $01,$02,$04,$08,$10,$20,$40,$80
+.segment "CODE"
 
 
 ; ---------------------------------------------------------------------------
@@ -10751,10 +10758,27 @@ lvl_track_tab:  .byte MUS_LEVEL, MUS_LEVEL, MUS_T13   ; GB per-level table $07CE
                 .byte MUS_LEVEL, MUS_T13, MUS_T13      ; W3 (GB $07CE: 07 03 03;
                                                        ; bank 1 keeps the real $07)
                                                        ; theme (per-bank music patch)
-; level id -> ROM bank, PRE-SHIFTED into SYS_CTRL bits 7:5 (saves the asl chain
-; in load_level -- this table lives in the byte-frozen LEVELS prefix).
-lvl_bank_tab:   .byte 1<<5, 0<<5, 2<<5, 3<<5, 4<<5, 5<<5
-                .byte 1<<5, 1<<5, 1<<5  ; W3 resident = bank 1 (cold data in 6)
+; level id -> ROM bank, as a plain bank number for set_bank (MAGNUM: the bank
+; IS the $2021 page -- docs/37). This table lives in the byte-frozen prefix.
+lvl_bank_tab:   .byte 7, 0, 2, 3, 4, 5
+                .byte 1, 1, 1           ; 1-1 now has bank 7 to itself, so bank 1
+                                        ; is W3's alone (cold data still in 6)
+
+; ---------------------------------------------------------------------------
+; set_bank: A = bank 0..14. MAGNUM (docs/37): every bank sits on the LOW half of
+; its own 32K page, so the page number IS the bank number and $2026 bit5 stays
+; 0 -- banking never touches SYS_CTRL, the register whose every write restarts
+; the LCD scan (law D1). $2022 must read 0 when $2021 is written or the mapper
+; ignores the page; the panel gets its drive value straight back.
+; Lives in the LEVELS prefix: identical bytes at the identical address in every
+; bank, so execution survives its own switch.
+.proc set_bank
+    stz LINK_DATA
+    sta LINK_DDR                 ; BANKS HERE
+    lda #$0F
+    sta LCD_DRIVE
+    rts
+.endproc
 
 .proc lvl_music                  ; start the current level's tune
     ldx cur_level
