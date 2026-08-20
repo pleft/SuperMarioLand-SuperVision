@@ -96,7 +96,38 @@ does, latching the MAGNUM page at the `$2021` write while `$2022 == 0`
 (`_bank_check`). The 128K image still passes GOLD-OK unchanged, so the model is
 inert until the image actually grows.
 
-Order of work: (1) harness model [done], (2) grow to 256K and convert the
-selection with the layout otherwise IDENTICAL -- gold hashes must stay
-bit-identical, (3) only then re-lay-out to make W3 resident and drive the
-switch rate to zero, (4) W4.
+## Trap 4: where `set_bank` can live (found attempting step 2)
+
+A routine that switches banks must have its OWN remaining instructions present
+in the destination bank -- the byte after the switch is fetched from the new
+mapping. That rules out three of the four obvious homes:
+
+- **LEVELS (the prefix)**: safe only when the destination bank ALSO carries the
+  prefix. Banks 0-5 do; bank 6 (W3 cold data + boot images) does not, and the
+  boot maps bank 6. So a prefix-resident `set_bank` cannot make that hop.
+- **RCODE ($1200)**: 3 bytes free, and it is bounded by the kit window at $1500.
+- **ZP**: full, so even the `sys_sh` shadow has to be an absolute byte.
+- **FIXED**: the only region present after ANY switch -- and it has **10 bytes
+  free**, against roughly 20-28 for the routine.
+
+Callers in RAM (the $1500 kit window, the L13E ending blob) can inline the
+sequence at no cost to FIXED, because RAM survives a switch too. It is only the
+FIXED and prefix callers that need the shared routine.
+
+**So step 2 is blocked on ~20 bytes of FIXED, and the fix is structural, not a
+squeeze.** With 16 banks available the clean answer is to give EVERY bank the
+prefix, which makes a prefix-resident `set_bank` universally safe and costs
+nothing in FIXED. That means W3's cold data (10817B) must leave bank 6 and
+split across two prefix-bearing banks (7551B of data each), and the boot images
+move with it. Prefix cost at 16 banks is 141K of 256K, leaving ~115K for data
+against ~60K of level data today -- affordable, but it is a packer rewrite, not
+an edit.
+
+Order of work: (1) harness model [done], (2) give every bank the prefix + move
+W3 cold data and the boot images out of bank 6, THEN grow to 256K and convert
+the selection -- gold hashes must stay bit-identical, (3) re-lay-out to make W3
+resident and drive the switch rate to zero, (4) W4.
+
+Do NOT grow the image before the selection is converted: past 131072 bytes
+Potator switches to MAGNUM and the existing 3-bit writes stop banking, so the
+two changes have to land together.
