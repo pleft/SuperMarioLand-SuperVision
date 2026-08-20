@@ -30,7 +30,11 @@ for _ in range(10): p.tick(1,True)
 p.button_release("start")
 for _ in range(240): p.tick(1,True)
 m[0xFFE4]=4; m[0xFFB4]=0x22; m[0xFFB3]=0x08
-def gcam(): return (m[0xC0AB]|(m[0xC0AC]<<8))*16
+GBCAM_BIAS = 192      # $C0AB is the STREAMING/right-edge pointer, one screen
+                      # + margin (160+32) ahead of the view. Port cam_x is the
+                      # LEFT edge. Verified by screen-grabbing both first frames
+                      # of 2-3: same scene, and GB 192-192 == port 0.
+def gcam(): return (m[0xC0AB]|(m[0xC0AC]<<8))*16 - GBCAM_BIAS
 for f in range(4000):
     m[0xC0D3]=0xF8; m[0xDA15]=5                 # keep him alive; no input
     p.tick(1,True)
