@@ -146,6 +146,19 @@ once "proving" a fixed bug was still there, once reporting three optimisations
 in a row as having changed nothing (the numbers were byte-identical, which was
 the tell).
 
+**E9. The sim runs NO NMI and NO IRQ, so anything those handlers apply does not
+reach the hardware registers.** The playfield scroll is written by the
+raster-split IRQ (`vxp`/`vyp` -> `XSCROLL`/`YSCROLL`) and the HUD's by the NMI
+(`vxph_ap`/`vyp_ap`). Rendering a sim frame from `$2002`/`$2003` therefore shows
+an UNSCROLLED view -- which looks exactly like the game failing to scroll, and
+sent me measuring a non-existent autoscroll bug. Render from the engine's
+shadow variables instead. Same class as E6: the instrument, not the port.
+
+**E10. Cross-correlate against STATIC scenery, not the whole frame.** Measuring
+the GB's scroll rate over the full playfield gave 0.3 px/frame because moving
+objects biased the match; the seabed band alone gave a clean 0.500 with ~0%
+residual, matching the port exactly.
+
 **E8. A sprite is invisible while it is erased, and the beam does not wait.**
 Frame cost above ~38% of the budget (the vblank fraction) means the renderer is
 drawing while the beam is over the playfield. Any sprite whose erase and draw
