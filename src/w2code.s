@@ -827,7 +827,12 @@ w2_nop: rts                      ; dead dispatch rows (corpse types unused)
     rts
 :   cpy #OBJ_DSHOT
     bne :+
-    lda #2
+    ldy o_st,x                   ; the shot is 16px WIDE and 16 (rising) or 24
+    beq @dsh16                   ; (flying) TALL -- a 2-col box left half of it
+    lda #$C3                     ; on the floor. bit7+bit6 = 24px, 3 cols
+    rts
+@dsh16:
+    lda #$83                     ; bit7 = 16px tall, 3 cols
     rts
 :   cpy #OBJ_YURA2
     beq @wfish

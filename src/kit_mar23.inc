@@ -1174,22 +1174,25 @@ vbox:                            ; GB phys byte1 per type (docs/12 table)
     rts
 :   jsr drgb_ensure              ; the glued lower half (its own erase slot)
     ldx oi
-    lda frame_count
-    lsr
-    bcs @tick
-    lda o_st,x                   ; 0 = up, 1 = down (0.5px/f)
+    lda o_vy,x                   ; GB-measured 1px per 1.70 frames = 0.59 px/f;
+    clc                          ; a 151/256 subpixel accumulator gives 0.590 (the
+    adc #151                     ; old frame_count>>1 gate was a flat 0.50)
+    sta o_vy,x
+    bcc @tick
+    lda o_st,x                   ; 0 = up, 1 = down
     bne @dn
     dec o_y,x
     lda o_y,x
-    cmp #63
-    bcs @tick
+    cmp #87                      ; GB-measured patrol: y 103..136 GB = 87..120
+    bcs @tick                    ; port. It used to sweep 63..124 -- almost twice
+                                 ; the height, which is why the fight read wrong
     lda #1
     sta o_st,x
     bra @tick
 @dn:
     inc o_y,x
     lda o_y,x
-    cmp #124
+    cmp #120
     bcc @tick
     stz o_st,x
 @tick:
@@ -1302,8 +1305,51 @@ vbox:                            ; GB phys byte1 per type (docs/12 table)
 
 
 .segment "W2FAR"
-.proc draw_dshot
-    jmp draw_ghalf               ; same blob
+.proc draw_dshot                 ; GB OAM capture: the shot is a METASPRITE, not a
+    ldx oi                       ; blob. $1F (rising) = 2x2, tiles $CE$CF over
+    stz do_flip                  ; $BC$BD; $58 (flying) = 2x3, $BE$BF / $CE$CF /
+    lda o_st,x                   ; $BC$BD. This drew ONE 8x8 ghalf tile -- user:
+    bne @fly                     ; "big fireballs but they are half rendered".
+    lda #$CE
+    ldy #0
+    jsr dsh_row
+    lda #$BC
+    ldy #8
+    jmp dsh_row
+@fly:
+    lda #$BE
+    ldy #0
+    jsr dsh_row
+    lda #$CE
+    ldy #8
+    jsr dsh_row
+    lda #$BC
+    ldy #16
+    jmp dsh_row
+.endproc
+.proc dsh_row                    ; A = the row's LEFT tile, Y = dy from the top
+    sta tmpH3
+    phy
+    ldx oi
+    lda o_y,x                    ; visual top = o_y + 8 (law A1)
+    clc
+    adc #8
+    ply
+    sty tmpL3
+    clc
+    adc tmpL3
+    sta dy
+    lda spr_col
+    sta dcol
+    ldx tmpH3
+    jsr draw_quad
+    lda spr_col                  ; the right half, 8px over (dcol is in 4px bytes)
+    clc
+    adc #2
+    sta dcol
+    ldx tmpH3
+    inx
+    jmp draw_quad
 .endproc
 
 .segment "W2FAR"

@@ -108,7 +108,7 @@ enemies live -- no wedge, no corruption, canaries clean. 3-3's ending (sphere
 gate -> rope -> room -> the World-3 creature -> bonus) verifies end to end
 with the creature tiles byte-asserted.
 
-## What is NOT done in W3
+## What is NOT done in W3  (user asked 2026-08-20: "are we done in W3?" -- NO)
 
 - **Hiyoihoi ($32) is not a boss yet**: it spawns and the VM runs its script
   (it throws its child $33), but there is no HP/defeat handling, so it cannot
@@ -146,3 +146,35 @@ Three reports; two had confirmable mechanisms, found by measurement:
    screenshot.
 
 Space after the fixes: W3 window 2030/2048, W3 far 398/448, FIXED ~1 byte.
+
+## 2-3's boss, re-measured against the GB (2026-08-20)
+
+The user asked whether Dragonzamasu ($1A) was really implemented per the
+original. Captured him on the GB rather than trusting the comments:
+
+```
+                    GB (measured)              port (was)          verdict
+HP                  19 (slot+$0C & $3F)        19                  OK
+shot cadence        every 64 frames            64                  OK
+patrol range        y 103..136 GB = 87..120    63..124              WRONG (2x)
+patrol speed        1px / 1.70 frames          1px / 2 frames      WRONG
+his shot            a METASPRITE               ONE 8x8 tile        WRONG
+```
+
+**The shot was the user-visible one** ("big fireballs but they are half
+rendered"). GB OAM at the shot's position:
+
+- `$1F` rising: 4 sprites, 2x2 = 16x16 -- `$CE $CF` over `$BC $BD`
+- `$58` flying: 6 sprites, 2x3 = 16x24 -- `$BE $BF` / `$CE $CF` / `$BC $BD`
+
+`draw_dshot` was `jmp draw_ghalf`: one 8x8 tile, and the wrong art (the
+gunion-split blob `$E2`). It now draws the real metasprite per phase, and
+`ovl_width` gives it a 3-col box that is 16px tall rising / 24px flying
+instead of the 2-col box that left half of it on the floor.
+
+Tiles: the port's quad ids ARE the GB's ($BC = DRG_TA), and the W2 region
+carries the full 61-tile $A0-$DC overlay, so $CE/$CF were already shipping --
+nothing new had to be extracted.
+
+LESSON (law E-class): "it was capture-verified" in a comment is not the same as
+"I verified it". The HP and cadence were right; the geometry never was.
