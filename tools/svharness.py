@@ -1,6 +1,6 @@
 """py65 harness for the banked SV image (64K-512K): loads [bank0][last-16K=fixed],
-watches
-SYS_CTRL ($2026) bits 7:5 and remaps $8000-$BFFF on bank change.
+watches the mapper regs and remaps $8000-$BFFF on bank change: SYS_CTRL
+($2026) bits 7:5 below 128K, or MAGNUM ($2021 low nibble + $2026 bit5) above it.
 
 Usage (run from the repo root; needs the -g debug build's build/dbg.txt):
     from svharness import Harness
@@ -22,6 +22,9 @@ class Harness:
         self.dbg = open(dbg).read()
         self.mem = bytearray(0x10000)
         self.cur_bank = 0
+        self.magnum = len(self.file) > 131072   # Potator: isMAGNUM
+        self.mag_page = 0
+        self.prev21 = 0
         self.mem[0x8000:0xC000] = self.file[0:0x4000]
         self.mem[0xC000:0x10000] = self.file[-0x4000:]
         self.mpu = MPU()
@@ -38,10 +41,24 @@ class Harness:
         raise KeyError(n)
 
     def _bank_check(self):
-        b = (self.mem[0x2026] >> 5) & 7
-        if b != self.cur_bank:
-            self.cur_bank = b
-            o = (b * 0x4000) % len(self.file)   # Potator: bankOffset % programRomSize
+        # Two mappers, exactly as Potator picks them (memorymap.c):
+        #   isMAGNUM = size > 131072  -> bankOffset = (r26 & $20)<<9 | (r21 & $F)<<15
+        #   else                      -> bankOffset = (r26 & $E0)<<9   (3 bits, 128K)
+        # The MAGNUM page is latched AT THE $2021 WRITE and only while $2022 == 0
+        # (Potator never re-evaluates it on a $2022 write), which is what lets the
+        # game restore the panel's LCD_DRIVE value straight afterwards.
+        if self.magnum:
+            r21 = self.mem[0x2021] & 0x0F
+            if r21 != self.prev21:
+                self.prev21 = r21
+                if self.mem[0x2022] == 0:
+                    self.mag_page = r21
+            off = (self.mag_page << 15) | ((self.mem[0x2026] & 0x20) << 9)
+        else:
+            off = (self.mem[0x2026] & 0xE0) << 9
+        if off != self.cur_bank:
+            self.cur_bank = off
+            o = off % len(self.file)            # Potator: bankOffset % programRomSize
             self.mem[0x8000:0xC000] = self.file[o:o + 0x4000]
 
     def _dma(self):
