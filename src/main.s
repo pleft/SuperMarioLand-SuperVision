@@ -8417,66 +8417,29 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     ; ---------- pass 2: overlap propagation (2 rounds) ----------
     jsr @spread
     jsr @spread
-    ; ---------- pass 3: erase all dirty ----------
+    ; ---------- pass 3: the ENTANGLED GROUP as a unit, then the singles ------
+    ; Redrawing every overlapped sprite a SECOND time (the first fusing design)
+    ; cost 2-3 eleven percent of its frames -- user: "it lags when more than 2-3
+    ; sprites are moving". Erasing the whole group and then drawing the whole
+    ; group costs nothing extra and still keeps each sprite blank only for the
+    ; GROUP's erases instead of the whole render (docs/36).
     stz oi
-@p3:
+@p3a:                            ; 3a: erase every ENTANGLED dirty sprite
     ldx oi
     lda o_nfl,x
     and #1
-    beq @p3n
+    beq @p3an
     lda o_pdr,x
-    beq @p3n
-    lda o_pvx,x                  ; erase at the old drawn spot (a DMA shift was
-    sta rb_vx                    ; already folded into o_pvx by pass 0)
-    lda o_pvy,x
-    sta rb_y
-    ldy #1
-    lda o_pw,x
-    bpl @short
-    iny                          ; TALL (16px): erase from 8px above, one extra row
-    asl                          ; bit6 = EXTRA-TALL (24px: Totomesu) -> one more
-    bpl :+
-    iny
-:   asl                          ; bit5 = TWO more (W3's 32px metasprites, docs/34)
-    bpl :+
-    iny
-    iny
-:   lsr                          ; recover the width: A = o_pw & $3F ...
-    lsr
-    and #$1F                     ; ... and the count now lives in bits 4:0
-    sta rb_cols
-    lda o_pvy,x
-    sec
-    sbc #8
-    sta rb_y
-    bra @rows
-@short:
-    sta rb_cols
-@rows:
-    lda o_pvy,x
-    and #7
-    beq :+
-    iny
-:   sty rb_rows
-    jsr restore_bg
-    ldx oi
-    stz o_pdr,x
-    lda o_nfl,x                  ; FUSE: draw the sprite the instant it is erased,
-    and #2                       ; rather than leave it blank until pass 4 reaches
-    beq @p3n                     ; it. Erase-all-then-draw-all left every sprite
-    jsr p4_one                   ; blank for a MEASURED 97 scanlines; the render
-    ldx oi                       ; runs long past vblank, so the beam sweeps those
-    lda o_nfl,x                  ; blanks -- that IS the flicker (docs/36).
+    beq @p3an
+    lda o_nfl,x
     bit #8
-    bne @p3n                     ; ENTANGLED: leave it dirty so pass 4 redraws it
-    and #$FA                     ; after the later erases (and Mario's) have run
-    sta o_nfl,x                  ; over it -- that keeps the draw ORDER, and so
-                                 ; the layering, exactly as it was
-@p3n:
+    beq @p3an                    ; a single: 3c fuses its erase with its draw
+    jsr erase_slot
+@p3an:
     inc oi
     lda oi
     cmp #OBJ_MAX
-    bne @p3
+    bne @p3a
     lda m_dirty                  ; Mario's erase (prev_vx pre-folded by pass 0)
     beq @p4s
     lda prev_vx
@@ -8491,7 +8454,55 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     beq :+
     iny
 :   sty rb_rows
-    jsr restore_bg
+    jsr restore_bg               ; Mario belongs to the group: his draw is LAST,
+                                 ; so his erase must precede every group draw
+@p3b:                            ; 3b: draw the group, ascending = layering intact
+    stz oi
+@p3bl:
+    ldx oi
+    lda o_nfl,x
+    bit #8
+    beq @p3bn                    ; not entangled
+    and #1
+    beq @p3bn                    ; not dirty
+    lda o_nfl,x
+    and #2
+    beq @p3bc                    ; erased but invisible: nothing to draw
+    jsr p4_one
+    ldx oi
+@p3bc:
+    lda o_nfl,x
+    and #$FA                     ; done: pass 4 must not draw it again
+    sta o_nfl,x
+@p3bn:
+    inc oi
+    lda oi
+    cmp #OBJ_MAX
+    bne @p3bl
+    stz oi                       ; 3c: the singles -- erase and draw at once, so
+@p3cl:                           ; they are blank for their own erase only
+    ldx oi
+    lda o_nfl,x
+    and #1
+    beq @p3cn
+    lda o_pdr,x
+    beq @p3cn
+    jsr erase_slot
+    ldx oi
+    lda o_nfl,x
+    and #2
+    beq @p3cc
+    jsr p4_one
+    ldx oi
+@p3cc:
+    lda o_nfl,x
+    and #$FA
+    sta o_nfl,x
+@p3cn:
+    inc oi
+    lda oi
+    cmp #OBJ_MAX
+    bne @p3cl
     ; ---------- pass 4: draw all dirty visible; Mario last ----------
 @p4s:
     stz oi
@@ -8649,8 +8660,9 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
 .endproc
 
 ; p4_one: draw slot X=oi and record its drawn state (position, erase width,
-; anim token). Split out of pass 4 so pass 3 can call it the instant it has
-; erased an UNENTANGLED sprite -- see the fusing note in pass 3.
+; anim token). In the LEVELS prefix, not FIXED: render_all only ever runs with a
+; level bank mapped, and FIXED had no room left for the pass-3 rework.
+.segment "LEVELS"
 .proc p4_one
     lda o_nvx,x
     sta ovx
@@ -8716,6 +8728,48 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     sta o_pdr,x
     rts
 .endproc
+
+; erase_slot: restore the background under slot X=oi's last drawn image. Split
+; out of pass 3 so the entangled group and the singles can share it.
+.proc erase_slot
+    lda o_pvx,x                  ; erase at the old drawn spot (a DMA shift was
+    sta rb_vx                    ; already folded into o_pvx by pass 0)
+    lda o_pvy,x
+    sta rb_y
+    ldy #1
+    lda o_pw,x
+    bpl @short
+    iny                          ; TALL (16px): erase from 8px above, one extra row
+    asl                          ; bit6 = EXTRA-TALL (24px) -> one more
+    bpl :+
+    iny
+:   asl                          ; bit5 = TWO more (W3's 32px metasprites)
+    bpl :+
+    iny
+    iny
+:   lsr                          ; recover the width ...
+    lsr
+    and #$1F
+    sta rb_cols
+    lda o_pvy,x
+    sec
+    sbc #8
+    sta rb_y
+    bra @rows
+@short:
+    sta rb_cols
+@rows:
+    lda o_pvy,x
+    and #7
+    beq :+
+    iny
+:   sty rb_rows
+    jsr restore_bg
+    ldx oi
+    stz o_pdr,x
+    rts
+.endproc
+.segment "CODE"
 
 
 ; draw_obj_sprite: draw object oi at (ovx, o_y) — mushroom = 1 OBJ tile, coin = 1 BG tile.

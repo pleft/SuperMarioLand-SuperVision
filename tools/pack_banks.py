@@ -194,7 +194,7 @@ def main():
             assert len(win23_img) <= 0x800, "2-3 window kit exceeds the $800 window"
             far23 = full23[w2c_sz:w2c_sz + far_sz]
             carve23 = full23[w2c_sz + far_sz:w2c_sz + far_sz + fv_sz]
-            assert far_at == 0xA2C0, "W2FARM moved -- update pack_banks"
+            assert far_at == 0xA600, "W2FARM moved -- update pack_banks"
             if fv_sz:
                 # the carve = bank5 chardata tiles $20-$4F (Mario poses; he
                 # never draws in the sub level). Guard the address drift.
@@ -306,7 +306,10 @@ def main():
 
         region = hdr
         if level == 5:
-            region += b"\xFF" * (0xA2C0 - (lvl_hdr_addr + HDR_SIZE)) + far23
+            assert lvl_hdr_addr + HDR_SIZE <= 0xA600, \
+                f"level 5 header runs into the far kit by "\
+                f"{lvl_hdr_addr + HDR_SIZE - 0xA600} bytes"
+            region += b"\xFF" * (0xA600 - (lvl_hdr_addr + HDR_SIZE)) + far23
         region += b"".join(tabs) + pool \
                      + blobs["pipes"] + blobs["blocks"] + blobs["spawns"]
         if level >= 3:

@@ -32,6 +32,9 @@ GUN_TA  = $B0                    ; slice: gunion quad (frame A; bank5 is
 YUR2_T  = $B4                    ; fish pair A ($B4/$B5), B ($B6/$B7): the flap
 TAM_T   = $B8                    ; is back; tamao = a PRE-MIRRORED 16q quad
 DRG_TA  = $BC                    ; dragon 16x32, frame A
+DSH_TOP = $BE                    ; his SHOT, in PORT ids (bank 5's slice is
+DSH_MID = $C0                    ; RE-INDEXED: GB $BE$BF/$CE$CF/$BC$BD land at
+DSH_BOT = $C2                    ; port $BE$BF/$C0$C1/$C2$C3)
 MUS_GOAL_ = 3                    ; build/audio/music.inc (blob can't include it)
 
 ; pad bits (GB layout; supervision.inc isn't included in the blob)
@@ -1310,20 +1313,20 @@ vbox:                            ; GB phys byte1 per type (docs/12 table)
     stz do_flip                  ; $BC$BD; $58 (flying) = 2x3, $BE$BF / $CE$CF /
     lda o_st,x                   ; $BC$BD. This drew ONE 8x8 ghalf tile -- user:
     bne @fly                     ; "big fireballs but they are half rendered".
-    lda #$CE
-    ldy #0
-    jsr dsh_row
-    lda #$BC
+    lda #DSH_MID                 ; PORT ids, not GB ids -- bank 5 ships a
+    ldy #0                       ; RE-INDEXED slice (pack_banks W2_TILES: port id
+    jsr dsh_row                  ; = $A4 + position). Raw GB ids drew the DRAGON's
+    lda #DSH_BOT                 ; own tiles: "2-3 boss everything is fucked up".
     ldy #8
     jmp dsh_row
 @fly:
-    lda #$BE
+    lda #DSH_TOP
     ldy #0
     jsr dsh_row
-    lda #$CE
+    lda #DSH_MID
     ldy #8
     jsr dsh_row
-    lda #$BC
+    lda #DSH_BOT
     ldy #16
     jmp dsh_row
 .endproc
