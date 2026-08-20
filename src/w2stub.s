@@ -11,6 +11,9 @@
 .import __STUB2_LOAD__, __STUB2_RUN__, __STUB2_SIZE__
 
 SYS_CTRL = $2026
+LINK_DDR = $2021                 ; MAGNUM page (docs/37): banking here does
+LINK_DAT = $2022                 ;   not restart the LCD scan; $2022 must read 0
+                                 ;   at the $2021 write, $0F = the panel's drive
 FLAGS    = $0B                   ; NMI | TIMER_IRQ | LCD (load_level's mask)
 
 .segment "STUB1"                 ; runs at $1500 (the ovl_bind entry)
@@ -22,8 +25,11 @@ FLAGS    = $0B                   ; NMI | TIMER_IRQ | LCD (load_level's mask)
     jmp __STUB2_RUN__
 
 .segment "STUB2"                 ; runs at $1F80 (outside the copy target)
-    lda #(6<<5)|FLAGS            ; map BANK 6
-    sta SYS_CTRL
+    stz LINK_DAT            ; map BANK 6
+    lda #6
+    sta LINK_DDR
+    lda #$0F
+    sta LINK_DAT
     stz tmpL2                    ; src = $B000 (the kit image in bank 6)
     lda #$B0
     sta tmpH2
@@ -50,6 +56,9 @@ FLAGS    = $0B                   ; NMI | TIMER_IRQ | LCD (load_level's mask)
     iny
     cpy #160
     bne :-
-    lda #(5<<5)|FLAGS            ; back to BANK 5
-    sta SYS_CTRL
+    stz LINK_DAT            ; back to BANK 5
+    lda #5
+    sta LINK_DDR
+    lda #$0F
+    sta LINK_DAT
     jmp $1500                    ; the kit's real init

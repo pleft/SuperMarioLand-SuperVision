@@ -123,10 +123,39 @@ move with it. Prefix cost at 16 banks is 141K of 256K, leaving ~115K for data
 against ~60K of level data today -- affordable, but it is a packer rewrite, not
 an edit.
 
-Order of work: (1) harness model [done], (2) give every bank the prefix + move
-W3 cold data and the boot images out of bank 6, THEN grow to 256K and convert
-the selection -- gold hashes must stay bit-identical, (3) re-lay-out to make W3
-resident and drive the switch rate to zero, (4) W4.
+## RESULT (step 2 landed)
+
+```
+3-1 SYS_CTRL writes/frame:  5.83  ->  0.00   (worst frame 22 -> 0)
+1-1, for comparison:        0.00      0.00
+reachable $2026 write sites:  15  ->     2   (neither fires during play)
+```
+
+Banking still happens during play (w3_draw, w3_fetch, the odd map miss) -- it
+just writes $2021 now, which does not restart the LCD scan. **Full W3 residency
+is therefore no longer needed for HUD stability**; it is only a performance
+question now (each switch is still ~10 cycles and a cache miss still costs a
+16-byte copy).
+
+Verified bit-identical: GOLD-OK (levels 0-5) and W3's own hashes (3-1
+02605b4e..., 3-2 5bd8f7b6...) match the 128K build exactly.
+
+Two bugs this shook out, both invisible to a build that links cleanly:
+- **1-1's header offset.** load_level carried a "the BONUS blob precedes the
+  header" case that only held while 1-1 shared bank 1 with the bonus game.
+  Moving 1-1 to bank 7 made it wrong -- caught as the ONE gold mismatch.
+- **Bank 1 lost its prefix.** The packer only writes the common prefix into
+  banks that have a LEVEL JOB. Once 1-1 left, nothing targeted bank 1, so W3
+  ran with no engine code beneath it (3-1 and 3-2 rendered identical garbage,
+  camera running away). pack_w3 now lays bank 1 down itself.
+- The stub's MAGNUM sequence grew the W3 tail into the far kit's pin; the pin
+  moved to $BE60 and the packer now asserts the overlap instead of corrupting.
+
+Order of work: (1) harness model [done], (2) 512K + selection converted [done],
+(3) W3 residency -- now a PERFORMANCE task, not a HUD one, (4) W4.
+
+NOTE for the SuperPico: the image is 524288 bytes, so the UF2 size law in
+memory (128K = 283648) no longer applies to this build.
 
 Do NOT grow the image before the selection is converted: past 131072 bytes
 Potator switches to MAGNUM and the existing 3-bit writes stop banking, so the

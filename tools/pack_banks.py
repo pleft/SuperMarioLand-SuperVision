@@ -340,19 +340,27 @@ def main():
         img[coff:coff + 128] = creat
         print(f"pack_banks: 2-3 kit in its own bank; creature (128B) -> bank 5 $BF00")
     if w3_jobs:
-        pack_w3(img, sym)
+        pack_w3(img, sym, prefix, l11)
     open(img_path, "wb").write(bytes(img))
 
 W3HDR = 0xB540                                  # main.s W3HDR (load_level pin)
 W3WIN = 0xA800                                  # bank 6: kit window image (w3stub pin)
 W3SPT = 0xA7C0                                  # bank 6: 3x .addr spawn lists (w3stub pin)
 
-def pack_w3(img, sym):
+def pack_w3(img, sym, prefix, l11):
     """World 3 (docs/33): levels 6-8 are RESIDENT on bank 1 -- headers, pipes,
     blocks, the stub and a W3-patched full bg charset live in its tail (from
     W3HDR) -- while the cold data (map pools/tables, the 2 shared room grids,
     spawn lists, the kit window image) lives in BANK 6, reached only through
     the stub at load and the window map reader at play."""
+    # Bank 1 hosts W3 and NOTHING ELSE since 1-1 moved to bank 7, so no level job
+    # writes it any more -- pack_w3 must lay down the common prefix itself, or the
+    # engine code simply is not there while 3-X runs (cost: 3-1/3-2 rendering
+    # identical garbage with the camera running away).
+    bank1 = bytearray(prefix + l11)
+    assert len(bank1) <= BANK, f"bank 1 prefix+blobs overflow by {len(bank1) - BANK}"
+    bank1 += b"\xFF" * (BANK - len(bank1))
+    img[1 * STRIDE:1 * STRIDE + BANK] = bank1
     BNK6 = 6 * STRIDE
     # --- bank 6 cold data: maps + rooms + spawns + kit image ---
     surfs, rooms_raw, spawns = [], {}, []
@@ -460,17 +468,19 @@ def pack_w3(img, sym):
             hdr += bytes((v & 0xFF, v >> 8))
         assert len(hdr) == HDR_SIZE
         tail[i * HDR_SIZE:(i + 1) * HDR_SIZE] = hdr
+    assert W3HDR + len(tail) <= 0xBE60, \
+        f"W3 bank-1 tail runs into the far kit by {W3HDR + len(tail) - 0xBE60} bytes"
     toff = 1 * STRIDE + (W3HDR - BASE)
     assert all(b == 0xFF for b in img[toff:toff + len(tail)]), \
         "bank 1 tail not free for W3 (1-1 region grew past W3HDR?)"
     img[toff:toff + len(tail)] = tail
     if far3:
-        assert far3_at == 0xBE40, "W3FAR moved -- update pack_banks"
+        assert far3_at == 0xBE60, "W3FAR moved -- update pack_banks"
         foff = 1 * STRIDE + far3_at - BASE
         assert all(b == 0xFF for b in img[foff:foff + len(far3)]), \
             f"bank 1 ${far3_at:04X} not free for the W3 far kit"
         img[foff:foff + len(far3)] = far3
-    print(f"pack_banks: W3 far kit {len(far3)}B at $BE40")
+    print(f"pack_banks: W3 far kit {len(far3)}B at ${far3_at:04X}")
     print(f"pack_banks: W3 -> bank 6 cold {len(cold) + len(spt) + len(win)}B, "
           f"bank 1 tail {len(tail)}B at ${W3HDR:04X} "
           f"({BASE + BANK - W3HDR - len(tail)} free)")
