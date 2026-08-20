@@ -8431,10 +8431,12 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     beq @p3an
     lda o_pdr,x
     beq @p3an
-    lda o_nfl,x
-    bit #8
-    beq @p3an                    ; a single: 3c fuses its erase with its draw
-    jsr erase_slot
+    jsr erase_slot               ; NOTE: the fusing experiment is REVERTED here --
+                                 ; it cost 2-3 four times its dropped frames (2.8%
+                                 ; -> 11%) to halve a flicker, and the user could
+                                 ; not play the level. docs/36 keeps the analysis;
+                                 ; the flicker needs a CHEAPER pipeline, not a
+                                 ; more expensive pass order.
 @p3an:
     inc oi
     lda oi
@@ -8456,53 +8458,6 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
 :   sty rb_rows
     jsr restore_bg               ; Mario belongs to the group: his draw is LAST,
                                  ; so his erase must precede every group draw
-@p3b:                            ; 3b: draw the group, ascending = layering intact
-    stz oi
-@p3bl:
-    ldx oi
-    lda o_nfl,x
-    bit #8
-    beq @p3bn                    ; not entangled
-    and #1
-    beq @p3bn                    ; not dirty
-    lda o_nfl,x
-    and #2
-    beq @p3bc                    ; erased but invisible: nothing to draw
-    jsr p4_one
-    ldx oi
-@p3bc:
-    lda o_nfl,x
-    and #$FA                     ; done: pass 4 must not draw it again
-    sta o_nfl,x
-@p3bn:
-    inc oi
-    lda oi
-    cmp #OBJ_MAX
-    bne @p3bl
-    stz oi                       ; 3c: the singles -- erase and draw at once, so
-@p3cl:                           ; they are blank for their own erase only
-    ldx oi
-    lda o_nfl,x
-    and #1
-    beq @p3cn
-    lda o_pdr,x
-    beq @p3cn
-    jsr erase_slot
-    ldx oi
-    lda o_nfl,x
-    and #2
-    beq @p3cc
-    jsr p4_one
-    ldx oi
-@p3cc:
-    lda o_nfl,x
-    and #$FA
-    sta o_nfl,x
-@p3cn:
-    inc oi
-    lda oi
-    cmp #OBJ_MAX
-    bne @p3cl
     ; ---------- pass 4: draw all dirty visible; Mario last ----------
 @p4s:
     stz oi
