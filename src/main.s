@@ -381,8 +381,8 @@ probe_stripes:                   ; the full proven liturgy + stripes, FIXED-ROM
     bne @m0f
 @m0: bra @m0
 .endif
-    lda #(6 << 5)            ; map BANK 6 (display/ints off): the one-shot boot
-    sta SYS_CTRL             ; bulk is COPIED TO RAM and run there -- real hw
+    stz SYS_CTRL             ; map BANK 0 (display/ints off): the one-shot boot
+                             ; bulk is COPIED TO RAM and run there -- real hw
     lda #<__BOOT6_LOAD__     ; proved long boot loops fetching through the cart
     sta lvl_ptr              ; window die on marginal contacts; RAM execution
     lda #>__BOOT6_LOAD__     ; is immune (the copy itself is short exposure)
@@ -525,7 +525,7 @@ probe_stripes:                   ; the full proven liturgy + stripes, FIXED-ROM
                                  ; WRAM clear, before anything draws.
     lda #<__RCODE_LOAD__         ; --- install the always-resident RAM code at
     sta ptr                      ; $1200 (ring helpers + hud_flush; docs/27):
-    lda #>__RCODE_LOAD__         ; copied from this same bank-6 window ---
+    lda #>__RCODE_LOAD__         ; copied from this same bank-0 window ---
     sta ptr+1
     lda #<__RCODE_RUN__
     sta tmpL
