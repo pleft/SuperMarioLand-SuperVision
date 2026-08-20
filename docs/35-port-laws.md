@@ -70,26 +70,45 @@ play** -- not per tile read, not per sprite draw. Data a level touches every
 frame must be RESIDENT in the bank that is mapped while it runs. If it cannot
 be, the switches must be batched to a single bracketed window per frame, and
 even that is a compromise the user can see.
-*(Cost: W3's HUD instability -- 22.5/frame, then still 9/frame after a partial
-fix, because the DRAW path also switched. Now **5.5/frame** with the map-column
-cache at $1F80.)*
+*(Cost: W3's HUD instability -- 22.5/frame, then 9/frame after a partial fix
+because the DRAW path also switched, then 5.8, now **2.95/frame**. See D1b.)*
 
-**D1b. W3's remaining 5.5 switches/frame are a LAYOUT problem, not a coding
-one.** 13.5 of the 18 map reads per frame come from the RENDERER (erase +
-column streaming), not from gameplay, and they switch because W3's map, tiles
-and charset live in bank 6 while its code runs elsewhere. No amount of caching
-removes them: the honest fix is to make a level's map + tiles + charset
-RESIDENT in the bank that is mapped while it runs, which needs the 8833-byte
-shared prefix shrunk so levels can share banks. Until then W3's HUD is
-measurably less stable than W1/W2's, and saying otherwise is not honest.
+**D1b. W3's switches are a CACHE-POLICY problem first, a layout problem
+second.** Measured in 3-1 (count PC hits on every `STA/STZ $2026` site):
+
+```
+                       before   after   what it is
+map column cache        3.03    0.14    w3_read misses
+w3_draw (per enemy)     1.84    1.84    display lists + tile sheet, bank 6
+w3_fetch (per byte)     0.96    0.96    AI script bytes, bank 6
+                        -----   -----
+                         5.83    2.95   per frame (worst frame 22 -> 18)
+```
+
+The cache was 7 slots with ROUND-ROBIN replacement, which evicts the column
+you are about to re-read: 1.5 misses/frame against a working set of only 5.7
+distinct columns. **Direct-mapped over 16 slots is the compulsory floor**
+(0.13/frame -- a column only misses when the camera first scrolls it in). Its
+256 bytes of tile data live in `shtab_lo`'s page 0, which is the identity
+shift and therefore dead once the blitter computes that case instead of
+looking it up; being page-aligned makes a slot's address `(slot << 4)` with a
+constant high byte. Verified: 3-1 and 3-2 render BIT-IDENTICALLY before and
+after (gold hashes only cover levels 0-5, so W3 needs its own comparison).
+
+The REMAINING 2.8/frame scales with the enemy count and needs residency, not
+caching: the display lists (490B) and the enemy tile sheet (896B) that
+`w3_draw` reads, plus the AI scripts (811B) `w3_fetch` reads a byte at a time.
+Bank 1 -- the bank mapped while 3-X runs -- has 451 bytes free, so that is a
+ROM-layout change (shrink the 8833-byte shared prefix), exactly as D1 says.
 
 **D2. Measure the switch rate in REAL play** (enemies on screen, no camera
 teleport) before claiming a switching fix works. A quiet test frame proves
 nothing.
 
 **D3. The RAM map is full.** ZP full; BSS ends at $11FC with RCODE at $1200;
-$1500-$1CFF is the kit window; $1D00-$1F7F the HUD shadow; $1F80-$1FFF is the
-map-column cache. BOOT6 ($1500 image, 2048) has ~1.8K spare for ONE-SHOT boot
+$1500-$1CFF is the kit window; $1D00-$1F7F the HUD shadow; $1F80-$1F9F holds
+the W3 cache TAGS (its 256 bytes of column data live in shtab_lo's dead page 0
+at $0200 -- see D1b; shtab_hi's page 0 at $0600 is free for the same reason). BOOT6 ($1500 image, 2048) has ~1.8K spare for ONE-SHOT boot
 code -- that is the place for boot-time initialisation when FIXED is full.
 
 **D4. Anything the TITLE draws must be initialised before the title runs.**

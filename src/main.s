@@ -226,7 +226,10 @@ mus_lt:      .res 2          ; current track's note-length table (16 bytes)
 ; --- sub-pixel blit shift tables (built at boot; page-aligned: BSS starts $0200) ---
 ; shtab_lo/hi[subx][b] = the 16-bit b << (subx*2), split. (Transparency masks are
 ; computed per row from the SHIFTED bytes — M() commutes with 2-bit-aligned shifts.)
-shtab_lo:    .res 1024      ; 4 pages: subx 0..3
+; PAGE 0 OF EACH (subx 0 = the identity shift) IS DEAD: the blit computes that
+; case instead of looking it up, and shtab_lo's page 0 ($0200, page-aligned) is
+; where W3's 16-slot column cache lives (docs/36). Keep shtab_lo FIRST in BSS.
+shtab_lo:    .res 1024      ; 4 pages: subx 0..3 (page 0 = the W3 cache's home)
 shtab_hi:    .res 1024
 ; --- per-level bindings, set by load_level from the current bank's level_hdr ---
 cur_level:   .res 1          ; level id 0.. (GB $ffe4); selects the ROM bank
@@ -8456,11 +8459,11 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     jsr p4_one                   ; blank for a MEASURED 97 scanlines; the render
     ldx oi                       ; runs long past vblank, so the beam sweeps those
     lda o_nfl,x                  ; blanks -- that IS the flicker (docs/36).
-    and #8
+    bit #8
     bne @p3n                     ; ENTANGLED: leave it dirty so pass 4 redraws it
-    lda o_nfl,x                  ; after the later erases (and Mario's) have run
-    and #$FA                     ; over it -- that keeps the draw ORDER, and so the
-    sta o_nfl,x                  ; layering, exactly as it was
+    and #$FA                     ; after the later erases (and Mario's) have run
+    sta o_nfl,x                  ; over it -- that keeps the draw ORDER, and so
+                                 ; the layering, exactly as it was
 @p3n:
     inc oi
     lda oi
@@ -10014,12 +10017,20 @@ hf_n1:       .res 1
     sta p_shhi+1
     lda blit_opaque              ; opaque: constant masks = the shifted $FF pair,
     beq :+                       ; hoisted out of the row loop
-    ldy #$FF
+    ldy #$FF                     ; subx 0 is the IDENTITY shift, so COMPUTE it: that
+    lda spr_subx                 ; was the last reader of shtab's page 0, which now
+    bne @opqs                    ; hosts W3's column cache instead (docs/36)
+    sty m0                       ; Y = $FF
+    stz m2
+    bra @opqm
+@opqs:
     lda (p_shlo),y
     sta m0
     lda (p_shhi),y
     sta m2
-    ora m0
+@opqm:
+    lda m0
+    ora m2
     sta m1
 :   lda #8
     sta blit_row

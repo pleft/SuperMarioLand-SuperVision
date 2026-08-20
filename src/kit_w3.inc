@@ -28,10 +28,16 @@ MUS_CLEAR3 = 3                   ; the course-clear jingle (build/audio/music.in
 ; caches whole 16-byte columns in the RAM tail the retired 2-3 loader stub
 ; used to borrow, so repeat probes (and the 16 reads the column streamer does)
 ; cost no switch at all. 4 slots x 32B stride = cheap (n<<5) indexing.
-W3CACHE  = $1F80                 ; 7 slots x [col16][16 tiles] = 126 bytes; the
-W3CSLOTS = 7                     ; victim counter holds a slot BASE (0,18,..108)
-W3CSTRIDE = 18                   ; so the probe needs no multiply
-W3CNEXT  = $1FFE
+; --- the map-column cache (docs/36) -----------------------------------------
+; Round-robin over 7 slots evicted the column we were about to re-read: 1.5
+; misses/frame = 3.0 SYS_CTRL writes = the HUD instability the user kept
+; seeing. Direct-mapped over 16 slots is the COMPULSORY floor (0.13/frame):
+; a column only ever misses when the camera first scrolls it in.
+; The 256 bytes of tile data live in shtab_lo's dead identity page, which is
+; PAGE-ALIGNED -- so a slot's address is (slot << 4) with a constant high byte.
+W3CDATA  = $0200                 ; 16 slots x 16 tile bytes (page-aligned)
+W3CTAG   = $1F80                 ; 16 x [col lo][col hi]
+W3CSLOTS = 16
 W3CMB    = $1FFF                 ; map_base hi when the cache was filled
 W3SCRB   = $B000                 ; bank 6 pins (pack_banks writes all three):
 W3DLB    = $B520                 ;   scripts / metasprite display lists /

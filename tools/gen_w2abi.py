@@ -41,6 +41,7 @@ NEED = [
     "ride", "carry_y_up", "spawn_item_snd", "obj_set_x8", "mrow", "spr_col", "mark_used", "read_solid", "feet_col",
     # 2-3 Marine Pop (kit_mar23.inc): the vehicle player + torpedoes
     "veh_vec", "pad_held", "pad_pressed", "goal_phase", "goal_tmr", "goal_top",
+    "death_anim",                               # veh_step: detect a respawn
     "mus_rate", "mus_stop", "mus_start", "cam_max", "mod_test", "mod_set",
     "ending13", "e_cap", "mario_frame", "quad_cols", "quad_rows",
     # W3 (docs/33): the window map reader + the stub

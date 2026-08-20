@@ -81,7 +81,15 @@ vthp:   .res 10                  ; per-slot torpedo HP (GB slot+$0C & $3F)
     lda goal_phase               ; sphere touched: the clear sequence owns the
     beq :+                       ; frame (jingle -> tally -> next level)
     rts
-:   lda spr_x                    ; the walk normally derives mario_vx; the dead
+:   lda subdead                  ; A NEW LIFE STARTS WITH THE HULL BACK. do_respawn
+    beq @live                    ; resets the engine's state but cannot reach the
+    lda death_anim               ; kit's, and veh_step never runs while the death
+    bne @live                    ; animation owns the frame -- so subdead still set
+    stz subdead                  ; HERE means the respawn has already happened
+                                 ; (user: "if I lose a life the sub remains
+                                 ;  disappeared when gameplay starts again")
+@live:
+    lda spr_x                    ; the walk normally derives mario_vx; the dead
     clc                          ; pose draws from it -- stale, it threw every
     adc scroll_s                 ; death hop far from the sub (user-diagnosed:
     sta mario_vx                 ; "the real player position is where the sub is")

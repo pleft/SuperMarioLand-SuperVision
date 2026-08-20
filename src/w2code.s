@@ -103,23 +103,16 @@ W3FLAGS = $0B                    ; NMI | TIMER_IRQ | LCD
     beq :+
     sta W3CMB
     jsr w3_cinval
-:   ldx #0                       ; --- probe the column cache ---
-@srch:
-    lda W3CACHE,x
+:   lda feet_col                 ; --- DIRECT-MAPPED probe: slot = col & 15 ---
+    and #W3CSLOTS-1              ; (round-robin kept evicting the column we were
+    asl                          ; about to re-read -- docs/36)
+    tax                          ; X = slot*2 = the tag pair
+    lda W3CTAG,x
     cmp feet_col
-    bne @nxt
-    lda W3CACHE+1,x
+    bne @miss
+    lda W3CTAG+1,x
     cmp feet_col+1
-    beq @hit
-@nxt:
-    txa
-    clc
-    adc #W3CSTRIDE
-    tax
-    cpx #W3CSLOTS*W3CSTRIDE
-    bne @srch
-    jmp @miss
-@hit:
+    bne @miss
     jsr @slotptr
 @read:
     ldy mrow
@@ -127,28 +120,20 @@ W3FLAGS = $0B                    ; NMI | TIMER_IRQ | LCD
     jmp map_transform            ; the mod/multi-coin rules live in FIXED
 @off:
     jmp map_offmap
-@slotptr:                        ; X = slot base -> tmpL2 = its tile bytes
-    txa
-    clc
-    adc #<(W3CACHE+2)
+@slotptr:                        ; X = slot*2 -> tmpL2 = the slot's 16 tile bytes.
+    txa                          ; The data page is ALIGNED, so this is a shift and
+    asl                          ; a constant -- no 16-bit add at all.
+    asl
+    asl
     sta tmpL2
-    lda #>(W3CACHE+2)
-    adc #0
+    lda #>W3CDATA
     sta tmpH2
     rts
-@miss:                           ; refill the round-robin victim
-    lda W3CNEXT                  ; next victim = the following slot BASE
-    clc
-    adc #W3CSTRIDE
-    cmp #W3CSLOTS*W3CSTRIDE
-    bcc :+
-    lda #0
-:   sta W3CNEXT
-    tax
+@miss:                           ; claim this column's own slot (no victim counter)
     lda feet_col
-    sta W3CACHE,x
+    sta W3CTAG,x
     lda feet_col+1
-    sta W3CACHE+1,x
+    sta W3CTAG+1,x
     jsr @slotptr
     lda feet_col                 ; map_ptr = map_base + col*2 (the pointer table)
     asl
@@ -218,16 +203,12 @@ W3FLAGS = $0B                    ; NMI | TIMER_IRQ | LCD
 .endproc
 
 .proc w3_cinval                  ; drop every cached column
-    ldx #0
-    lda #$FF                     ; col-hi $FF never matches a real column
-:   sta W3CACHE+1,x
-    txa
-    clc
-    adc #W3CSTRIDE
-    tax
-    cpx #W3CSLOTS*W3CSTRIDE
-    bne :-
-    stz W3CNEXT
+    ldx #(W3CSLOTS*2)-1          ; poison every slot's col-HI (odd bytes of the
+    lda #$FF                     ; tag pairs); $FF never matches a real column
+:   sta W3CTAG,x
+    dex
+    dex
+    bpl :-
     rts
 .endproc
 .segment "W2C"
