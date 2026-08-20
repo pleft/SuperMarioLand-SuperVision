@@ -231,6 +231,11 @@ mus_lt:      .res 2          ; current track's note-length table (16 bytes)
 ; where W3's 16-slot column cache lives (docs/36). Keep shtab_lo FIRST in BSS.
 shtab_lo:    .res 1024      ; 4 pages: subx 0..3 (page 0 = the W3 cache's home)
 shtab_hi:    .res 1024
+; shtab_hi's PAGE 0 is dead (subx 0 = the identity shift, which the blitter now
+; computes) and it is PAGE-ALIGNED, so it hosts the blitter's transparency-mask
+; lookup: masktab[b] = ((b | b>>1) & $55) * 3, built once at boot. Replaces an
+; 8-instruction spread per byte per row -- the blit is a third of a busy frame.
+MASKTAB = $0600
 ; --- per-level bindings, set by load_level from the current bank's level_hdr ---
 cur_level:   .res 1          ; level id 0.. (GB $ffe4); selects the ROM bank
 hdr_buf:     .res 24         ; RAM copy of the current bank's level header
@@ -8510,10 +8515,11 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     ldy tmpL3
     cpy oi2
     beq @sp_jn
-    lda o_pdr,y
-    beq @sp_jn                   ; j not drawn (the box test below runs even when j
-                                 ; is ALREADY dirty: an overlapping dirty PAIR must
-                                 ; be found too, so neither of them fuses)
+    lda o_nfl,y
+    and #1
+    bne @sp_jn                   ; j already dirty -- nothing to mark, and the box
+    lda o_pdr,y                  ; test below is pure cost (it was only needed by
+    beq @sp_jn                   ; the reverted fusing experiment)
     lda o_pw,x                   ; box width by the pair's real widths: two narrow
     and #$7F                     ; (8px) sprites need only a 20px box — the wide 32px
     cmp #3                       ; box was chaining arrows to everything nearby
@@ -8549,15 +8555,6 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     ina
 :   cmp #28
     bcs @sp_jn
-    cpy oi2                      ; slots are erased+drawn in ASCENDING order, so only
-    bcs @sp_je                   ; the LOWER of an overlapping pair can be damaged --
-    lda o_nfl,y                  ; the higher one is drawn after the lower one's erase.
-    ora #8                       ; Bit3 = "a later erase will run over you": pass 4
-    sta o_nfl,y                  ; redraws it (the paired-per-slot wipe bug, avoided
-@sp_je:                          ; without erasing everything up front)
-    lda o_nfl,y
-    and #1
-    bne @sp_jn                   ; j was already dirty: nothing more to mark
     jsr mark_slot_y              ; overlap: j must redraw (erase too if it moved)
 @sp_jn:
     inc tmpL3
@@ -8593,9 +8590,6 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     ina
 :   cmp #28
     bcs @sp_mn
-    lda o_nfl,y                  ; overlaps MARIO: his erase runs after every slot
-    ora #8                       ; erase and his draw is last of all, so this slot
-    sta o_nfl,y                  ; cannot fuse either
     lda m_dirty                  ; overlapping pair: if either is dirty, both are
     bne @sp_mset
     lda o_nfl,y
@@ -9845,6 +9839,19 @@ hf_n1:       .res 1
     beq @done
     bra @b
 @done:
+    ldx #0                       ; --- masktab[b] = the transparency mask of b ---
+@mt:
+    txa
+    sta tmpL
+    lsr
+    ora tmpL
+    and #$55
+    sta tmpH
+    asl
+    ora tmpH
+    sta MASKTAB,x
+    inx
+    bne @mt
     rts
 .endproc
 
@@ -10006,6 +10013,36 @@ hf_n1:       .res 1
 
 ; ---------------------------------------------------------------------------
 
+
+; RING_NEXT_CUR: cur_dst += the VRAM line stride, wrapped in the 8160-byte ring.
+; Inlined at the blit sites: it is called once per ROW of every sprite and tile
+; blit (~214 times a frame), so the jsr/rts alone was ~2.5K cycles = 3.5% of a
+; busy 2-3 frame.
+.macro RING_NEXT_CUR
+    .local ok, wrap
+    lda cur_dst
+    clc
+    adc #VRAM_STRIDE
+    sta cur_dst
+    lda cur_dst+1
+    adc #0
+    sta cur_dst+1
+    cmp #$5F
+    bcc ok
+    bne wrap
+    lda cur_dst
+    cmp #$E0
+    bcc ok
+wrap:
+    lda cur_dst
+    sec
+    sbc #$E0
+    sta cur_dst
+    lda cur_dst+1
+    sbc #$1F
+    sta cur_dst+1
+ok:
+.endmacro
 ; ---------------------------------------------------------------------------
 ; sprite_blit_subpx: transparent sprite blit at a SUB-PIXEL X (spr_subx = 0..3),
 ; with optional horizontal flip (do_flip). Each row's 2 source bytes are shifted
@@ -10076,12 +10113,8 @@ hf_n1:       .res 1
     lda s0
     beq @a1                      ; wholly transparent byte -> mask 0 -> dst untouched
     sta tmp_src
-    lsr
-    ora tmp_src
-    and #$55                     ; M(src), inlined (same spread the slow path uses)
-    sta tmp_mask
-    asl
-    ora tmp_mask
+    tax
+    lda MASKTAB,x                ; M(src) from the table (docs: shtab_hi page 0)
     eor #$FF
     and (cur_dst),y
     ora tmp_src
@@ -10091,12 +10124,8 @@ hf_n1:       .res 1
     lda s1
     beq @a2
     sta tmp_src
-    lsr
-    ora tmp_src
-    and #$55
-    sta tmp_mask
-    asl
-    ora tmp_mask
+    tax
+    lda MASKTAB,x
     eor #$FF
     and (cur_dst),y
     ora tmp_src
@@ -10109,9 +10138,32 @@ hf_n1:       .res 1
     bcc @anoc
     inc cur_src+1
 @anoc:
-    jsr ring_next_cur
+    lda cur_dst                  ; ring advance, INLINED: once per ROW of every
+    clc                          ; blit (~214 a frame), so jsr/rts alone was ~2.5K
+    adc #VRAM_STRIDE             ; cycles = 3.5% of a busy 2-3 frame
+    sta cur_dst
+    lda cur_dst+1
+    adc #0
+    sta cur_dst+1
+    cmp #$5F
+    bcc @rnaok
+    bne @rnawr
+    lda cur_dst
+    cmp #$E0
+    bcc @rnaok
+@rnawr:
+    lda cur_dst
+    sec
+    sbc #$E0
+    sta cur_dst
+    lda cur_dst+1
+    sbc #$1F
+    sta cur_dst+1
+@rnaok:
     dec blit_row
-    bne @arow
+    beq @adone                   ; (the inlined ring advance outgrew a relative
+    jmp @arow                    ;  branch)
+@adone:
     rts
 @row:
     lda do_flip
@@ -10153,47 +10205,15 @@ hf_n1:       .res 1
 @masks:
     lda blit_opaque
     bne @merge                   ; opaque: masks preset
-    lda s0                       ; transparency: M(shifted), inlined — M spreads each
-    beq @z0                      ; nonzero 2-bit pixel to a full 2-bit mask and
-    sta tmp_src                  ; commutes with the 2-bit-aligned shift. A wholly
-    lsr                          ; transparent byte masks to 0, so both the spread
-    ora tmp_src                  ; and its merge below are skipped -- sprite edges
-    and #$55                     ; and the spill byte are empty most rows.
-    sta m0
-    asl
-    ora m0
-    sta m0
-    bra @k1
-@z0:
-    stz m0
-@k1:
-    lda s1
-    beq @z1
-    sta tmp_src
-    lsr
-    ora tmp_src
-    and #$55
+    ldx s0                       ; transparency: M(shifted) straight from MASKTAB.
+    lda MASKTAB,x                ; A wholly transparent byte masks to 0, and its
+    sta m0                       ; merge below is skipped -- sprite edges and the
+    ldx s1                       ; spill byte are empty on most rows.
+    lda MASKTAB,x
     sta m1
-    asl
-    ora m1
-    sta m1
-    bra @k2
-@z1:
-    stz m1
-@k2:
-    lda s2
-    beq @z2
-    sta tmp_src
-    lsr
-    ora tmp_src
-    and #$55
+    ldx s2
+    lda MASKTAB,x
     sta m2
-    asl
-    ora m2
-    sta m2
-    bra @merge
-@z2:
-    stz m2
 @merge:
     ldy #0                       ; dst = (dst & ~mask) | shifted
     lda m0
@@ -10225,7 +10245,29 @@ hf_n1:       .res 1
     sta cur_src
     bcc :+
     inc cur_src+1
-:   jsr ring_next_cur            ; dst += stride, ring-wrapped (docs/27)
+:
+    lda cur_dst                  ; ring advance, INLINED: once per ROW of every
+    clc                          ; blit (~214 a frame), so jsr/rts alone was ~2.5K
+    adc #VRAM_STRIDE             ; cycles = 3.5% of a busy 2-3 frame
+    sta cur_dst
+    lda cur_dst+1
+    adc #0
+    sta cur_dst+1
+    cmp #$5F
+    bcc @rnbok
+    bne @rnbwr
+    lda cur_dst
+    cmp #$E0
+    bcc @rnbok
+@rnbwr:
+    lda cur_dst
+    sec
+    sbc #$E0
+    sta cur_dst
+    lda cur_dst+1
+    sbc #$1F
+    sta cur_dst+1
+@rnbok:
 :   dec blit_row
     beq @out
     jmp @row
@@ -10388,7 +10430,29 @@ HUD_SPLIT_LINE = 16              ; timer reload = split scanline (IPeriod=256 cy
     sta cur_src
     bcc :+
     inc cur_src+1
-:   jsr ring_next_cur            ; dst += stride, ring-wrapped (docs/27)
+:
+    lda cur_dst                  ; ring advance, INLINED: once per ROW of every
+    clc                          ; blit (~214 a frame), so jsr/rts alone was ~2.5K
+    adc #VRAM_STRIDE             ; cycles = 3.5% of a busy 2-3 frame
+    sta cur_dst
+    lda cur_dst+1
+    adc #0
+    sta cur_dst+1
+    cmp #$5F
+    bcc @rncok
+    bne @rncwr
+    lda cur_dst
+    cmp #$E0
+    bcc @rncok
+@rncwr:
+    lda cur_dst
+    sec
+    sbc #$E0
+    sta cur_dst
+    lda cur_dst+1
+    sbc #$1F
+    sta cur_dst+1
+@rncok:
 :   dex
     bne @row
     rts

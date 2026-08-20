@@ -1038,12 +1038,16 @@ vbox:                            ; GB phys byte1 per type (docs/12 table)
     inc o_xl,x
     bne :+
     inc o_xh,x
-:   lda o_xl,x                   ; a screen-width past the camera: gone (the
-    sec                          ; engine's draw clips the approach margin)
-    sbc cam_x
-    lda o_xh,x
-    sbc cam_x+1
-    beq @foe
+:   lda o_xl,x                   ; past the screen: GONE. This used to keep the
+    sec                          ; fish until it was 256px past the camera (the
+    sbc cam_x                    ; 16-bit high byte), so three of them sat OFF
+    tay                          ; SCREEN being simulated and drawn -- GB-vs-port
+    lda o_xh,x                   ; differential, 2026-08-20: GB had 2 objects
+    sbc cam_x+1                  ; where the port had 6, all of the extras
+    bne @gone                    ; invisible past the right edge.
+    cpy #176                     ; screen is 160 wide; the GB drops them just past
+    bcc @foe
+@gone:
     stz o_type,x
     rts
 @foe:
