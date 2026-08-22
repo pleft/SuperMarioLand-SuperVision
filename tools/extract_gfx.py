@@ -153,6 +153,16 @@ def main():
         creat += decode_tiles(d, off, 1)
     with open(os.path.join(out, "creature23.svt"), "wb") as f:
         f.write(sv_pack(creat))
+    # 2-3's BOSS SHOT (Dragonzamasu's ball). The arena runs a SECOND 256-tile
+    # OBJ sheet -- bank 2, file 0x8032 + tile*16, exactly one bank above the
+    # common sheet (0x4032) and the same sheet the rescue moth comes from. So
+    # the ball is NOT the $E2/$E3 of the common $8000 sheet: those bytes are a
+    # striped BG pattern, which is what the port was drawing. OAM-measured in
+    # the arena: tiles $E2/$E3 alternate every 4 frames ($FE = a blank tile,
+    # the 3 frames the shot spends inside his mouth).
+    dsh = decode_tiles(d, 0x8032 + 0xE2 * 16, 2)
+    with open(os.path.join(out, "dshot23.svt"), "wb") as f:
+        f.write(sv_pack(dsh))
     # 3-3's rescue creature: same 2x2 metasprite ($A0/$A1/$B0/$B1, x-flipped
     # pair), sourced from WORLD 3's bank -- VRAM-dumped at 3-3's state $26 and
     # byte-matched to bank 3 0xC032 (tops) / 0xC132 (bottoms).

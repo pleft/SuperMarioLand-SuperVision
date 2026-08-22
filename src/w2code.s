@@ -395,14 +395,14 @@ w2_rts:
     lda o_st,x
     bne @notup
     lda o_tmr,x                  ; UP
-    cmp #52
-    bcs :+
-    lda #2
-    bra @up
-:   cmp #59
-    bcs :+
-    lda #1
-    bra @up
+    cmp #52                      ; NOTE: 2-3's honen DOES bob, like 2-1/2-2's --
+    bcs :+                       ; rise, fall, REST on its base line, repeat. A
+    lda #2                       ; 130-frame capture showed only the first leap
+    bra @up                      ; and led to a "single leap, no bob" rewrite that
+:   cmp #59                      ; was wrong and user-visible. Over 300+ frames the
+    bcs :+                       ; GB reads 166 -> 54 -> 168 -> 168,168,168 (the
+    lda #1                       ; rest) -> 148 -> 55 -> ... Measure a full CYCLE
+    bra @up                      ; before concluding what a periodic enemy does.
 :   cmp #62
     bcc @tick                    ; hang (dy 0)
     lda #1                       ; -> DOWN
@@ -702,6 +702,14 @@ w2_rts:
 .segment "W2FAR"
 .endif
 .ifndef EAS3                     ; W3 spawns neither $10 nor $24
+.ifdef MAR23
+.proc w2_width23                 ; every 2-3 body: 16 wide, 16 tall
+    lda #$83
+    rts
+.endproc
+
+                        ; on the GB's own box (which IS the object).
+.endif
 .proc draw_leap
     lda #LEAP_TA
     ; falls through
@@ -715,7 +723,11 @@ w2_rts:
     asl
     clc
     adc tmpH3
-    sta tmpH3                    ; this flap frame's TL tile
+    ; falls through with A = this flap frame's TL tile
+.endproc
+.proc draw_16q_f                 ; A = the FINAL TL tile. Same quad, but NO flap:
+    sta tmpH3                    ; for sprites whose animation is not foe_frame's
+    ldx oi                       ; 16-frame wing beat (tamao's is a GB-measured 30)
     lda o_hp,x                   ; facing: +1 = Mario is right -> mirror
     and #$80
     eor #$80                     ; $80 -> 0 (left, native); 0 -> $80 (flip)
@@ -843,8 +855,7 @@ w2_nop: rts                      ; dead dispatch rows (corpse types unused)
     rts
 :   cpy #OBJ_SUBV
     bcc @wbase23                 ; honen/leap/wball keep the shared rows
-    lda #$83                     ; every 2-3 body: 16 wide, 16 tall
-    rts
+    jmp w2_width23               ; the 2-3 bodies (W2FAR: the window is full)
 @wbase23:
 .endif
 .ifdef YUR22

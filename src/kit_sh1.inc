@@ -1,5 +1,16 @@
 ; cull once the camera passes 20px beyond (the walker rule)
 .proc l3_cull                    ; C=1 -> culled (slot freed)
+.ifdef MAR23
+    lda o_y,x                    ; VERTICAL cull, BOTH ways. 2-3's enemies leave
+    cmp #168                     ; the screen downward (the honen's leap) and
+    bcs @cull                    ; upward (the torion aims at Mario), and o_y is
+    cmp #8                       ; a BYTE: off the bottom it runs past 255 and
+    bcc @cull                    ; wraps; off the top it hits 0 and wraps the
+.endif                           ; other way, in ONE step. Either way the enemy
+                                 ; re-enters from the
+                                 ; TOP and falls forever. Found twice by the
+                                 ; anomaly sweep (honen, then torion at visual
+                                 ; y 263) -- the second one nobody had noticed.
     lda o_xl,x
     clc
     adc #20

@@ -256,9 +256,33 @@ def main():
                 # a negative id = x-mirror the tile in python)
                 W2_TILES += [0xA0,0xA1,0xB0,0xB1,
                              0xA8,0xA9, 0xB8,0xB9,
-                             0xAA,-0xAA, 0xAB,-0xAB,
-                             0xAE,0xAF,0xBE,0xBF, 0xCE,0xCF,0xBC,0xBD]
+                             # TAMAO is four copies of ONE tile: the GB's OAM in
+                             # the arena reads $aa at all four quadrants (it flips
+                             # them). $AB is a DIFFERENT, arc-shaped tile -- using
+                             # it drew arcs where the GB has a round ball.
+                             0xAA, -0xAA, 0x1_00AA, 0x2_00AA,
+                             # the dragon's MOUTH-OPEN frame (GB OAM: $AE/$AF,
+                             # $BE/$BF, $CE/$CF, $BC/$BD -- 25 of every 64 frames)
+                             0xAE,0xAF,0xBE,0xBF, 0xCE,0xCF,0xBC,0xBD,
+                             # his SHOT is a single 8x8 BALL, and it does NOT come
+                             # from this sheet: the arena runs a second OBJ sheet
+                             # (extract_gfx: dshot23.svt). $E2/$E3 of the COMMON
+                             # sheet are a striped BG pattern -- the "graphics mess"
+                             # the user photographed. Alternates every 4 frames.
+                             'DSH0', 'DSH1',
+                             # tamao frame B: four flips of GB $AB (frame A above is
+                             # $AA); the pair alternates every 30 frames.
+                             0xAB, -0xAB, 0x1_00AB, 0x2_00AB,
+                             # the dragon's REST frame (GB $BA/$BB, $CA/$CB, $DA/$DB,
+                             # $CC/$CD -- the other 39 of the 64). The port shipped
+                             # only the mouth frame, so he never animated.
+                             0xBA,0xBB,0xCA,0xCB, 0xDA,0xDB,0xCC,0xCD]
             OVL_LO = 0xA4
+            def _vfl(td):                  # vertical flip: reverse the row order
+                out = bytearray()
+                for r in range(7, -1, -1):
+                    out += td[r*2:r*2+2]
+                return bytes(out)
             def _mir(td):
                 # SV 2bpp: 2 bytes/row, 4 px/byte -> mirror = swap bytes +
                 # reverse the 2-bit groups within each
@@ -268,9 +292,22 @@ def main():
                         return ((b & 3) << 6) | ((b >> 2 & 3) << 4) | ((b >> 4 & 3) << 2) | (b >> 6 & 3)
                     out += bytes((rev(td[r*2+1]), rev(td[r*2])))
                 return bytes(out)
+            _obj8000 = open("build/gfx/w2_obj_8000.svt", "rb").read()
+            _dsh = open("build/gfx/dshot23.svt", "rb").read()
             def _tile(t):
-                td = w2_ovl1[(abs(t)-0xA0)*16:(abs(t)-0xA0+1)*16]
-                return _mir(td) if t < 0 else td
+                if t == 'DSH0': return _dsh[0:16]     # the arena's own OBJ sheet
+                if t == 'DSH1': return _dsh[16:32]
+                flags = (t >> 16) if t > 0 else 0     # 1 = vflip, 2 = h+v flip
+                a = (t & 0xFFFF) if t > 0 else -t
+                if 0xA0 <= a <= 0xDC:          # the $8A00 overlay (61 tiles)
+                    td = w2_ovl1[(a-0xA0)*16:(a-0xA0+1)*16]
+                else:                          # anything else comes from the BASE
+                    td = _obj8000[a*16:(a+1)*16]   # $8000 sheet (all 256 tiles) --
+                assert len(td) == 16, f"tile ${a:02X} not in any source sheet"
+                if t < 0:      td = _mir(td)        # the dragon's shot ($E3/$FE)
+                if flags == 1: td = _vfl(td)        # lives in the base sheet, not
+                if flags == 2: td = _vfl(_mir(td))  # in the overlay
+                return td
             sl = b"".join(_tile(t) for t in W2_TILES)
             assert len(sl) == len(W2_TILES)*16
             quad_base = addr - OVL_LO*16
@@ -339,11 +376,11 @@ def main():
         # the L13E room machine copies it over the moth tiles (main.s @pdone)
         creat = open("build/gfx/creature23.svt", "rb").read()
         assert len(creat) == 128, "creature23.svt must be 8 tiles (128B)"
-        coff = 5 * STRIDE + 0xBF00 - BASE
+        coff = 5 * STRIDE + 0xBF80 - BASE
         assert all(b == 0xFF for b in img[coff:coff + 128]), \
-            "bank 5 $BF00 not free for the creature sheet"
+            "bank 5 $BF80 not free for the creature sheet"
         img[coff:coff + 128] = creat
-        print(f"pack_banks: 2-3 kit in its own bank; creature (128B) -> bank 5 $BF00")
+        print(f"pack_banks: 2-3 kit in its own bank; creature (128B) -> bank 5 $BF80")
     if w3_jobs:
         pack_w3(img, sym, prefix, l11)
     open(img_path, "wb").write(bytes(img))
