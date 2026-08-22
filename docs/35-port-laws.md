@@ -181,3 +181,137 @@ it was FREED before its turn and looked like a plain right-to-left swim.
   then enter the clear state directly (`$ffa6 = $F0`, `$ffb3 = $07`).
 - **Autoplay assist**: `$C0D3 = $F8` (star), `$DA15 = 5` (lives), and lift
   Mario when `$C201 > 0x96` so pits do not end the run.
+
+**E11. Verify on the REAL core, driving the game's own level select.** The py65
+harness cannot see the NMI, the raster IRQ or the LCD (E3/E9), and the old gold
+gate lived in `/tmp` and evaporated. `tools/svshot.c` runs the real Potator core
+(N taps of SELECT = level N, then START), dumps sampled framebuffers AND 8K of
+RAM per sample, and takes an input script (`"R150,U80,D120"`) so the port and a
+PyBoy GB run can be driven by the SAME input and compared frame for frame.
+`tools/svgold.sh` is the gold gate rebuilt on top of it -- levels 0-8, hashed.
+This is what finally reproduced "mario dies unexpectedly" and "the sub
+disappears" without a playtest.
+
+**E12. Compare the DRAWN sprite, not the state variable.** Every coordinate
+claim in this project that turned out wrong came from trusting a variable's
+name. The GB's OAM ($FE00, y-16/x-8) is hardware truth for where a sprite IS;
+the port's equivalent is the object's `o_x - cam_x` and `o_y + 8`. Cut a
+template out of one side's frame and search for it in the other's -- an
+exact-zero match proves the art is identical and pins the offset. That is how
+the Marine Pop's 2px and the school fish's 16px were measured.
+
+## G. The frame: GB coordinates -> port coordinates
+
+Established for 2-3 by OAM measurement (2026-08-20) and true wherever a kit
+transcribes GB constants. **Get this right BEFORE porting a level's player.**
+
+```
+GB $c202 = hull/sprite LEFT  + 15        port spr_x = sprite LEFT  + 7 (kit) 
+GB $c201 = hull/sprite TOP   + 22        port spr_y = sprite TOP       (engine)
+```
+
+- **A probe offset does NOT carry across unchanged.** The GB writes `$ffad =
+  c201 + d` and reads the tile row `($ffad - 16) >> 3`, so the screen y it tests
+  is `spr_y + d + 6`. The port's `vrowset` tests the row containing the y it is
+  given. Passing `spr_y + d` reads ONE TILE ROW HIGH -- 2-3 shipped that way in
+  all three probes (h/up/down).
+- **Clamp constants must be converted through the same frame**, then checked in
+  pixels: hold each direction for 260 frames on the GB and read OAM. 2-3's true
+  box is hull left [-1, 145], hull top [25, 126]. The kit had [1,145] x [34,134]
+  -- the sub could sink 6px into the seabed and could not reach the ceiling.
+- **A "clamp" in the GB source may not be the reachable limit.** 2-3's left step
+  decrements twice while the autoscroll runs and only the FIRST dec is guarded
+  ($5008 vs $5012), so the reachable minimum is 2 below the stated $10.
+
+**E13. PyBoy hooks fire only at CALL/JUMP TARGETS, not on every PC match.**
+Proved by probing every instruction of one routine: `$09f1` (a call target)
+fired 9 times while `$09f4`, `$09f5`, `$09f6`, `$09f8`, `$09fa`, `$0a04`,
+`$0a09` and `$0a0f` -- all inside it, with no branch between them -- fired ZERO.
+The same effect earlier made `$515e` fire and `$5161` not, which I wrote off as
+noise.
+
+Consequences, both of which bit in this session:
+- You CANNOT trace control flow inside a routine with hooks. "I hooked the
+  branch targets and the damage path runs" is not evidence; only the entry is.
+- A hook CAN read registers (`pyboy.register_file.HL`) and memory at the moment
+  it fires, which is how the enemy slot behind a collision was finally
+  identified ($d113 = slot 1's x byte).
+
+For anything mid-routine use a real debugger with watchpoints (mGBA/SameBoy --
+see [[re-dynamic-trace-lesson]]), or hook the entry and re-derive the rest from
+memory state.
+
+**E14. A sprite's TILES must be read from OAM, and OAM must be printed WHOLE.**
+Every sprite in 2-3's boss arena was drawn with tiles the port had guessed
+(docs/40): the dragon's shot was three rows of his own torso, tamao was two
+halves of two different tiles, and the dragon had only one of his two frames.
+The single capture that fixed all of it printed y, x, TILE and ATTR for all 40
+OAM slots -- and the attrs (`04/22/40/62` on one 16x16) are what proved tamao is
+one tile flipped four ways rather than four tiles. An earlier partial dump in
+the same session, printing only what I came for, read every id one off and I
+believed it. Print every field.
+
+**E15. VRAM is not the sheet you extracted.** The arena's `$E2/$E3` are a
+striped BG pattern in the common OBJ sheet -- the port drew exactly those
+stripes. The real ball lives in a SECOND 256-tile OBJ sheet (bank 2 file
+`0x8032`, one bank above the common `0x4032`). Before sourcing a tile, dump the
+GB's live VRAM at the moment it is on screen and byte-search the ROM for it: the
+match is unique, and it names the bank and offset for the extractor. Never
+assume the sheet you already have covers a new scene.
+
+**E16. Check what the shared draw helper does to your tile id.** `draw_16q`
+silently adds `foe_frame*4` (a 16-frame wing flap). Passing it a base whose
+animation is driven some other way lands 4 tiles further on -- for tamao, inside
+the dragon. If a sprite's cadence is not the helper's cadence, take the helper's
+no-animation entry point.
+
+
+**E17. Every bank switch must use `set_bank`'s encoding: a PLAIN bank number.**
+Under MAGNUM `$2021` bits 3:0 are the page and the page number IS the bank
+number (docs/37). One inlined copy still wrote the pre-MAGNUM SYS_CTRL layout,
+`(bank << 5) | sysflags`, so its bits 3:0 carried the FLAGS and it mapped page
+11 -- which does not exist in a 256K image. The reads came back `$FF`, and the
+2-3 rescue's fake Daisy rendered as a solid black square for months. When a
+banking scheme changes, grep every writer of the register, not just the routine
+you renamed: `sta LINK_DDR` had three callers and one was stale.
+
+**E18. A sprite's DRAW origin and the engine's erase origin are two different
+conventions -- check which one the draw helper actually honours.** The engine's
+law is "visual top = `o_y` + 8" (`o_ndy`), and `draw_dshot` adds the 8 by hand.
+`draw_subv` does not: its quad table is `0,0,8,8`, so its `o_y` IS the drawn top.
+The sub's `o_y` was being set as if the law applied, and the hull floated a tile
+above where the GB draws it -- for long enough that a correct torpedo height
+looked like the bug. To settle where a sprite is really drawn, match its own ROM
+tiles against the framebuffer (diff 0 at a known offset); ink-row extents are not
+frame-stable and will mislead by a few px.
+
+**E19. A time-integrating accumulator must know every state that FREEZES the
+thing it drives.** 2-3's autoscroll banks elapsed frames so the camera keeps the
+GB's exact 0.5 px/frame across an irregular game loop. `mario_grow` freezes the
+action for 80 frames and the GB scrolls none of them -- so the accumulator
+banked all 80 and spent them the instant the sub finished growing: a 41px camera
+jump in one frame, with the background 5 tiles behind the collision map. Clamp
+the elapsed delta (2 = a dropped frame still compensates, a freeze cannot bank),
+and never let the accumulator apply its surplus by writing the driven variable
+DIRECTLY -- the caller's step is usually a protocol (here: cam_x, the spr_x
+give-back, and the background column fed off that move), and bypassing it moves
+the map without drawing the picture. No scripted run in a whole session of
+captures ever grew, shrank, or paused; only a human picking up a mushroom found
+it. When you add an accumulator, enumerate the freezes.
+
+
+**E20. Anything that CLIPS on one side must clip on the other.** `restore_bg`
+refuses to blit past tile col 24 (the 48-byte framebuffer row); `draw_player`
+had no such check and folded mod 48 back into view. A sprite parked off-row --
+2-3's crush death sits at x 240, the GB's wrapped `c202 >= $ED` -- therefore drew
+every frame at x 48 with no erase behind it, painting a solid column up the
+screen. Erase and draw must agree on the clip, or the difference IS the bug.
+
+**E21. Two build flavours must share no artifacts.** `GODMODE=1` only changes
+`ASFLAGS`, invisible to the `.o` rules, so incremental builds mixed objects, and
+a `godmode` target writing the shared ROM name left godmode content in the
+normal file. Give each flavour its own object dir and its own output name
+(`build/god/`, `-god.sv`); then both stay incremental and neither can be the
+other. And verify a test build BEHAVIOURALLY on a path that the flag actually
+changes -- 1-1's hold-right death is a PIT, which never calls `hurt_mario`, so it
+"passes" identically on both.
