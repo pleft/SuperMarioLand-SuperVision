@@ -2284,10 +2284,19 @@ quad_rows: .byte 0, 0, 8, 8
     ldy ending13                 ; the fake Daisy's creature is per WORLD: 1-3
     dey                          ; keeps the moth already in RAM; 2-3 and 3-3
     beq @w1moth                  ; overwrite those tiles from their own sheets
-    lda #(5 << 5) | (SYSCTRL_NMI_EN | SYSCTRL_TIMER_IRQ | SYSCTRL_LCD)
-    ldx #<$BF00                  ; 2-3: its own bank ($BF00)
-    stx tmpL
-    ldx #>$BF00
+    lda #5                       ; the SOURCE bank, in set_bank's encoding: under
+                                 ; MAGNUM $2021 takes the PAGE NUMBER, which IS the
+                                 ; bank number (docs/37), and its bits 3:0 are the
+                                 ; whole field. This used to write (5<<5)|sysflags
+                                 ; -- the pre-MAGNUM SYS_CTRL layout -- so bits 3:0
+                                 ; carried the FLAGS ($B) and it mapped page 11,
+                                 ; which does not exist in a 256K image: the reads
+                                 ; came back $FF and the fake Daisy turned into a
+                                 ; solid BLACK SQUARE. 3-3's arm below always wrote
+                                 ; a plain 6, which is why only 2-3 was affected.
+    ldx #<$BF80                  ; 2-3: its own bank ($BF80 -- the sheet sits in
+    stx tmpL                     ; the last 128B so the level's tile slice, which
+    ldx #>$BF80                  ; grows from below, can use everything under it)
     dey
     beq :+
     lda #6                       ; MAGNUM page 6 = the W3 data bank (docs/37)
@@ -5935,13 +5944,48 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     tay
     lda spawn_tab+1,y          ; fire_cam hi ($FF = end of table)
     cmp #$FF
-    beq @done
+    bne @chk
+@ret:                            ; (a local return: @done is now out of branch
+    rts                          ;  range past the type dispatch below)
+@chk:
+    ; The GB fires an entry when its object is 192px AHEAD of the camera, and
+    ; spawn_tabx lands the object at fire + 192 + off*4 -- so the trigger is
+    ; fire + off*4, not fire. Measured on 2-3: the spitter and the honen both
+    ; fired 8px of camera EARLY (off = 2), which put the honen's leap 15 frames
+    ; out of phase and dropped it on Mario's head. (tmpL/tmpH are free here:
+    ; spawn_check's own handlers clobber them anyway.)
+    lda cur_level                ; GATED TO 2-3 (see below): the rule is measured
+    cmp #5                       ; on the GB, but only in 2-3, and the walking
+    beq @lead                    ; gold shows it moves 1-1, 2-2 and 3-1 as well.
+    lda spawn_tab,y              ; Ungated it is very probably right everywhere --
+    sta tmpL                     ; it is the GB's own spawner -- but twice today
+    lda spawn_tab+1,y            ; a rule measured in one context turned out not
+    sta tmpH                     ; to generalise, so those levels keep the old
+    bra @cmp                     ; timing until each is measured. See docs/38.
+@lead:
+    lda spawn_tab+4,y          ; off*4, mirroring spawn_tabx byte for byte
+    asl
+    asl
+    clc
+    adc #15                      ; ...+15: o_x is the object's VISUAL x and the
+    clc                          ; GB fires when THAT is 177px ahead. Measured by
+    adc spawn_tab,y              ; keying every spawn in the level on the CAMERA
+                                 ; instead of the frame: with +8 every enemy fired
+                                 ; at dcam = -7 exactly (spitter, torion, gunion,
+                                 ; tamao, the dragon), so the trigger was a uniform
+                                 ; 7px early.
+    sta tmpL
+    lda spawn_tab+1,y
+    adc #0
+    sta tmpH
+@cmp:
+    lda tmpH
     cmp cam_x+1
     bcc @fire
-    bne @done
-    lda spawn_tab,y
+    bne @ret
+    lda tmpL
     cmp cam_x
-    bcs @done                    ; STRICT: fires only once the camera passes the column
+    bcs @ret                     ; STRICT: fires only once the camera passes it
 @fire:
     lda spawn_tab+3,y          ; type: Chibibo $00, Nokobon $04, Fly $0E, Bunbun $42,
     beq @chib                  ; stone $36, moving platforms $0A/$0B
@@ -6917,6 +6961,12 @@ fly_dy:
 ; hurt_mario: shared side-contact/explosion damage (RE: big -> shrink flash + powers
 ; lost + mercy blink; small -> death). Respects mercy/grow/shrink windows.
 .proc hurt_mario
+.ifdef GODMODE                   ; TEST BUILDS ONLY (make GODMODE=1): lets a run
+    rts                          ; traverse the whole level so behaviour can be
+.endif                           ; watched instead of fought. The GB side gets the
+                                 ; SAME treatment (scratchpad/sml_iddqd3.gb) so the
+                                 ; comparison stays fair -- see [[iddqd-rom-trap]]:
+                                 ; never ask an invincible build about DEATHS.
     lda hurt_inv
     ora mario_grow
     ora mario_shrink
@@ -8334,9 +8384,18 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     inc tmpH
 :   lda tmpH
     bne @p1vis0
-    lda tmpL
-    cmp #168
-    bcs @p1vis0
+    lda tmpL                     ; tmpL is the RING pixel column (screen x +
+    cmp #177                     ; scroll_s), and scroll_s runs 0..31 -- so a cut
+    bcs @p1vis0                  ; at 168 slides up to 31px LEFT of the screen's
+                                 ; right edge and drops sprites that are FULLY
+                                 ; visible. Measured on the real core: the Marine
+                                 ; Pop parked at its right clamp (screen x 144)
+                                 ; vanished for 17 and 12 frame stretches while
+                                 ; the GB drew it throughout. 168 was 192 - 24, a
+                                 ; blanket guard for the widest sprite's blit;
+                                 ; blit_tile/blit_blank now clip at the row end
+                                 ; themselves, so the cut can sit at 176, which
+                                 ; covers every fully-visible position (144 + 31).
     ldx oi
     lda o_y,x                    ; dy clip 16..152
     clc
@@ -8486,9 +8545,16 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     jmp @p4
 :   lda m_dirty
     beq @out
-    jsr draw_player
-    lda mario_vx
-    sta prev_vx
+    lda mario_vx                 ; PAST the 48-byte framebuffer row (24 tile cols)?
+    cmp #192                     ; Then skip the draw. restore_bg clips at that same
+    bcs :+                       ; limit, so no erase can ever follow such a draw --
+    jsr draw_player              ; while the draw itself folds mod 48 bytes and lands
+:   lda mario_vx                 ; back in the VISIBLE part of the row. 2-3's crush
+    sta prev_vx                  ; death parks Mario at x 240 (the GB's c202 >= $ED
+                                 ; is a WRAPPED negative: he is off the LEFT edge),
+                                 ; so every frame of the death hop stamped an
+                                 ; un-erasable copy at x 48 and the hop drew itself
+                                 ; a solid column up the middle of the screen.
     lda spr_y
     sta prev_y
     lda mario_frame
@@ -8499,6 +8565,7 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     sta prev_vis
 @out:
     rts
+
 ; @spread: one propagation round -- every dirty sprite's OLD rect vs every clean drawn
 ; sprite's OLD rect (coarse boxes: |dx|<32, |dy|<28); hits become dirty. Mario included.
 @spread:
@@ -8611,6 +8678,9 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
 ; p4_one: draw slot X=oi and record its drawn state (position, erase width,
 ; anim token). In the LEVELS prefix, not FIXED: render_all only ever runs with a
 ; level bank mapped, and FIXED had no room left for the pass-3 rework.
+
+
+
 .segment "LEVELS"
 .proc p4_one
     lda o_nvx,x
@@ -9796,6 +9866,7 @@ hud_go:      .res 1          ; hud_check verdict: NMI must latch + repaint
 hf_col:      .res 1          ; NMI HUD-copy: view byte col / row counter / seam n1
 hf_row:      .res 1
 hf_n1:       .res 1
+
 .segment "CODE"
 
 ; build_shtab: the sub-pixel shift/mask tables — for every byte b and subx k:
@@ -10384,6 +10455,11 @@ HUD_SPLIT_LINE = 16              ; timer reload = split scanline (IPeriod=256 cy
 ; blit_blank: zero-fill one tile cell at dst_ptr (tile $2C = sky, bytes all $00).
 ; Same addressing as blit_tile but no source reads -- the erase fast path.
 .proc blit_blank
+    lda dcol                     ; past the 48-byte ring row? set_dst's mod would
+    cmp #48                      ; put this on the NEXT scanline. restore_bg has
+    bcc @go                      ; guarded its erase like this all along; the DRAW
+    rts                          ; never did, which is why the pass-1 cull had to
+@go:                             ; sit at 168 = 192 - 24 and swallow sprites in the
     lda dst_ptr
     sta cur_dst
     lda dst_ptr+1
@@ -10408,6 +10484,11 @@ HUD_SPLIT_LINE = 16              ; timer reload = split scanline (IPeriod=256 cy
 .endproc
 
 .proc blit_tile
+    lda dcol                     ; past the 48-byte ring row? set_dst's mod would
+    cmp #48                      ; put this on the NEXT scanline. restore_bg has
+    bcc @go                      ; guarded its erase like this all along; the DRAW
+    rts                          ; never did, which is why the pass-1 cull had to
+@go:                             ; sit at 168 = 192 - 24 and swallow sprites in the
     lda src_ptr
     sta cur_src
     lda src_ptr+1
