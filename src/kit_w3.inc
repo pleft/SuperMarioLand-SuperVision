@@ -54,6 +54,7 @@ W3FLG    = $0B                   ; NMI | TIMER_IRQ | LCD (load_level's mask)
 CX_CTX     = $1C60               ; the context: +0 act +1 dcol0 +2 dy0 +3 cols
                                  ; +4 rows +5 fb_col0 snapshot +8 saved[144]
 CX_OWN     = $1FE0               ; composing slot + 1 (0 = free)
+CX_EN      = $1FE1               ; nonzero = the composer is enabled (init: 0)
 CX_TILES   = $1FA0               ; 4 x 16B final tile pixels
 CXA_DCOL0  = $01C6               ; the aux ABI block (w3aux.s AXV_*)
 CXA_DY0    = $01C7
@@ -632,8 +633,14 @@ CXS_T4     = $0152
     stz CXA_REL                  ; dispatch (docs/42). The walk and the stash
     lda #6                       ; are BANK-6-RESIDENT (W3X); the composer is
     jsr w3_bank                  ; PAGE-8-RESIDENT (w3aux).
-    jsr w6_elig                  ; C=1: stashed -> compose; C=0: plain draw
-    bcs @comp
+    lda CX_EN                    ; COMPOSE DISABLED BY DEFAULT (docs/42): one
+    beq @plain                   ; context protects one rarely-watched object
+    jsr w6_elig                  ; while the claim/release churn among
+    bcs @comp                    ; overlapping rollers costs ~45 logic frames
+                                 ; in the tokotoko zone (user-caught: "no
+                                 ; improvement + slowdown"). The machinery
+                                 ; stays for the group-compose evolution;
+                                 ; set CX_EN nonzero to re-enable.
     lda CXA_REL                  ; we owned a context and lost eligibility:
     beq @plain                   ; write its saved bg back first, then draw
     lda #8                       ; the old way

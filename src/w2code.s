@@ -70,6 +70,7 @@ init:                            ; $1500: bind our vector table
     stz W3CMB                    ; a fresh level starts with an empty column cache
     stz CX_CTX                   ; and no composed context (docs/42): the window
     stz CX_OWN                   ; copy just filled $1C60+ with blob padding
+    stz CX_EN                    ; composer OFF by default (docs/42)
     jmp w3_cinval
 .else
     rts
