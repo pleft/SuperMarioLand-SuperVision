@@ -110,3 +110,33 @@ renderer needs NO map at all:
 - Code homes: phase A (display-list walk stores tile pixels + offsets to RAM)
   in a BANK-6 pin (1KB free there, mapped during the walk); phase B (the
   composer) in the AUX page; kit window only pays the dispatch seams.
+
+## HANDOFF (checkpoint, session end 2026-08-23)
+
+DONE + committed (4e01196): 512K default image; page-8 aux proven on the real
+core; the walk relocated to the W3X bank-6 pin ($BC00, window down to $6EB);
+the save-under composer (aux_compose/aux_uncompose) passes bit-exact py65
+unit tests (tools/test_aux.py: fresh / still+1px / moved-a-cell / uncompose).
+Battery 10/10, svgold 9/9 identical throughout. NOT wired in-game yet.
+
+NEXT (half 2 -- the stash + dispatch), with the decisions already made:
+- w6_elig (W3X): eligibility (not entangled; CX_OWN free/ours -- steal from a
+  dead owner without writeback; <=4 tiles; no behind tiles $87/$92/$EE; box
+  <=3x3 cells inside scanlines 16..159 and ring bytes 0..39 (stream margin));
+  prescan the list storing AXV box + AUX_TILES (flips applied at copy via
+  revpix/row-reverse); RING IDENTITY: dcol is ring-relative and the DMA shift
+  does NOT move ring_b (the pass-0 fold exists because of this) -- store
+  fb_col0 in ctx+5 at compose, and at stash adjust ctx.dcol0 by
+  (fb_col0 - ctx5)*2 bytes to absorb any missed shift frames.
+- w3_draw (window): w3_bank(A=page) helper; C=1 from w6_elig -> dance 8,
+  aux_compose; else if AXV_REL (we owned, lost eligibility) -> dance 8,
+  aux_uncompose first, then dance 6, plain walk. Budget ~+45B window
+  (cap $75F, now $6EB).
+- KEY OPEN QUESTION found at checkpoint: erase_slot has exactly ONE caller
+  (pass 3a, entangled-only). Singles apparently draw OVER their old image
+  (moves <=2px keep the quad self-covering?) -- verify how singles erase
+  before deciding whether composed objects can keep o_pdr=1 (which would let
+  the existing dead-slot leftover erase self-clean a dead composed object's
+  image; the plan currently assumes yes).
+- Then: gates + flickermeter delta (baseline: cannons 14/199, tokotoko
+  45/369, ganchan 2/26 flicker-frames) + stray sweep + ship.
