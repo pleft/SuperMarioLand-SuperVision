@@ -164,3 +164,29 @@ sets o_pdr=1 after every draw, so the composed dispatch must CLEAR it again
 (or return via a path that skips @wset) -- one stz in the window dispatch.
 The dirty budget applies to composed objects unchanged (fine: compose cost
 ~= old draw cost). Everything needed for the wiring is now known.
+
+## SHIPPED (v1, one context)
+
+Wired end to end: w6_elig (bank-6 W3X + W3X2 pins) prescans the display list,
+screens eligibility (ownership incl. dead-owner steal; 40px overlap radius vs
+every slot + Mario; <=4 tiles; no behind tiles; box <=3x3 inside scanlines
+16..159 and ring bytes 0..39; fb_col0 re-base with the stale-warp guard), and
+stashes the AXV box + final tile pixels; w3_draw dispatches compose (page 8)
+/ uncompose+plain; w3_step clears o_pdr for the composed slot each update.
+Two real bugs found by the gates: shtab page 0 is the W3 column cache (the
+identity shift must be computed, never read -- caught by poisoning the page
+in the unit test) and the fb ring seam at $5FE0 (row stepping now wraps like
+ring_next_dst -- caught by the stray sweep as a full-height garbage band).
+
+MEASURED: a composed object is blank 1/197 object-frames vs 82/394 (21%) for
+the plain pipeline -- the flicker is fully solved for whatever the context
+covers. ONE context = one protected object at a time (every RAM pool is
+exhausted; the window tail barely fits 152B). Stray sweeps: byte-identical
+event lists vs the pre-compose build (no new artifacts); battery 10/10;
+svgold 9/9 byte-identical; the roomscript was re-recorded via svauto (E23:
+replays die at every engine-speed change).
+
+NEXT for more coverage: a second context needs 152B of RAM from somewhere
+(candidates: shrink the W3 column cache to 8 slots = 128B, still short; or
+group-compose in the aux page, which also lifts the overlap restriction --
+the real endgame for crowds and for 2-3).

@@ -57,6 +57,10 @@ AXV_ORJ     = $01E0
 AXV_ACT     = $01E1              ; ctx active snapshot
 AXV_S       = $01E2              ; mix scratch
 AXV_MIX     = $01E3              ; mix target index
+AXV_SUB0    = $01E4              ; 1 = identity shift (dx&3==0): shtab page 0
+                                 ; is the W3 COLUMN CACHE (W3CDATA), not a
+                                 ; table -- compute s0/s1 directly
+AXV_REL     = $01E5              ; dispatch: lost ownership, uncompose first
 
 .segment "AUX"
 
@@ -165,6 +169,9 @@ AXV_MIX     = $01E3              ; mix target index
 .endproc
 
 ; ax_rd16: the VRAM cell at dst_ptr -> 16 bytes at (tmpL2). Clobbers tmpL3.
+; The fb is a RING of $1FE0 bytes ($4000-$5FDF): row stepping must wrap at
+; the seam like the engine's ring_next_dst (a straddling cell painted a
+; full-height garbage band -- caught by the stray sweep).
 .proc ax_rd16
     lda dst_ptr
     sta tmpL3
@@ -182,7 +189,8 @@ AXV_MIX     = $01E3              ; mix target index
     sta tmpL3
     bcc :+
     inc tmpH3
-:   lda tmpL2
+:   jsr ax_wrap
+    lda tmpL2
     clc
     adc #2
     sta tmpL2
@@ -217,8 +225,48 @@ AXV_MIX     = $01E3              ; mix target index
     sta tmpL2
     bcc :+
     inc tmpH2
-:   dex
+:   jsr ax_wrap2
+    dex
     bne @r
+    rts
+.endproc
+
+; ax_wrap/ax_wrap2: wrap a roving VRAM pointer at the ring seam ($5FE0).
+.proc ax_wrap                    ; tmpL3/tmpH3
+    lda tmpH3
+    cmp #$5F
+    bcc @ok
+    bne @w
+    lda tmpL3
+    cmp #$E0
+    bcc @ok
+@w: lda tmpL3
+    sec
+    sbc #$E0
+    sta tmpL3
+    lda tmpH3
+    sbc #$1F
+    sta tmpH3
+@ok:
+    rts
+.endproc
+
+.proc ax_wrap2                   ; tmpL2/tmpH2
+    lda tmpH2
+    cmp #$5F
+    bcc @ok
+    bne @w
+    lda tmpL2
+    cmp #$E0
+    bcc @ok
+@w: lda tmpL2
+    sec
+    sbc #$E0
+    sta tmpL2
+    lda tmpH2
+    sbc #$1F
+    sta tmpH2
+@ok:
     rts
 .endproc
 
@@ -264,6 +312,7 @@ AXV_MIX     = $01E3              ; mix target index
     sta AXV_BCASE
     tya
     and #3
+    sta AXV_SUB0                 ; 0 = identity (page 0 is the column cache!)
     clc
     adc #>shtab_lo
     sta p_shlo+1
@@ -318,6 +367,15 @@ AXV_MIX     = $01E3              ; mix target index
     iny
     lda (tmpL3),y
     sta AXV_B1
+    lda AXV_SUB0
+    bne @tables
+    lda AXV_B0                   ; identity shift: never read page 0 (it is
+    sta AXV_S0                   ; the W3 column cache, not a table)
+    lda AXV_B1
+    sta AXV_S1
+    stz AXV_S2
+    bra @cases
+@tables:
     ldy AXV_B0                   ; s0 = shlo[b0]
     lda (p_shlo),y
     sta AXV_S0
@@ -329,6 +387,7 @@ AXV_MIX     = $01E3              ; mix target index
     sta AXV_S1
     lda (p_shhi),y               ; s2 = shhi[b1]
     sta AXV_S2
+@cases:
     lda AXV_BCASE
     beq @c0
     cmp #1

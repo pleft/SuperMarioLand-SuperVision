@@ -68,6 +68,8 @@ init:                            ; $1500: bind our vector table
     lda #>w3_read                ; code can juggle the mapping (docs/33)
     sta mapread_vec+1
     stz W3CMB                    ; a fresh level starts with an empty column cache
+    stz CX_CTX                   ; and no composed context (docs/42): the window
+    stz CX_OWN                   ; copy just filled $1C60+ with blob padding
     jmp w3_cinval
 .else
     rts

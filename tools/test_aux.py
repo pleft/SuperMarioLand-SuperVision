@@ -52,11 +52,14 @@ def shifted(row2, dx):
     sub = dx & 3
     case = (dx + 8) >> 2
     b0, b1 = row2
-    lo = lambda b: h.mem[0x0200 + sub * 256 + b]
-    hi = lambda b: h.mem[0x0600 + sub * 256 + b]
-    s0 = lo(b0)
-    s1 = hi(b0) | lo(b1)
-    s2 = hi(b1)
+    if sub == 0:
+        s0, s1, s2 = b0, b1, 0      # identity: page 0 is the column cache
+    else:
+        lo = lambda b: h.mem[0x0200 + sub * 256 + b]
+        hi = lambda b: h.mem[0x0600 + sub * 256 + b]
+        s0 = lo(b0)
+        s1 = hi(b0) | lo(b1)
+        s2 = hi(b1)
     return {0: [(s2, 0)], 1: [(s1, 0), (s2, 1)],
             2: [(s0, 0), (s1, 1)], 3: [(s0, 1)]}[case]
 
@@ -121,6 +124,8 @@ TILE = [0xC3, 0x00, 0x81, 0x00, 0x81, 0x00, 0xFF, 0xFC,
         0xFF, 0x03, 0x81, 0x00, 0x81, 0x00, 0xC3, 0xC0]   # arbitrary, holes incl.
 
 map8()
+for i in range(256):                 # poison shtab page 0: in-game it is the
+    h.mem[0x0200 + i] = 0xEE         # W3 column cache, never a shift table
 
 # ---- test 1: FRESH compose, 3x3 box, 4-tile quad at subpixel offset ----
 box = {'dcol0': 10, 'dy0': 64, 'cols': 3, 'rows': 3}
@@ -169,6 +174,14 @@ for rj in range(3):
     if read_cell(box['dcol0'], box['dy0'] + rj * 8) != bg[(0, rj)]:
         print("  vacated col not restored at rj", rj); ok = False
 chk("box moved +1 cell (vacated column restored)", ok)
+
+# ---- test 3b: byte-aligned tiles (subx 0) with page 0 poisoned ----
+tiles0 = [(0, 0, TILE), (8, 0, TILE), (0, 8, TILE), (8, 8, TILE)]
+setup(box3, tiles0, active_ctx=True)
+call(sym['aux_compose'])
+want = compose_ref(newbg, tiles0, box3)
+ok = all(read_cell(box3['dcol0'] + ci * 2, box3['dy0'] + rj * 8) == w for (ci, rj), w in want.items())
+chk("aligned tiles, cache page poisoned", ok)
 
 # ---- test 4: uncompose -> everything pristine ----
 call(sym['aux_uncompose'])

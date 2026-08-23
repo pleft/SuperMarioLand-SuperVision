@@ -16,7 +16,8 @@
 ;   o_vy  = direction flags       (ffc5): bit0 = moving RIGHT, bit1 = FALLING
 ;   w3_pc[slot] = script PC, w3_ti[slot] = VM type index
 ; ===========================================================================
-.include "w3data.inc"            ; every table here is read BEFORE the reader or
+.include "w3data.inc"
+.include "w3auxabi.inc"        ; aux_compose/aux_uncompose (page 8, docs/42)            ; every table here is read BEFORE the reader or
                                  ; the draw maps bank 6, so some may live in the
                                  ; bank-RESIDENT far segment (see w3data.inc)
 
@@ -48,6 +49,38 @@ W3LINKV  = $2022                 ;   NOT restart the LCD scan. $2022 must read
                                  ;   0 at the $2021 write; $0F is the panel's
                                  ;   drive value, handed straight back.
 W3FLG    = $0B                   ; NMI | TIMER_IRQ | LCD (load_level's mask)
+
+; --- the save-under composer (docs/42; MUST match src/w3aux.s) -------------
+CX_CTX     = $1C60               ; the context: +0 act +1 dcol0 +2 dy0 +3 cols
+                                 ; +4 rows +5 fb_col0 snapshot +8 saved[144]
+CX_OWN     = $1FE0               ; composing slot + 1 (0 = free)
+CX_TILES   = $1FA0               ; 4 x 16B final tile pixels
+CXA_DCOL0  = $01C6               ; the aux ABI block (w3aux.s AXV_*)
+CXA_DY0    = $01C7
+CXA_COLS   = $01C8
+CXA_ROWS   = $01C9
+CXA_NT     = $01CA
+CXA_TX     = $01CB
+CXA_TY     = $01CF
+CXA_REL    = $01E5               ; dispatch: uncompose before the plain draw
+; stash scratch (SCRATCH area, consumed before aux_compose reuses it)
+CXS_ID     = $0136               ; 4B tile ids
+CXS_DC     = $013A               ; 4B dcol offsets (biased +64)
+CXS_DY     = $013E               ; 4B dy offsets (biased +64)
+CXS_FL     = $0142               ; 4B flip bits (1=x, 2=y)
+CXS_N      = $0146
+CXS_MNDC   = $0147               ; biased mins/maxes
+CXS_MXDC   = $0148
+CXS_MNDY   = $0149
+CXS_MXDY   = $014A
+CXS_T0     = $014B
+CXS_T1     = $014C
+CXS_XF     = $014D               ; current control flip bits
+CXS_BASE   = $014E               ; dy_base = o_y + 8
+CXS_SPRC   = $014F               ; spr_col copy
+CXS_T2     = $0150
+CXS_T3     = $0151
+CXS_T4     = $0152
 
 ; --- spawn: A = GB type, Y = spawn entry offset. C=0 consumed. -------------
 .segment "W2FAR"
@@ -97,7 +130,14 @@ W3FLG    = $0B                   ; NMI | TIMER_IRQ | LCD (load_level's mask)
 
 ; --- one frame of VM for slot X -------------------------------------------
 .proc w3_step
-    jsr w3_ffc7                  ; the GB's PER-FRAME ffc7 physics (below)
+    lda CX_OWN                   ; a COMPOSED object holds o_pdr=0 so pass 3a
+    beq :+                       ; never erases it mid-frame -- but p4_one sets
+    dea                          ; o_pdr=1 after every draw; clear it again in
+    cmp oi                       ; the update phase (runs after the render in
+    bne :+                       ; the same loop iteration, docs/42)
+    ldx oi
+    stz o_pdr,x
+:   jsr w3_ffc7                  ; the GB's PER-FRAME ffc7 physics (below)
     ldx oi
     lda o_type,x                 ; gravity may have culled the slot
     cmp #OBJ_W3
@@ -580,21 +620,39 @@ W3FLG    = $0B                   ; NMI | TIMER_IRQ | LCD (load_level's mask)
 ; tile bytes have bit7 set. Tiles $A0-$DC resolve through the level header's
 ; overlay base (the W3 sheet in bank 6), everything else through chardata --
 ; draw_quad already does exactly that, so GB tile ids ship verbatim.
-.proc w3_draw                    ; WINDOW half: just the bank-6 dance around
-    stz W3LINKV                  ; the walk, which is BANK-6-RESIDENT now
-    lda #6                       ; (W3X, docs/42) -- the window space it used
-    sta W3LINK                   ; became the composer's context RAM
-    lda #$0F
-    sta W3LINKV
-    jsr w6_draw
-    stz do_yflip                 ; never leak the flips into engine draws
-    stz W3LINKV                  ; back to the W3 resident bank
-    lda #1
+.proc w3_bank                    ; A = MAGNUM page (the W3LINK dance)
+    stz W3LINKV
     sta W3LINK
     lda #$0F
     sta W3LINKV
-    stz do_flip
     rts
+.endproc
+
+.proc w3_draw                    ; WINDOW half: bank juggling + the composed
+    stz CXA_REL                  ; dispatch (docs/42). The walk and the stash
+    lda #6                       ; are BANK-6-RESIDENT (W3X); the composer is
+    jsr w3_bank                  ; PAGE-8-RESIDENT (w3aux).
+    jsr w6_elig                  ; C=1: stashed -> compose; C=0: plain draw
+    bcs @comp
+    lda CXA_REL                  ; we owned a context and lost eligibility:
+    beq @plain                   ; write its saved bg back first, then draw
+    lda #8                       ; the old way
+    jsr w3_bank
+    jsr aux_uncompose
+    lda #6
+    jsr w3_bank
+@plain:
+    jsr w6_draw
+    bra @done
+@comp:
+    lda #8
+    jsr w3_bank
+    jsr aux_compose
+@done:
+    stz do_yflip                 ; never leak the flips into engine draws
+    stz do_flip
+    lda #1
+    jmp w3_bank                  ; tail: back to the resident bank
 .endproc
 
 .segment "W3X"
@@ -694,6 +752,457 @@ W3FLG    = $0B                   ; NMI | TIMER_IRQ | LCD (load_level's mask)
     iny
     bra @walk
 @done:
+    rts
+.endproc
+
+; ---------------------------------------------------------------------------
+; w6_elig (docs/42): decide composed vs plain for the current W3 object and,
+; when composed, STASH everything the page-8 composer needs (the AXV box +
+; final tile pixels). BANK-6-resident: reads the display tables freely.
+; Out: C=1 stashed (tmpL -> the context, CX_OWN claimed);
+;      C=0 plain draw (CXA_REL set if an owned active context must be
+;      written back first).
+.proc w6_elig
+    ; ---- ownership screen ----
+    lda CX_OWN
+    beq @scan                    ; free
+    dea
+    cmp oi
+    beq @scan                    ; ours
+    tay                          ; someone else's: alive?
+    lda o_type,y
+    cmp #OBJ_W3
+    bne :+
+    jmp @no                      ; a live owner keeps it -> plain draw
+:   stz CX_CTX                   ; dead owner: steal, no writeback (its image
+    stz CX_OWN                   ; was erased by the leftover pass or is gone
+    bra @scan                    ; off-screen -- docs/42)
+@scan:
+    ; ---- overlap screen: any live slot or Mario near? -> plain ----
+    ldx oi
+    lda o_nvx,x
+    sta CXS_T0
+    lda o_ndy,x
+    sta CXS_T1
+    ldy #9
+@ov:
+    cpy oi
+    beq @ovn
+    lda o_type,y
+    beq @ovn
+    lda o_nvx,y
+    sec
+    sbc CXS_T0
+    bcs :+
+    eor #$FF
+    ina
+:   cmp #40
+    bcs @ovn
+    lda o_ndy,y
+    sec
+    sbc CXS_T1
+    bcs :+
+    eor #$FF
+    ina
+:   cmp #40
+    bcs @ovn
+    jmp @no
+@ovn:
+    dey
+    bpl @ov
+    lda spr_x                    ; Mario
+    clc
+    adc scroll_s
+    sec
+    sbc CXS_T0
+    bcs :+
+    eor #$FF
+    ina
+:   cmp #40
+    bcs @mok
+    lda spr_y
+    sec
+    sbc CXS_T1
+    bcs :+
+    eor #$FF
+    ina
+:   cmp #48
+    bcs @mok
+    jmp @no
+@mok:
+    ; ---- param -> display list ----
+    ldx oi
+    lda o_st,x
+    ldy #W3_NPARAM-1
+:   cmp w3_paramtab,y
+    beq @pf
+    dey
+    bpl :-
+    jmp @no
+@pf:
+    lda w3_dlo,y
+    sta tmpL
+    lda w3_dhi,y
+    sta tmpH
+    ldy #0
+    ldx oi                       ; facing left? skip the RIGHT list
+    lda o_vy,x
+    and #$01
+    bne @ps
+:   lda (tmpL),y
+    iny
+    cmp #$FF
+    bne :-
+@ps:
+    ; ---- prescan: accumulate offsets, collect tiles, min/max ----
+    stz CXS_N
+    stz CXS_XF
+    lda #64
+    sta CXS_T0                   ; dy accumulator (biased +64)
+    sta CXS_T1                   ; dc accumulator (biased +64)
+    lda #255
+    sta CXS_MNDC
+    sta CXS_MNDY
+    stz CXS_MXDC
+    stz CXS_MXDY
+@pw:
+    lda (tmpL),y
+    cmp #$FF
+    bne :+
+    jmp @pbox
+:   bmi @ptile
+    pha                          ; a CONTROL byte
+    and #$08
+    beq :+
+    lda CXS_T0
+    sec
+    sbc #8
+    sta CXS_T0
+:   pla
+    pha
+    and #$04
+    beq :+
+    lda CXS_T0
+    clc
+    adc #8
+    sta CXS_T0
+:   pla
+    pha
+    and #$02
+    beq :+
+    dec CXS_T1
+    dec CXS_T1
+:   pla
+    pha
+    and #$01
+    beq :+
+    inc CXS_T1
+    inc CXS_T1
+:   pla
+    and #$30                     ; bit4 x-flip, bit5 y-flip -> bits 0/1
+    lsr
+    lsr
+    lsr
+    lsr
+    sta CXS_XF
+    iny
+    bra @pw
+@ptile:
+    ldx CXS_N
+    cpx #4
+    beq @noJ                     ; more than one quad -> plain
+    cmp #$EE                     ; the BEHIND-capable tiles keep the old path
+    beq @noJ                     ; (their skip rule samples live VRAM)
+    cmp #$87
+    bcc :+
+    cmp #$89
+    bcc @noJ
+:   cmp #$92
+    bcc :+
+    cmp #$96
+    bcc @noJ
+:   sta CXS_ID,x
+    lda CXS_T1
+    sta CXS_DC,x
+    cmp CXS_MNDC
+    bcs :+
+    sta CXS_MNDC
+:   lda CXS_T1
+    cmp CXS_MXDC
+    bcc :+
+    sta CXS_MXDC
+:   lda CXS_T0
+    sta CXS_DY,x
+    cmp CXS_MNDY
+    bcs :+
+    sta CXS_MNDY
+:   lda CXS_T0
+    cmp CXS_MXDY
+    bcc :+
+    sta CXS_MXDY
+:   lda CXS_XF
+    sta CXS_FL,x
+    inc CXS_N
+    iny
+    jmp @pw
+@noJ:
+    jmp @no
+@pbox:
+    lda CXS_N
+    beq @noJ
+    ; ---- the y box ----
+    ldx oi
+    lda o_y,x
+    clc
+    adc #8
+    sta CXS_BASE                 ; dy_base
+    clc
+    adc CXS_MNDY
+    sec
+    sbc #64                      ; top scanline
+    cmp #16
+    bcc @noJ                     ; would touch the HUD rows
+    and #$F8
+    sta CXA_DY0
+    lda CXS_BASE
+    clc
+    adc CXS_MXDY
+    sec
+    sbc #56                      ; bottom = base + maxdy - 64 + 8
+    cmp #161
+    bcs @noJ
+    sec
+    sbc CXA_DY0
+    clc
+    adc #7
+    lsr
+    lsr
+    lsr
+    sta CXA_ROWS
+    cmp #4
+    bcs @noJ
+    ; ---- the x box ----
+    lda spr_col
+    sta CXS_SPRC
+    clc
+    adc CXS_MNDC
+    sec
+    sbc #64                      ; dcol_min (must be >= 0)
+    bmi @noJ
+    and #$FE
+    sta CXA_DCOL0
+    lda CXS_SPRC
+    clc
+    adc CXS_MXDC
+    sec
+    sbc #64
+    asl
+    asl                          ; *4 = px
+    clc
+    adc spr_subx
+    clc
+    adc #8                       ; right edge px
+    sta CXS_T0
+    lda CXA_DCOL0
+    asl
+    asl                          ; left edge px
+    sta CXS_T1
+    lda CXS_T0
+    sec
+    sbc CXS_T1
+    clc
+    adc #7
+    lsr
+    lsr
+    lsr
+    sta CXA_COLS
+    cmp #4
+    bcc :+
+    jmp @no
+:   asl                          ; right margin: dcol0 + cols*2 <= 40 keeps
+    clc                          ; us clear of the stream/blank strip
+    adc CXA_DCOL0
+    cmp #41
+    bcc :+
+    jmp @no
+:
+    ; ---- claim + the missed-shift re-base ----
+    lda CX_CTX
+    bpl @claim
+    lda fb_col0
+    sec
+    sbc CX_CTX+5                 ; tile cols scrolled since the last compose
+    beq @claim
+    cmp #7                       ; 1..6 = missed shift frames: re-base. Anything
+    bcc @rebase                  ; else = a RESPAWN/WARP restream -- the saved
+    stz CX_CTX                   ; bg is for another world region and an 8-bit
+    bra @claim                   ; re-base can alias into valid columns: DROP
+@rebase:                         ; the context (no writeback), save fresh.
+    asl                          ; -> ring bytes
+    sta CXS_T0
+    lda CX_CTX+1
+    sec
+    sbc CXS_T0                   ; stale cells then fail the <48 guard: safe
+    sta CX_CTX+1
+@claim:
+    lda fb_col0
+    sta CX_CTX+5
+    lda oi
+    ina
+    sta CX_OWN
+    ; ---- AXV fill + the tile pixel copies ----
+    lda CXS_N
+    sta CXA_NT
+    ldx #0
+@ft:
+    cpx CXS_N
+    beq @fdone
+    lda CXS_SPRC                 ; TX = (spr_col+dc)*4 + subx - dcol0*4
+    clc
+    adc CXS_DC,x
+    sec
+    sbc #64
+    asl
+    asl
+    clc
+    adc spr_subx
+    sta CXS_T0
+    lda CXA_DCOL0
+    asl
+    asl
+    sta CXS_T1
+    lda CXS_T0
+    sec
+    sbc CXS_T1
+    sta CXA_TX,x
+    lda CXS_BASE                 ; TY = dy_base + dy - 64 - dy0
+    clc
+    adc CXS_DY,x
+    sec
+    sbc #64
+    sec
+    sbc CXA_DY0
+    sta CXA_TY,x
+    jsr w6_tile
+    inx
+    bra @ft
+@fdone:
+    lda #<CX_CTX
+    sta tmpL
+    lda #>CX_CTX
+    sta tmpH
+    sec
+    rts
+@no:
+    lda CX_OWN                   ; bailing while owning an ACTIVE context:
+    beq @no2                     ; release it and ask the dispatch to write
+    dea                          ; the saved bg back before the plain draw
+    cmp oi
+    bne @no2
+    stz CX_OWN
+    lda CX_CTX
+    bpl @no2
+    lda #1
+    sta CXA_REL
+    lda #<CX_CTX
+    sta tmpL
+    lda #>CX_CTX
+    sta tmpH
+@no2:
+    clc
+    rts
+.endproc
+
+.segment "W3X2"
+; w6_tile: X = tile index (preserved). Copy tile CXS_ID[x]'s 16 bytes with
+; the flips CXS_FL[x] applied -> CX_TILES + x*16 (the composer wants FINAL
+; pixels). Overlay ids $A0-$DC read the per-world sheet via hdr_buf+18.
+.proc w6_tile
+    phx
+    lda CXS_ID,x
+    sta CXS_T0
+    lda CXS_FL,x
+    sta CXS_T1
+    txa
+    asl
+    asl
+    asl
+    asl
+    sta CXS_T2                   ; dst base = x*16
+    stz tmpH3                    ; src = id*16 + base
+    lda CXS_T0
+    asl
+    rol tmpH3
+    asl
+    rol tmpH3
+    asl
+    rol tmpH3
+    asl
+    rol tmpH3
+    sta tmpL3
+    lda CXS_T0
+    cmp #$A0
+    bcc @char
+    cmp #$DD
+    bcs @char
+    lda tmpL3
+    clc
+    adc hdr_buf+18
+    sta tmpL3
+    lda tmpH3
+    adc hdr_buf+19
+    bra @hi
+@char:
+    lda tmpL3
+    clc
+    adc #<chardata
+    sta tmpL3
+    lda tmpH3
+    adc #>chardata
+@hi:
+    sta tmpH3
+    ldx #0                       ; x = source row
+@row:
+    txa
+    asl
+    tay
+    lda (tmpL3),y                ; b0
+    sta CXS_T3
+    iny
+    lda (tmpL3),y                ; b1
+    sta CXS_T4
+    lda CXS_T1
+    lsr                          ; bit0 = x-flip: swap + reverse pixels
+    bcc @nxf
+    ldy CXS_T4
+    lda revpix,y
+    pha
+    ldy CXS_T3
+    lda revpix,y
+    sta CXS_T4
+    pla
+    sta CXS_T3
+@nxf:
+    txa                          ; dst row (bit1 = y-flip: 7-r)
+    ldy CXS_T1
+    cpy #2
+    bcc @ny
+    eor #$FF
+    clc
+    adc #8
+@ny:
+    asl
+    clc
+    adc CXS_T2
+    tay
+    lda CXS_T3
+    sta CX_TILES,y
+    lda CXS_T4
+    sta CX_TILES+1,y
+    inx
+    cpx #8
+    bne @row
+    plx
     rts
 .endproc
 .segment "W2C"

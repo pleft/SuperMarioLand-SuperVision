@@ -470,7 +470,16 @@ def pack_w3(img, sym, prefix, l11):
         xoff = BNK6 + 0xBC00 - BASE
         assert all(b == 0xFF for b in img[xoff:xoff + len(x3)]), "bank 6 $BC00 busy"
         img[xoff:xoff + len(x3)] = x3
-        print(f"pack_banks: W3X walk {len(x3)}B at bank 6 $BC00")
+        x2m = re.search(r"^W3X2\s+([0-9A-F]+)\s+\S+\s+([0-9A-F]+)", m3, re.M)
+        x2 = b""
+        if x2m:
+            assert int(x2m.group(1), 16) == 0x8000, "W3XM2 moved -- update pack_banks"
+            x2_sz = int(x2m.group(2), 16)
+            x2 = full3[w3c_sz + len(far3) + x3_sz:w3c_sz + len(far3) + x3_sz + x2_sz]
+            x2off = BNK6 + 0x8000 - BASE
+            assert all(b == 0xFF for b in img[x2off:x2off + len(x2)]), "bank 6 head busy"
+            img[x2off:x2off + len(x2)] = x2
+        print(f"pack_banks: W3X walk {len(x3)}B at $BC00 + {len(x2)}B at the bank-6 head")
     cre3 = open("build/gfx/creature33.svt", "rb").read()
     assert len(cre3) == 128, "creature33.svt must be 8 tiles"
     coff3 = BNK6 + 0xBB80 - BASE

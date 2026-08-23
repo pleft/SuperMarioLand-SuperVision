@@ -48,7 +48,7 @@ NEED = [
     "ending13", "e_cap", "mario_frame", "quad_cols", "quad_rows",
     # W3 (docs/33): the window map reader + the stub
     "map_ptr", "map_base", "lvl_cols", "mc_colh", "mc_coll", "mc_row",
-    "mapread_vec", "w3_pc", "w3_ti", "w3_ph0", "w3_ph1", "w3_fcc", "do_yflip", "flipbuf", "w3_ffc7", "w3_stand", "w3_carry_rt", "w3_carry_lf", "w3_cinval", "set_dst", "dst_ptr", "src_ptr", "p_shlo", "p_shhi",
+    "mapread_vec", "w3_pc", "w3_ti", "w3_ph0", "w3_ph1", "w3_fcc", "do_yflip", "flipbuf", "w3_ffc7", "w3_stand", "w3_carry_rt", "w3_carry_lf", "w3_cinval", "chardata", "revpix", "o_nvx", "o_ndy", "set_dst", "dst_ptr", "src_ptr", "p_shlo", "p_shhi",
     "map_transform", "map_offmap",
     "wcol", "redraw_one", "award_coin", "hit_qblock", "break_brick",
     "restore_bg", "rb_vx", "rb_y", "rb_cols", "rb_rows",
