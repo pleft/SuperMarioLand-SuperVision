@@ -59,6 +59,7 @@
 .endif
 
 .if .not (.defined(YUR22) .or .defined(MAR23))
+.ifndef EAS3                     ; (see kit_sh1: no rock in W3)
 .proc draw_rock
     lda #ROCK_TL
     sta tmpL3
@@ -66,6 +67,7 @@
     sta tmpH3
     jmp l3_pair
 .endproc
+.endif
 .endif
 
 .ifndef MAR23                    ; 2-3 draws ride quad/pair16 directly

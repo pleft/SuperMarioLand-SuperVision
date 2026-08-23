@@ -39,7 +39,9 @@ W3SPT    = $A7C0                 ; bank 6: 3x .addr spawn lists (pack_banks pin)
     stz tmpL                     ; dst = $1500
     lda #$15
     sta tmpH
-    ldx #8                       ; 8 full pages = the whole $800 window
+    ldx #8                       ; 8 full pages = the whole $800 window ($1D00+
+                                 ; is HUDSHADOW -- growing into it let the HUD
+                                 ; overwrite kit code every frame; measured)
 @pg:
     ldy #0
 :   lda (tmpL2),y

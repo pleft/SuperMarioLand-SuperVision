@@ -18,6 +18,8 @@ NEED = [
     "arc_idx",
     "jump_state",
     "victim_xy",
+    "blit_behind",
+    "w3_spawn_at",
     "award_stomp",
     # the vector block + the level binding
     "ovl_vec", "hdr_buf", "cur_level",
@@ -46,7 +48,8 @@ NEED = [
     "ending13", "e_cap", "mario_frame", "quad_cols", "quad_rows",
     # W3 (docs/33): the window map reader + the stub
     "map_ptr", "map_base", "lvl_cols", "mc_colh", "mc_coll", "mc_row",
-    "mapread_vec", "w3_pc", "w3_ti", "map_transform", "map_offmap",
+    "mapread_vec", "w3_pc", "w3_ti", "w3_ph0", "w3_ph1", "w3_fcc", "do_yflip", "flipbuf", "w3_ffc7", "w3_stand", "w3_carry_rt", "w3_carry_lf", "w3_cinval",
+    "map_transform", "map_offmap",
     "wcol", "redraw_one", "award_coin", "hit_qblock", "break_brick",
     "restore_bg", "rb_vx", "rb_y", "rb_cols", "rb_rows",
     "read_map_tile", "add_score", "calc_feet_col", "fb_col0", "mario_vx", "scroll_s", "bud_base", "find_block", "spawn_walker", "spawn_flower", "spawn_star",

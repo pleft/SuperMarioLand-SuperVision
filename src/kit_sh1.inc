@@ -32,7 +32,14 @@
     rts
 .endproc
 
-; Mario overlap (the enemy_contact box): |dx|<10 (centres) and |spr_y-o_y|<14
+; Mario overlap (the enemy_contact box): |dx|<10 (centres); the y window is
+; the GB's own per-type collision height. PhysicsParam byte 1's LOW NIBBLE is
+; the box height in rows (the hi nibble is width; bit7 = standable, docs/41),
+; and the art sits at the BOTTOM of the cell -- so for a 16-tall type the old
+; |spr_y - o_y| < 14 is exact, but for the 8-tall missile it overcounted by
+; 8px: the $4B fired from the pipe cannon passed 6px under STANDING Mario's
+; feet and got "stomped" at the muzzle (user-reported; GB-measured: the same
+; pass at 8px does nothing). Window: 3-h <= spr_y - o_y <= 13.
 .proc l3_box                     ; C=1 -> touching
     jsr mario_dx
     lda tmpH3
@@ -40,6 +47,34 @@
     lda tmpL3
     cmp #10
     bcs @no
+.ifdef EAS3
+    lda #16                      ; kit types (suu): the full-cell box
+    sta tmpH3                    ; h lives in tmpH3: w3_touch stores its stomp
+    lda o_type,x                 ; target in tmpL2 right after this returns, and
+    cmp #OBJ_W3                  ; it still needs h for the stomp/side division
+    bne :+
+    lda w3_ph1,x                 ; the per-slot phys1 mirror (w3_init_keepdir)
+    and #$0F
+    asl
+    asl
+    asl
+    sta tmpH3                    ; h = the GB box height in px
+:   lda spr_y
+    sec
+    sbc o_y,x                    ; dy (signed)
+    clc
+    adc tmpH3
+    sec
+    sbc #3                       ; dy + h - 3: in [0, h+10] -> touching
+    sta tmpH2
+    lda tmpH3
+    clc
+    adc #10
+    cmp tmpH2
+    bcc @no
+    sec
+    rts
+.else
     lda spr_y
     sec
     sbc o_y,x
@@ -50,6 +85,7 @@
     bcs @no
     sec
     rts
+.endif
 @no:
     clc
     rts
@@ -104,6 +140,7 @@
 ; --- ROCK $0C: hangs 174f, then falls 1px/f THROUGH terrain; gone at y>=168.
 ; Spiky: any contact hurts; star/ball have no effect ($3186: 00 00 FF 00 00) ---
 .if .not (.defined(YUR22) .or .defined(MAR23)) ; 2-2/2-3: no spiky ball
+.ifndef EAS3                     ; W3 spawns no $0C -- reclaim the window
 .proc upd_rock
     lda o_tmr,x
     cmp #174
@@ -127,4 +164,5 @@
 @no:
     rts
 .endproc
+.endif
 .endif

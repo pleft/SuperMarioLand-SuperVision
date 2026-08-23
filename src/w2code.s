@@ -183,9 +183,9 @@ W3FLAGS = $0B                    ; NMI | TIMER_IRQ | LCD
     beq @big
     dey
     bpl :-
-    jsr @left8                   ; default box: 8px left, 24px tall, 40px wide
-    lda #$C5
-    rts
+    jsr @left8                   ; default box: 8px left, 16px tall, 32px wide
+    lda #$84                     ; ($84 = one 16x16 quad; big metasprites are
+    rts                          ;  ALL in the exception tables now, task #30)
 @big:
     lda o_pvy,x                  ; a taller metasprite: lift the erase origin
     sec
@@ -208,15 +208,9 @@ W3FLAGS = $0B                    ; NMI | TIMER_IRQ | LCD
     rts
 .endproc
 
-.proc w3_cinval                  ; drop every cached column
-    ldx #(W3CSLOTS*2)-1          ; poison every slot's col-HI (odd bytes of the
-    lda #$FF                     ; tag pairs); $FF never matches a real column
-:   sta W3CTAG,x
-    dex
-    dex
-    bpl :-
-    rts
-.endproc
+; (w3_cinval moved to the LEVELS common prefix -- the far kit is full to the
+;  byte and the grown erase-exception tables needed its room; called only
+;  under the normal mapping, so the prefix is safe. gen_w2abi exports it.)
 .segment "W2C"
 .endif
 
@@ -246,11 +240,11 @@ W3FLAGS = $0B                    ; NMI | TIMER_IRQ | LCD
     bra @go
 .endif
 .ifndef YUR22                    ; 2-2 spawns no rock/honen (types nop'd there)
-.ifndef MAR23
-:   cmp #$0C
-    bne :+
-    lda #OBJ_ROCK
-    bra @go
+.if .not (.defined(MAR23) .or .defined(EAS3))
+:   cmp #$0C                     ; NO W3 level spawns $0C either (levels 6/7/8
+    bne :+                       ; spawn lists, checked): the rock's update and
+    lda #OBJ_ROCK                ; draw are compiled out of that build to buy
+    bra @go                      ; window space for w3_stand
 .endif
 .ifndef EAS3
 :   cmp #$10
@@ -333,7 +327,7 @@ w2_updtab:
     .word upd_mek-1, upd_mhead-1, upd_msq-1, upd_mcorp-1
 .else
 .ifdef EAS3
-    .word w2_rts-1, upd_suu-1, upd_rock-1     ; W3 spawns no honen/leaper:
+    .word w2_rts-1, upd_suu-1, w2_nop-1       ; W3 spawns no rock/honen/leaper:
     .word w2_nop-1, w2_nop-1, w2_nop-1, w2_nop-1, w2_nop-1
     .word w3_step-1              ; OBJ_W3: the AI-VM
 .else
@@ -369,7 +363,7 @@ w2_drwtab:
     .word draw_mek-1, draw_mhead-1, draw_msq-1, draw_mcorp-1
 .else
 .ifdef EAS3
-    .word w2_rts-1, draw_suu-1, draw_rock-1
+    .word w2_rts-1, draw_suu-1, w2_rts-1
     .word w2_nop-1, w2_nop-1, w2_nop-1, w2_nop-1, w2_nop-1
     .word w3_draw-1              ; OBJ_W3
 .else
@@ -591,6 +585,7 @@ w2_rts:
 .endproc
 .endif
 
+.ifndef EAS3                     ; (W3 never spawns $24 -> no aimed ball)
 .proc spawn_wball                ; child type $23: single-aimed slow ball
     lda #OBJ_WBALL
     jsr obj_alloc_typed
@@ -612,6 +607,7 @@ w2_rts:
     ldx oi
     rts
 .endproc
+.endif
 
 ; the ball: GB-captured motion -- x 0.5px/f, y = the aimed Bresenham slope
 ; (rc_wball_move), no gravity, lives until it leaves the screen; ANY contact

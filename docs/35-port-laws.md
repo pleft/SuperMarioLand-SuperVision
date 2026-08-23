@@ -315,3 +315,107 @@ normal file. Give each flavour its own object dir and its own output name
 other. And verify a test build BEHAVIOURALLY on a path that the flag actually
 changes -- 1-1's hold-right death is a PIT, which never calls `hurt_mario`, so it
 "passes" identically on both.
+
+**E22. Every object updater must retire its slot when the camera leaves it
+behind -- an object with no way to die eats the table, and the table fails
+SILENTLY.** The walkers had the rule (`o_x + 20 < cam_x`); the RIDEABLES did
+not: `upd_stone`, `upd_platv` and `upd_plath` freed a slot only by falling off
+the bottom of the screen, so 3-1's six $36 stepping stones and both $0A lifts
+stayed live for the rest of the level. `find_free_obj` then returned "table
+full" and `spawn_check` DROPPED the spawn without a sound -- the moving platform
+the player is supposed to ride simply never appears, which reads to the player
+exactly like "I fall through the platform". GB-measured (PyBoy capture of the
+$D100 slots, 3-1): the six stones are freed one by one as each one's screen x
+goes negative -- slot 2 at cam 384, 3+4 at 416, 5 at 432, 6+7 at 464. Audit for
+this by listing every `.proc upd_*` and grepping each body for a cull; anything
+without one must justify how else it dies (a timer, an arc that leaves the
+screen, a contact). And when a spawn can fail, say so at the call site: a
+silent `bcs @full` is how a whole level section goes missing.
+
+**E23. Compare the two engines CLOSED-LOOP, not by replaying one's input on the
+other.** Feeding the GB's recorded script to the port drifts: ten pixels of
+phase and a scripted jump lands on the wrong side of an obstacle, after which
+every frame differs and the report is noise (measured on 3-1: the port stalled
+against the $70-$73 block at world x 242 purely because it arrived 13px late).
+Run the SAME search on both sides instead -- `tools/gbauto.py` on the GB,
+`tools/svauto.c` on the real Potator core, both greedy over save states with a
+two-horizon score -- and compare how far each gets. A place the GB's search
+sails through and the port's cannot is a port bug, with its world x printed;
+anywhere both stall is a limit of the search, not of the port.
+
+**E24. `o_y` is a BYTE: every object needs a VERTICAL cull, and its window must
+be derived from the port's y ORIGIN, not guessed.** W3 shipped with no vertical
+cull at all, so a stomped corpse fell past the bottom, wrapped through 255 and
+rained down the screen again and again (user-reported on 3-1's first enemy and
+on a stomped missile; captured as `o_y` 0->255 then 255->0). 2-3 had had the
+guard since its own anomaly sweep -- gated `.ifdef MAR23`, so the next world
+inherited nothing. Two numbers, both measured, not chosen: the port's floor is
+168 because the GB frees its $3D corpse at GB y 192 and `port o_y = GB y - 24`;
+the ceiling is 232 because 3-1's high-ledge Batadon legitimately peaks at GB y
+18 = port -6 = 250 and comes back down, so 232..255 is a NEGATIVE y and must be
+kept alive. Cull the band between them and nothing else. When a guard is added
+for one world, ask immediately which builds it is compiled out of.
+
+**E25. Read the GB's own tables for CLASS flags before hand-listing the members.**
+"Mario can stand on it" is bit 7 of PhysicsParamTable byte 1, with the collision
+box in the same byte (hi nibble - 8 = width/8, lo nibble = height/8). The port
+instead hard-coded the four rideables it happened to know (`OBJ_PLATV/PLATH/
+STONE/GIFT`), so every World-3 member of that class -- the rising pipe cannon,
+the moai ledges -- was solid on the GB and thin air here, and the level's big
+pit (lift -> ledge -> lift) became uncrossable. When a behaviour applies to "some
+types", find the BIT that decides it; a hand-written list is a bug with a delay
+fuse. The same table's bits also told us the box dimensions we would otherwise
+have measured sprite by sprite.
+
+**E26. A "defensive default" is an invented behavior.** The port's block
+dispatch defaulted unlisted ?-blocks to "a coin" because it seemed harmless;
+the GB's own dispatch says an unlisted $80 IS a brick (jp $19E1) while an
+unlisted $81 pays the coin. The default was wrong for exactly one tile id and
+survived three worlds because W1's unlisted blocks all happen to be $81. When
+the reference has a dispatch, port the dispatch -- including its fall-through
+-- and never paper over an unknown case with something plausible: write the
+unknown case to fail loudly or measure it.
+
+**E27. A helper that reads globals must have them LOADED at every call site.**
+`restore_bg` reads `rb_vx/rb_y/rb_cols/rb_rows`; render_all loads them before
+calling, `pipe_animate` did not, and the pipe descent erased a stale rectangle
+every frame -- Mario stacked copies of himself up the pipe. When extracting a
+helper, either pass its inputs explicitly or grep every caller for the load.
+
+**E28. A register-passed argument dies at the first `jsr` -- audit the call
+chain the day you write it.** `w3_behind` keys on X = the tile id;
+`draw_quad` called `set_dst` first, and set_dst's `ldx dy` replaced the tile
+with the row number. The priority gate therefore armed at random from the day
+it shipped, the cannon's hide-in-pipe worked only by coincidence of row
+values, and THREE verification passes sampled lucky frames and called it
+fixed. When a helper reads a register argument, read the code between the
+argument's producer and the consumer -- every jsr in between is a suspect --
+or pass through a zero-page byte. And when a fix "holds at the spots you
+checked" but the user keeps seeing the bug, suspect the mechanism is
+nondeterministic-by-accident, not that the user is wrong.
+
+**E29. Code reachable while a data bank is mapped must live in FIXED.**
+`w3_draw` maps BANK 6 (display lists + the W3 tile slice) around its whole
+walk, so everything `draw_quad` can reach during it -- every jsr, transitively
+-- must live in $C000+ (FIXED) or the always-mapped RAM window. `flip_to_buf`
+was placed next to its corpse-draw sibling in the banked common prefix; the
+first time a bit5 (Y-flip) control byte armed it, the jsr landed in TILE DATA
+at $98E9 and executed it, and the Ganchan froze mid-hop with its whole slot
+"pinned" by a blit spraying deterministic garbage. The freeze looked like a VM
+bug for three bisections. Before adding a call inside w3_draw's window, check
+the target's address in rom.lbl: $8000-$BFFF means it is data during the draw.
+(The inverse trade paid for it: `carry_x1_rt` is only ever called under the
+normal mapping, so it moved OUT of FIXED to the common prefix.)
+
+**E30. The two 3-1 boulder enemies are not one enemy; name them by their GB
+types.** $31 = TOKOTOKO, the six placed ground rollers: phys1 $22 (bit7
+CLEAR, not standable), landing on one is a STOMP -> morph $40, +400, crack,
+crumble to $0D. $47 = GANCHAN, spawned forever by the six $03 sky spawners
+(cols 155-215, y 56): phys1 $A2 (bit7 SET, standable), unkillable, side
+contact $FF, and it CARRIES its rider -- Mario's x moves with the object's
+every step (w3_carry_rt/lf; "You can ride these boulders over spike pits",
+the Player's Guide). Its 2nd animation param $47 is the SAME four tiles
+rotated 180 deg via display-list control bit5 = Y-flip. A session's worth of
+measurements filed under the wrong names survived the swap only because every
+number was tagged with its TYPE ID; keep tagging measurements with type ids,
+never nicknames.

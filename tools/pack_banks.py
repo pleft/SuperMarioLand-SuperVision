@@ -443,15 +443,18 @@ def pack_w3(img, sym, prefix, l11):
         "bank 6 spawn-table slot not free"
     img[BNK6 + W3SPT - BASE:BNK6 + W3SPT - BASE + len(spt)] = spt
     # scripts / display lists / the compact tile slice, at the kit's pins
-    for pin, path in ((0xB000, "build/w3scripts.bin"), (0xB520, "build/w3dlists.bin")):
+    for pin, path in ((0xB200, "build/w3scripts.bin"), (0xB540, "build/w3dlists.bin")):
         d = open(path, "rb").read()
         off = BNK6 + pin - BASE
         assert all(b == 0xFF for b in img[off:off + len(d)]), f"bank 6 ${pin:04X} busy"
         img[off:off + len(d)] = d
     ovl = open("build/gfx/w3_ovl_8A00.svt", "rb").read()
     order = [int(t, 16) for t in open("build/w3tiles.txt").read().split()]
-    slice_ = b"".join(ovl[(t - 0xA0) * 16:(t - 0xA0 + 1) * 16] for t in order)
-    off = BNK6 + 0xB780 - BASE
+    hi3 = open("build/gfx/w3_hi.svt", "rb").read()      # $F9/$FA/$FB/$FE originals
+    HI = {0xF9: 0, 0xFA: 1, 0xFB: 2, 0xFE: 3}
+    slice_ = b"".join(hi3[HI[t] * 16:(HI[t] + 1) * 16] if t in HI
+                      else ovl[(t - 0xA0) * 16:(t - 0xA0 + 1) * 16] for t in order)
+    off = BNK6 + 0xB740 - BASE
     assert all(b == 0xFF for b in img[off:off + len(slice_)]), "bank 6 $B780 busy"
     img[off:off + len(slice_)] = slice_
     full3 = open("build/w3code.bin", "rb").read()
@@ -505,19 +508,23 @@ def pack_w3(img, sym, prefix, l11):
         hdr.append(pieces[(i, "pipes")][1])
         hdr += bytes((pieces[(i, "blocks")][0] & 0xFF, pieces[(i, "blocks")][0] >> 8))
         hdr.append(pieces[(i, "blocks")][1])
-        quad_base = 0xB780 - 0xA0 * 16          # port ids $A0.. -> the slice
+        quad_base = 0xB740 - 0xA0 * 16          # port ids $A0.. -> the slice
         for v in (sent_at, quad_base, stub_at, bgc_at):
             hdr += bytes((v & 0xFF, v >> 8))
         assert len(hdr) == HDR_SIZE
         tail[i * HDR_SIZE:(i + 1) * HDR_SIZE] = hdr
-    assert W3HDR + len(tail) <= 0xBE60, \
-        f"W3 bank-1 tail runs into the far kit by {W3HDR + len(tail) - 0xBE60} bytes"
+    assert W3HDR + len(tail) <= 0xBE50, \
+        f"W3 bank-1 tail runs into the far kit by {W3HDR + len(tail) - 0xBE50} bytes"
     toff = 1 * STRIDE + (W3HDR - BASE)
     assert all(b == 0xFF for b in img[toff:toff + len(tail)]), \
         "bank 1 tail not free for W3 (1-1 region grew past W3HDR?)"
     img[toff:toff + len(tail)] = tail
     if far3:
-        assert far3_at == 0xBE60, "W3FAR moved -- update pack_banks"
+        assert far3_at == 0xBE50, "W3FAR moved -- update pack_banks"
+        assert far3_at + len(far3) <= 0xC000, \
+            f"W3 far kit overruns bank 1 by {far3_at + len(far3) - 0xC000} bytes " \
+            "(ld65 sized the segment past its memory area and the write silently " \
+            "corrupted the next bank -- the game then hung at level entry)"
         foff = 1 * STRIDE + far3_at - BASE
         assert all(b == 0xFF for b in img[foff:foff + len(far3)]), \
             f"bank 1 ${far3_at:04X} not free for the W3 far kit"

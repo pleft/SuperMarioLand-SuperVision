@@ -130,6 +130,13 @@ def main():
         f.write("; contact table $3186 column +0: the type to MORPH INTO when\n")
         f.write("; stomped ($00 = not stompable -- Mario passes through the head)\n")
         f.write("w3_stomp:\n    .byte " + ",".join(f"${ROM[CONTACT_TBL+5*t]:02X}" for t in types) + "\n")
+        f.write("; contact table column +2: the SIDE-contact result -- $FF hurts,\n")
+        f.write("; $00 does NOTHING, anything else morphs the slot into that type.\n")
+        f.write("; Column +0 being zero means 'not stompable', which is NOT the same\n")
+        f.write("; as 'hurts': $27/$0D (the corpses), $49 (the moai pillar), $3E and\n")
+        f.write("; $36 are all harmless on every side, and treating them as hurtful\n")
+        f.write("; killed Mario when he bounced on a corpse (user-reported).\n")
+        f.write("w3_side:\n    .byte " + ",".join(f"${ROM[CONTACT_TBL+5*t+2]:02X}" for t in types) + "\n")
         # display lists: index by param through a compact table
         f.write(f"W3_NPARAM = {len(params)}\n")
         f.write("w3_paramtab:\n    .byte " + ",".join(f"${p:02X}" for p in params) + "\n")
@@ -142,7 +149,11 @@ def main():
         def conv(lst):
             out = bytearray()
             for b in lst:
-                if b & 0x80 and b != 0xFF and 0xA0 <= b <= 0xDC:
+                # $F9/$FA/$FB/$FE are W3's missile art, and the port's shared
+                # sheet has one-way-platform caps at those ids (extract_gfx) --
+                # the missile drew as a comb. Route them through the overlay
+                # slice too; pack_banks takes their pixels from w3_hi.svt.
+                if b & 0x80 and b != 0xFF and (0xA0 <= b <= 0xDC or b in (0xF9, 0xFA, 0xFB, 0xFE)):
                     if b not in remap:
                         remap[b] = 0xA0 + len(order)
                         order.append(b)
@@ -175,6 +186,15 @@ def main():
         # anchor, 24px tall). A few metasprites are bigger; list ONLY those,
         # with the y-origin adjust (in 8px rows) and the engine's width byte
         # (bit7 = +1 row, bit6 = +1, bit5 = +2, low bits = 8px columns).
+        # DEFAULT SHRUNK for task #30: it was 40x24 ($C5, sized for the
+        # Batadon's [wing|head|wing] band) and every 16x16 Tokotoko/Ganchan/
+        # missile paid 15-20 erased cells where 8-12 suffice -- the single
+        # fattest render cost in a busy 3-1 frame. New default = $84 (a 16x16
+        # quad: 4 cols from x-8, 16px tall from y-8, erase_slot adds the
+        # unaligned +1 row dynamically). Everything bigger gets an EXACT
+        # exception; the four legacy big ones keep their old (conservative)
+        # bytes so the boss erases stay byte-identical.
+        LEGACY = {0x4E, 0x4F, 0x54, 0x55}
         exc = []
         for p in params:
             e = ents(p)
@@ -182,15 +202,24 @@ def main():
                 continue
             miny = min(y for y, _ in e); maxy = max(y for y, _ in e) + 8
             minx = min(x for _, x in e); maxx = max(x for _, x in e) + 8
-            if miny >= -8 and maxy <= 16 and minx >= -8 and maxx <= 32:
-                continue                      # inside the default box
-            yadj = (-miny - 8) // 8           # extra 8px rows above the default
-            rows = (maxy - miny) // 8 + 1     # +1: an unaligned y straddles a row
-            cols = (maxx - minx) // 8 + 1
-            wb = 0x80 | cols                  # tall
-            if rows >= 3: wb |= 0x40
-            if rows >= 4: wb |= 0x20          # bit5 = +2 rows
+            if miny >= -8 and maxy <= 8 and minx >= -8 and maxx <= 16:
+                continue                      # fits the tight $84 default
+            if p in LEGACY:
+                yadj = (-miny - 8) // 8
+                rows = (maxy - miny) // 8 + 1
+                cols = (maxx - minx) // 8 + 1
+                wb = 0x80 | cols
+                if rows >= 3: wb |= 0x40
+                if rows >= 4: wb |= 0x20
+            else:
+                yadj = max(0, (-miny - 8) // 8)
+                srows = (maxy + 8 + yadj * 8) // 8   # from the lifted origin
+                cols = (maxx - minx) // 8 + 1
+                wb = {1: 0x80, 2: 0x80, 3: 0xC0,
+                      4: 0xA0, 5: 0xE0}[min(max(srows, 1), 5)] | cols
             exc.append((p, yadj, wb))
+        print(f"gen_w3data: erase exceptions: " +
+              ", ".join(f"${p:02X}:y{y*8}:${w:02X}" for p, y, w in exc))
         f.write(f"W3_NEXC = {len(exc)}\n")
         f.write("w3_excp:\n    .byte " + ",".join(f"${p:02X}" for p, _, _ in exc) + "\n")
         f.write("w3_excy:\n    .byte " + ",".join(f"{y*8}" for _, y, _ in exc) + "\n")

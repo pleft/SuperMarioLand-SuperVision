@@ -39,9 +39,9 @@ W3CDATA  = $0200                 ; 16 slots x 16 tile bytes (page-aligned)
 W3CTAG   = $1F80                 ; 16 x [col lo][col hi]
 W3CSLOTS = 16
 W3CMB    = $1FFF                 ; map_base hi when the cache was filled
-W3SCRB   = $B000                 ; bank 6 pins (pack_banks writes all three):
-W3DLB    = $B520                 ;   scripts / metasprite display lists /
-W3TILB   = $B780                 ;   the compact W3 tile slice
+W3SCRB   = $B200                 ; bank 6 pins (pack_banks writes all three):
+W3DLB    = $B540                 ;   scripts / metasprite display lists /
+W3TILB   = $B740                 ;   the compact W3 tile slice
 W3SYSC   = $2026
 W3LINK   = $2021                 ; MAGNUM page (docs/37): banking here does
 W3LINKV  = $2022                 ;   NOT restart the LCD scan. $2022 must read
@@ -73,19 +73,37 @@ W3FLG    = $0B                   ; NMI | TIMER_IRQ | LCD (load_level's mask)
 .endproc
 .segment "W2C"
 
-.proc w3_init                    ; X = slot: a fresh VM context
-    stz w3_pc,x
-    stz o_tmr,x                  ; wait 0 -> the first step fetches
-    stz o_hp,x                   ; divider 0 -> a tick every frame until F4
-    stz o_vx,x
-    stz o_vy,x
-    stz o_st,x
-    rts
+.proc w3_init                    ; X = slot, SPAWN entry: a fresh slot may hold
+    stz o_vy,x                   ; the previous occupant's direction -- clear it
+.endproc                         ; and fall through
+.proc w3_init_keepdir            ; MORPH entry: the GB carries ffc5 (direction)
+    ldy w3_ti,x                  ; mirror phys0/phys1 into per-slot RAM: the
+    lda w3_phys0,y               ; ENGINE-side physics (w3_ffc7/w3_stand, in
+    sta w3_ph0,x                 ; LEVELS -- the window is full and $1D00+ is
+    lda w3_phys1,y               ; HUDSHADOW) cannot link the kit's tables
+    sta w3_ph1,x
+    lda #$FF                     ; poison the gravity cache: a recycled slot must
+    sta w3_fcc,x                 ; not inherit the last occupant's floor verdict
+    stz w3_pc,x                  ; across F3 exactly like the param ffc6. Zeroing
+    stz o_tmr,x                  ; it turned every faced missile LEFT (user:
+    stz o_hp,x                   ; "always travelling left no matter where Mario
+    stz o_vx,x                   ; stands") -- $4A runs F0 $40 (FACE MARIO) and
+    rts                          ; THEN F3 $4B, so the facing must survive the
+                                 ; morph. o_st (the param) is NOT reset either:
+                                 ; $3D reads "F8 $27 / F3 $0D" and $0D never sets
+                                 ; one -- clearing it left stomped enemies with
+                                 ; no death sprite at all (both user-reported).
 .endproc
 
 ; --- one frame of VM for slot X -------------------------------------------
 .proc w3_step
-    lda o_tmr,x                  ; wait == 0 -> run opcodes until one waits
+    jsr w3_ffc7                  ; the GB's PER-FRAME ffc7 physics (below)
+    ldx oi
+    lda o_type,x                 ; gravity may have culled the slot
+    cmp #OBJ_W3
+    beq :+
+    rts
+:   lda o_tmr,x                  ; wait == 0 -> run opcodes until one waits
     bne @tick
     jsr w3_fetch
 @tick:
@@ -133,16 +151,20 @@ W3FLG    = $0B                   ; NMI | TIMER_IRQ | LCD (load_level's mask)
     sec
     sbc tmpH3
     sta o_xl,x
-    bcs @ystep
+    bcs :+
     dec o_xh,x
+:   jsr w3_carry_lf              ; the Ganchan carries its rider (engine side
+    ldx oi                       ; checks ride == oi+1; tmpH3 = dx)
     bra @ystep
 @right:
     lda o_xl,x
     clc
     adc tmpH3
     sta o_xl,x
-    bcc @ystep
+    bcc :+
     inc o_xh,x
+:   jsr w3_carry_rt
+    ldx oi
 @ystep:
     lda o_vx,x
     lsr
@@ -187,6 +209,30 @@ W3FLG    = $0B                   ; NMI | TIMER_IRQ | LCD (load_level's mask)
 .endproc
 
 ; --- opcode fetch: runs extended ops until one sets the wait counter ------
+.proc w3_morph                   ; F3: become another type, fresh context
+    lda tmpL3
+    ldy #W3_NTYPES-1
+:   cmp w3_typetab,y
+    beq @found
+    dey
+    bpl :-
+    stz o_type,x                 ; unknown target: despawn
+    rts
+@found:
+    tya
+    sta w3_ti,x
+    jmp w3_init_keepdir
+.endproc
+
+.proc w3_child                   ; tmpL3 = the GB type to spawn
+    jsr w3_spawn_at              ; engine: a slot at the parent's exact position
+    bcs @none
+    jsr w3_morph                 ; kit: the type lookup + a fresh VM context
+@none:
+    ldx oi                       ; the VM loop runs on the PARENT's slot
+    rts
+.endproc
+
 .proc w3_fetch
 @loop:
     jsr w3_getop
@@ -231,8 +277,14 @@ W3FLG    = $0B                   ; NMI | TIMER_IRQ | LCD (load_level's mask)
     bne :+
     jsr w3_morph
     bra @loop
-:   bra @loop                    ; F1 child / F9 sfx / FA: not yet
+:   cmp #$F1                     ; SPAWN CHILD: the moai pillar's missiles ($49
+    bne :+                       ; spawns $4A, which morphs to $4B). Never
+    jsr w3_child                 ; implemented, so the cannon fired nothing at all
+    bra @loop                    ; (user-reported).
+:   bra @loop                    ; F9 sfx / FA: not yet
 .endproc
+.segment "W2FAR"
+.segment "W2C"
 
 .proc w3_getop                   ; A = script[pc]; pc++ (the blob is in bank 6)
     ldy w3_ti,x
@@ -298,12 +350,18 @@ W3FLG    = $0B                   ; NMI | TIMER_IRQ | LCD (load_level's mask)
     and #$FD
 :   eor #$02
     sta o_vy,x
-@flip:
-    lda tmpL3
-    and #$0C                     ; bits3-2: XOR-flip the direction bits
+@flip:                           ; bits3-2 XOR-flip the direction bits, but bit2
+    lda tmpL3                    ; flips Y and bit3 flips X -- not the other way.
+    and #$04                     ; GB-measured: $0D (the stomp corpse, F0 $64)
+    lsr                          ; FALLS, while $49 (F0 $20, bit2 clear) rises.
+    sta tmpH2                    ; With them swapped the corpse flew UPWARD off
+    lda tmpL3                    ; the screen and never despawned, so stomped
+    and #$08                     ; enemies piled up until the pool was full.
+    lsr
+    lsr
+    lsr
+    ora tmpH2
     beq @forcey
-    lsr
-    lsr
     eor o_vy,x
     sta o_vy,x
 @forcey:
@@ -336,20 +394,6 @@ W3FLG    = $0B                   ; NMI | TIMER_IRQ | LCD (load_level's mask)
 .segment "W2C"
 
 .segment "W2FAR"
-.proc w3_morph                   ; F3: become another type, fresh context
-    lda tmpL3
-    ldy #W3_NTYPES-1
-:   cmp w3_typetab,y
-    beq @found
-    dey
-    bpl :-
-    stz o_type,x                 ; unknown target: despawn
-    rts
-@found:
-    tya
-    sta w3_ti,x
-    jmp w3_init
-.endproc
 .segment "W2C"
 
 ; --- terrain probes (the port's own tile semantics) -----------------------
@@ -433,6 +477,33 @@ W3FLG    = $0B                   ; NMI | TIMER_IRQ | LCD (load_level's mask)
 ; which is just another VM script (the kill/puff chains are types too).
 .segment "W2FAR"
 .proc w3_touch                   ; the shared helpers CLOBBER X: reload it from oi
+    jsr w3_stand                 ; standable top? (GB phys1 bit7) -- landing on
+    txa                          ; one beats every contact rule, exactly as it
+    ina                          ; does on the GB ($33/$35/$47 hurt at the SIDES
+    bcs @setride                 ; but carry Mario on top). RIDE BOOKKEEPING:
+    cmp ride                     ; without it, jump_player's tile probe found AIR
+    bne :+                       ; under his feet every frame (the ledge is an
+    stz ride                     ; OBJECT), flipped him airborne, and w3_stand
+:   ldx oi                       ; snapped him back -- his pose strobed jump/
+                                 ; stand and the sprite flickered (user-reported).
+                                 ; ride = slot+1 while held; cleared only if it
+                                 ; was OURS (another slot may hold him now).
+    lda o_y,x                    ; VERTICAL cull -- o_y is a BYTE. A stomped
+    cmp #168                     ; corpse falls past the bottom, wraps through
+    bcc :+                       ; 255 and RAINS DOWN THE SCREEN AGAIN, forever
+    cmp #232                     ; (user-reported twice: 3-1's first enemy and a
+    bcs :+                       ; stomped missile). 2-3 has had this guard since
+    stz o_type,x                 ; the anomaly sweep found it (kit_sh1's MAR23
+    rts                          ; block); W3 never got it.
+:                                ; The 232 window is NOT slack: port o_y = GB y
+                                 ; - 24, so an object 24px above the GB's screen
+                                 ; top is already o_y 232 -- and 3-1's high-ledge
+                                 ; Batadon (spawn col 49, GB ground y 48) hops 30px,
+                                 ; peaking at GB 18 = port -6 = 250. GB-measured:
+                                 ; it peaks and COMES BACK DOWN, so 232..255 is a
+                                 ; legal negative y, not an escape. 168 is the
+                                 ; GB's own floor: its $3D corpse despawns at
+                                 ; GB y 192 = port 168, measured on the same run.
     jsr l3_cull                  ; after every call (the kit-wide convention)
     bcs @rts
     jsr l3_box
@@ -440,38 +511,69 @@ W3FLG    = $0B                   ; NMI | TIMER_IRQ | LCD (load_level's mask)
     bcc @rts
     ldy w3_ti,x
     lda w3_stomp,y
-    beq @hurt                    ; not stompable
-    sta tmpL2
-    jsr l3_above                 ; C=0 means Mario is 4+px ABOVE = the stomp side
-    ldx oi                       ; (l3_above's contract; C=1 is side contact)
-    bcs @hurt
-    lda tmpL2                    ; -> the GB's stomp morph, run by the VM
+    beq @side                    ; not stompable -> the SIDE column decides, and it
+    sta tmpL2                    ; is NOT automatically "hurts"
+    lda tmpH3                    ; stomp/side split at dy <= -2: the GB's $08C7
+    sbc #5                       ; constant through the +2 anchor shift (C=1 from
+    cmp tmpH2                    ; l3_box's touch). l3_above's top-anchored +4 was
+    bcs @stomp                   ; right for 16-tall types but sat INSIDE the
+                                 ; 8-tall missile's touch window: falling contact
+                                 ; landed on the SIDE branch on half the phases
+                                 ; and a stomp became a hurt (user-reported).
+                                 ; stomp iff val = dy+h-3 <= h-5  <=>  dy <= -2.
+@side:                           ; GB $3186 column +2: $FF hurts, $00 does NOTHING,
+    ldx oi                       ; anything else morphs. Treating every
+    ldy w3_ti,x                  ; non-stompable as hurtful killed Mario on the
+    lda w3_side,y                ; cloud corpse ($27), the falling corpse ($0D),
+    beq @rts                     ; the moai pillar ($49), $3E and the stone head
+    cmp #$FF                     ; ($36) -- all $00 on the GB. Bouncing on a corpse
+    beq @hurt                    ; you had just stomped was fatal (user-reported).
     sta tmpL3
     jsr w3_morph
-    ldx oi
+    rts
+@stomp:
+    ldy w3_ti,x                  ; score class = phys byte2 >> 6, taken from the
+    lda w3_phys2,y               ; STOMPED type -- w3_morph below retypes the slot,
+    clc                          ; and reading it afterwards gave the CORPSE's
+    rol                          ; class ($0D = 0), so every stomp paid 100 instead
+    rol                          ; of the Batadon's 800 or a missile's 400
+    rol                          ; (user-reported). The 3 ROLs also need a clear
+    and #3                       ; carry.
+    tay
+    lda @val,y
+    pha
+    lda tmpL2                    ; -> the GB's stomp morph, run by the VM
+    sta tmpL3
+    jsr w3_morph                 ; the corpse's OWN script decides how it looks
+    ldx oi                       ; and moves -- do NOT force a param here. GB
+                                 ; ($3186/$349E): $3C stomps into $3D whose script
+                                 ; opens `F8 26`, while $4B (the missile) stomps
+                                 ; into $0D whose script has NO F8 at all, so the
+                                 ; MISSILE's own param carries and the corpse is a
+                                 ; falling missile. Forcing $27 painted the
+                                 ; Batadon's squash on everything -- the user saw a
+                                 ; stomped missile turn into a winged moai head.
+                                 ; The fall is the script's too: $0D opens `F0 64`
+                                 ; = rise ~7px, then flips to falling (GB-measured
+                                 ; y 109 -> 102 -> 176, ~65 frames, then gone).
     lda #1                       ; Mario's fixed stomp bounce
     sta jump_state
     lda #14
     sta arc_idx
     stz fall_v
     stz ride
-    ldx oi
-    ldy w3_ti,x                  ; score class = phys byte2 >> 6 (0:100 1:400 2:800)
-    lda w3_phys2,y
-    rol
-    rol
-    rol
-    and #3
-    tay
-    lda @val,y
+    pla
     jmp award_stomp
 @val: .byte $01, $04, $08, $10
 @hurt:
     jmp l3_hurt
+@setride:
+    sta ride                     ; (falls into the rts)
 @rts:
     rts
 .endproc
 .segment "W2C"
+
 
 ; --- draw: walk the GB metasprite display list ----------------------------
 ; control byte: bit3 y-8, bit2 y+8, bit1 x-8, bit0 x+8, bit4 -> x-flip;
@@ -546,8 +648,15 @@ W3FLG    = $0B                   ; NMI | TIMER_IRQ | LCD (load_level's mask)
     beq :+
     lda #1
     sta do_flip
-    bra @next
+    bra :++
 :   stz do_flip
+:   lda tmpH3                    ; bit5 = Y-FLIP (the Ganchan's $47 tumble frame:
+    and #$20                     ; same 4 tiles rotated 180 degrees -- ignoring
+    beq :+                       ; it drew the halves facing the wrong way,
+    lda #1                       ; user-reported twice)
+    sta do_yflip
+    bra @next
+:   stz do_yflip
 @next:
     iny
     bra @walk
@@ -571,6 +680,7 @@ W3FLG    = $0B                   ; NMI | TIMER_IRQ | LCD (load_level's mask)
     iny
     bra @walk
 @done:
+    stz do_yflip                 ; never leak the flip into engine draws
     stz W3LINKV        ; back to the W3 resident bank
     lda #1
     sta W3LINK

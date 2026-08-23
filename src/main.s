@@ -624,8 +624,9 @@ main_loop:
     ; ==== FRAME-START RENDER (the beam is in the HUD rows for the first ~4096 cyc, and
     ; above any sprite for much longer: everything drawn here can't be caught mid-blit).
     ; Uses the state the LOGIC phase computed last frame. ====
-    jsr sfx_tick                 ; sound streams run every frame, all modes
-    jsr mus_tick                 ; the music sequencer too (self-gated while paused)
+    jsr audio_catchup            ; sfx+music at DISPLAY rate, like the GB's
+                                 ; VBlank sequencer (music must not drag when
+                                 ; logic frames stretch -- user-reported)
     lda bonus_phase              ; the bonus game, the ending scenes and pipe
     ora pipe_phase               ; animations own their own drawing
     ora e_own
@@ -913,7 +914,13 @@ main_loop:
     beq @used
     cmp #$80                     ; only $80/$81 ?-blocks become the used block; anything else
     bcc @keep                    ; (a mod bit that bled onto a blank/wall/coin-row tile in a
-@used:                           ; room) is left RAW, so it can never turn solid
+    bne @used                    ; room) is left RAW, so it can never turn solid
+    phx                          ; $80 exactly: only big Mario's SMASH can mod an
+    jsr find_block               ; UNLISTED one (see the ceiling dispatch), so
+    plx                          ; that mod bit means BROKEN -> blank, not used
+    bcs @used
+    bra @broke
+@used:
     ldy veh_vec+1                ; vehicle level: no bonks exist, so a modded
     bne @broke                   ; ?-block is TORPEDOED = destroyed (GB $2097)
     lda #$7F
@@ -1033,6 +1040,10 @@ main_loop:
 ;   unlisted -> a single coin. One-shot blocks are marked used + redrawn; the multi-coin
 ;   block stays live (drawn as a brick $82) for a hard 255-frame window from the FIRST bonk,
 ;   coins per bonk, then converts to used on the first bonk after expiry (RE: Jump_000_1888).
+.segment "LEVELS"                ; hit_qblock moved out of FIXED (it was full):
+                                 ; only ever called from the bonk path with the
+                                 ; LEVEL bank mapped (w3_read restores bank 1
+                                 ; before it returns)
 .proc hit_qblock
     jsr find_block               ; multi-coin? register the cell FIRST, so the hop below
     bcc @reg_done                ; already shows the brick ($82) even on the very first bonk
@@ -1095,7 +1106,8 @@ main_loop:
     jsr mark_used
 @coinspawn:
     jsr spawn_coin               ; coin-pop animation
-    bra award_coin               ; +1 coin, +100 score, 1-up at 100
+    jmp award_coin               ; +1 coin, +100 score, 1-up at 100 (jmp: the
+                                 ; proc moved to LEVELS, award_coin is FIXED)
 @multicoin:
     lda mc_tmr                   ; window open (incl. the first bonk) -> another coin
     beq @mc_conv
@@ -1107,6 +1119,379 @@ main_loop:
     sta mc_colh
     bra @coinspawn
 .endproc
+
+; spike_check: the tile under Mario's feet is the SPIKE $ED -> hurt (GB
+; FloorCheck $181E, RE'd byte-for-byte: star -> immune; small dies, big
+; shrinks; the transitional sizes and the post-hit mercy are hurt_mario's
+; own gates). The GB still LANDS on it (falls through to LandSnap), so
+; spikes are solid ground that bites -- the port let Mario stand on them
+; painlessly (user-reported, 3-1 room 2).
+.proc spike_check
+    lda feet_tile
+    cmp #$ED
+    bne @rts
+    lda mario_starT
+    bne @rts
+    jmp hurt_mario
+@rts:
+    rts
+.endproc
+
+; --- the GB's ffc7 ENGINE physics (RE'd at $267B/$28CE/$2958) -------------
+; Per-slot phys byte0 mirror (w3_ph0, written by the kit at spawn/morph):
+;   bit1 ($02) GRAVITY: 1px per FRAME while nothing solid is under the object;
+;              on landing snap y to the 8px grid (GB `inc ffc2` / `and $F8`).
+;              $31 boulder ($06) and the $3D corpse ($02). Without it the
+;              boulder GLIDED for ever ("no gravity at all") and the ride
+;              crossing of the spike stretch was impossible (user-reported).
+;   bit2 ($04) REVERSE at walls (GB `set/res 0,ffc5`): the boulder ping-pongs
+;              (GB-measured x 38 <-> 200 at the first towers).
+; Called from the kit's w3_step every frame, BEFORE the tick gate. X = slot.
+.proc w3_ffc7
+    lda w3_ph0,x
+    and #$02
+    beq @wall
+    lda o_xl,x                   ; floor probe: col (x+4)>>3, row under the feet
+    clc
+    adc #4
+    sta feet_col
+    lda o_xh,x
+    adc #0
+    sta feet_col+1
+    lsr feet_col+1
+    ror feet_col
+    lsr feet_col+1
+    ror feet_col
+    lsr feet_col+1
+    ror feet_col
+    lda feet_col                 ; CACHE: same column at the same y as last time
+    cmp w3_fcc,x                 ; -> reuse the verdict; the banked probe runs
+    bne @probe                   ; only on a tile-boundary crossing or while
+    lda o_y,x                    ; the y is actually changing (a fall re-probes
+    cmp w3_fcy,x                 ; every frame, correctly)
+    bne @probe
+    lda w3_fcv,x
+    lsr
+    bcs @snap
+    bra @fall
+@probe:
+    lda feet_col
+    sta w3_fcc,x
+    lda o_y,x
+    sta w3_fcy,x
+    clc
+    adc #16
+    lsr
+    lsr
+    lsr
+    sec
+    sbc #2
+    sta mrow
+    phx
+    jsr read_solid
+    plx
+    sta w3_fcv,x
+    lsr
+    bcs @snap
+@fall:
+    inc o_y,x                    ; unsupported: fall 1px this frame
+    lda o_y,x
+    sta w3_fcy,x                 ; keep the cache keyed to the NEW y (falling
+    dea                          ; re-probes next frame; verdict stays 'open')
+    ina
+    cmp #168                     ; off the bottom -> free the slot
+    bcc @wall
+    cmp #232
+    bcs @wall
+    stz o_type,x
+    rts
+@snap:
+    lda o_y,x                    ; landed: snap to the 8px grid (GB `and $F8`)
+    and #$F8
+    sta o_y,x
+@wall:
+    lda w3_ph0,x
+    and #$04
+    beq @rts
+    lda o_hp,x                   ; probe only on the frame the VM will TICK --
+    sta tmpL2                    ; movement happens per tick, so a wall test on
+    and #$0F                     ; the other frames is pure waste (this is the
+    sta tmpH2                    ; frame-budget fix: with 2 boulders the wasted
+    lda tmpL2                    ; probes alone were 4 banked reads per frame)
+    lsr
+    lsr
+    lsr
+    lsr
+    cmp tmpH2
+    bne @rts
+    lda o_vx,x                   ; only a mover can hit a wall
+    and #$0F
+    beq @rts
+    lda o_vy,x
+    and #$01
+    bne @pr
+    lda o_xl,x                   ; LEFT: probe at x - 2
+    sec
+    sbc #2
+    sta feet_col
+    lda o_xh,x
+    sbc #0
+    bra @pcol
+@pr:
+    lda o_xl,x                   ; RIGHT: probe at x + 10
+    clc
+    adc #10
+    sta feet_col
+    lda o_xh,x
+    adc #0
+@pcol:
+    sta feet_col+1
+    lsr feet_col+1
+    ror feet_col
+    lsr feet_col+1
+    ror feet_col
+    lsr feet_col+1
+    ror feet_col
+    lda o_y,x                    ; BODY row = one above the feet row
+    clc
+    adc #16
+    lsr
+    lsr
+    lsr
+    sec
+    sbc #3
+    sta mrow
+    phx
+    jsr read_solid
+    plx
+    lsr
+    bcc @rts
+    lda o_vy,x                   ; wall: reverse
+    eor #$01
+    sta o_vy,x
+@rts:
+    rts
+.endproc
+
+; --- standing on a W3 object (moved from the kit window; see docs/41) ------
+; phys1 mirror: bit7 = standable, hi nibble-8 = width/8, lo nibble = height/8.
+; Standing means spr_y = o_y - h; x window |mario centre - (o_x+4)| <= w/2+2
+; (GB-measured on the $49 cannon: supported in [-2,+10], falls at -3/+11).
+; Sets ride = slot+1 while held (cleared by w3_touch when it lets go).
+.proc w3_stand                   ; X = slot; C=1 -> standing on it (snapped)
+    lda w3_ph1,x
+    bpl @no                      ; bit7 clear -> not standable
+    sta tmpH
+    and #$0F                     ; height rows -> px
+    asl
+    asl
+    asl
+    sta tmpL
+    lda o_y,x
+    sec
+    sbc tmpL
+    sta tmpL                     ; tmpL = the spr_y he would stand at
+    lda jump_state               ; RISING? leave him alone (he jumped off)
+    lsr
+    bcs @no
+    lda spr_y                    ; feet in the catch band [target-8, target+5]
+    sec
+    sbc tmpL
+    clc
+    adc #8
+    cmp #14
+    bcs @no
+    jsr mario_dx                 ; tmpH3:tmpL3 = |mario centre - (o_x+4)|
+    lda tmpH3
+    bne @no
+    lda tmpH                     ; half-window = width/2 + 2
+    and #$70
+    lsr
+    lsr
+    clc
+    adc #2
+    cmp tmpL3
+    bcc @no
+    lda tmpL                     ; ON IT: snap, and stay grounded
+    sta spr_y
+    stz jump_state
+    stz fall_v
+    sec
+    rts
+@no:
+    clc
+    rts
+.endproc
+
+; carry_x1_rt: move the RIDER 1px right with the carrying object. Past the pin
+; it pushes the CAMERA, not spr_x (rides used to shove Mario way past PIN_X and
+; the next walk step dumped ALL the excess into cam at once = the user's "rough
+; transition" on the 2-1 platform rides), with the CAM_MAX GUARD (user-caught
+; at the 2-2 top platform, which rides AT the level end): an unclamped push
+; scrolled past max and broke goal_check's exact cam==max door test -- at max
+; Mario moves on screen instead, like the walk path's @atmax.
+.proc carry_x1_rt
+    lda spr_x
+    cmp #PIN_X+1
+    bcc @mv
+    lda cam_x
+    cmp cam_max
+    bne @push
+    lda cam_x+1
+    cmp cam_max+1
+    beq @mv
+@push:
+    inc cam_x
+    bne :+
+    inc cam_x+1
+:   rts
+@mv:
+    inc spr_x
+    rts
+.endproc
+
+; w3_carry_rt/lf: the GANCHAN ride ($47, docs/41). GB: while bit7-standing on
+; the boulder, Mario's x moves with the object's x every step -- that is the
+; whole point of the enemy ("You can ride these boulders over spike pits",
+; Player's Guide). Called from w3_move's x-step with tmpH3 = this tick's dx;
+; carries only if Mario rides THIS slot (ride == oi+1). Right goes through
+; carry_x1_rt so the pin/camera rules match the platform rides exactly.
+.proc w3_carry_rt
+    lda ride
+    beq @no
+    dea
+    cmp oi
+    bne @no
+    ldx tmpH3
+:   jsr carry_x1_rt
+    dex
+    bne :-
+@no:
+    rts
+.endproc
+
+.proc w3_carry_lf
+    lda ride
+    beq @no
+    dea
+    cmp oi
+    bne @no
+    lda spr_x
+    sec
+    sbc tmpH3
+    bcc :+                       ; past the LEFT screen edge: spr_x is a byte and
+    cmp #8                       ; wrapped to 255 -- Mario teleported to the right
+    bcs :++                      ; edge (found by the ride battery's wrap check).
+:   lda #8                       ; Clamp at 8: the boulder slides on, Mario
+:   sta spr_x                    ; leaves its stand window and drops, like the
+@no:                             ; GB's own screen-edge stop.
+    rts
+.endproc
+
+; audio_catchup: the GB runs its sequencer in VBLANK, so music NEVER drags when
+; logic lags; the port ticks audio once per elapsed DISPLAY frame instead
+; (user: "slowdown in music too!"). Clamp: a long stall (level load) resyncs
+; and plays ONE tick rather than bursting the backlog. mus_seen self-heals
+; from any garbage via the clamp. Lives in the LOW common prefix (< the $8D80
+; per-world data divergence) -- called only under the normal mapping.
+.proc audio_catchup
+    lda frame_count
+    sec
+    sbc mus_seen
+    beq @z                       ; 0 elapsed: play one anyway (uniform with the
+    cmp #5                       ; old per-loop call; happens only on same-frame
+    bcc :+                       ; re-entry)
+@z: lda #1                       ; resync a long stall (level load) with ONE tick
+:   tax
+    lda frame_count
+    sta mus_seen
+:   phx
+    jsr sfx_tick
+    jsr mus_tick
+    plx
+    dex
+    bne :-
+    rts
+.endproc
+
+; blit_blank: zero-fill one tile cell at dst_ptr (tile $2C = sky, all $00).
+; Same addressing as blit_tile but no source reads -- the erase fast path, and
+; the single hottest primitive in a busy 3-1 frame (~25 calls: sprite erases
+; over sky + stream blanks = 7.1k cycles profiled). UNROLLED: 8 rows via Y
+; offsets 0/$30/$60/$90/$C0 from the base and 0/$30/$60 from base+$F0 --
+; ~160 cycles vs the loop's ~280. Lives in the LOW common prefix (< $8D80):
+; every caller runs under the normal mapping, and FIXED is full (E29 trade).
+.proc blit_blank
+    lda dcol                     ; past the 48-byte ring row? set_dst's mod would
+    cmp #48                      ; put this on the NEXT scanline (restore_bg's
+    bcc @go                      ; long-standing guard)
+    rts
+@go:
+    lda dst_ptr
+    sta cur_dst
+    lda dst_ptr+1
+    sta cur_dst+1
+    lda #0
+    ldy #$00
+    sta (cur_dst),y
+    iny
+    sta (cur_dst),y
+    ldy #$30
+    sta (cur_dst),y
+    iny
+    sta (cur_dst),y
+    ldy #$60
+    sta (cur_dst),y
+    iny
+    sta (cur_dst),y
+    ldy #$90
+    sta (cur_dst),y
+    iny
+    sta (cur_dst),y
+    ldy #$C0
+    sta (cur_dst),y
+    iny
+    sta (cur_dst),y
+    lda cur_dst
+    clc
+    adc #$F0
+    sta cur_dst
+    bcc :+
+    inc cur_dst+1
+:   lda #0
+    ldy #$00
+    sta (cur_dst),y
+    iny
+    sta (cur_dst),y
+    ldy #$30
+    sta (cur_dst),y
+    iny
+    sta (cur_dst),y
+    ldy #$60
+    sta (cur_dst),y
+    iny
+    sta (cur_dst),y
+    rts
+.endproc
+
+; w3_cinval: drop every cached W3 column (the kit's column cache at $1F80).
+; Evicted from the far kit ($BE50, full to the byte) to make room for the
+; grown erase-exception tables (task #30); every caller is kit code running
+; under the normal mapping.
+W3CTAG_E   = $1F80
+W3CSLOTS_E = 16
+.proc w3_cinval
+    ldx #(W3CSLOTS_E*2)-1        ; poison every slot's col-HI (odd bytes of the
+    lda #$FF                     ; tag pairs); $FF never matches a real column
+:   sta W3CTAG_E,x
+    dex
+    dex
+    bpl :-
+    rts
+.endproc
+
+.segment "CODE"
+
 
 ; mark_used: set the (feet_col,mrow) mod bit and redraw the cell (-> $7F used / blank).
 .proc mark_used
@@ -1331,6 +1716,7 @@ main_loop:
 ; FloorCheck), else 0. (Off-map rows are non-solid.)
 .proc read_solid
     jsr read_map_tile
+    sta feet_tile                ; the tile the support decision was made on
 tile:
     cmp #$F4                     ; coins are walk-through (collectible), not floor
     beq no
@@ -1420,6 +1806,7 @@ no:
     jsr read_solid                ; (probes: +6/+8 walking, +6/+14 running)
     beq @unsup                    ; hangs deviate (10/8 vs GB 15/3) -- known
 @sup:
+    jsr spike_check               ; the supporting tile may be the SPIKE $ED
     jmp @done                     ; supported -> stay grounded
 @unsup:
     lda #2                        ; walked off a ledge -> free-fall
@@ -1489,7 +1876,13 @@ no:
     jsr sfx_play                  ; used-block bonks fire seq $68A0 = the $dfe0=$07 handler
     bra @bonk
 @qblock:
-    jsr hit_qblock                ; spawn coin or mushroom per the content table
+    cmp #$80                      ; GB $1888 vs $1966 (RE'd + room-2 capture,
+    bne @q2                       ; docs/41): a $80 with NO content entry is
+    jsr find_block                ; dispatched to the BRICK handler $19E1 --
+    bcs @q2                       ; small Mario hops it, big SMASHES it (+50,
+    jmp @realbrick                ; shards, gone), and it never pays a coin.
+@q2:                              ; $81's no-content default IS the single coin
+    jsr hit_qblock                ; + used block, so only the $80 detours.
     bra @bonk
 @brick:
     lda mc_colh                   ; the LIVE multi-coin block reads as $82 -> re-bonk = more
@@ -2722,109 +3115,6 @@ moth_tiles: .incbin "../build/gfx/moth.svt"
     rts
 .endproc
 
-.proc sfx_tick
-    lda sfx_p+1
-    beq @idle
-    lda sfx_wait
-    beq @row
-    dec sfx_wait
-@idle:
-    rts
-@row:
-    lda (sfx_p)                  ; delay byte
-    cmp #$FF
-    bne :+
-    jmp @end
-:   jsr @inc
-    lda (sfx_p)                  ; mask
-    sta tmpL
-    and #$0F
-    sta tmpH
-    lda tmpL
-    lsr
-    lsr
-    lsr
-    lsr
-    ora tmpH
-    ora sfx_used
-    sta sfx_used
-    jsr @inc
-    lda tmpL
-    and #1
-    beq :+
-    lda (sfx_p)
-    sta CH1_FLO
-    jsr @inc
-    lda (sfx_p)
-    sta CH1_FHI
-    jsr @inc
-    lda (sfx_p)
-    sta CH1_VOLDUTY
-    ldy #$FF
-    sty CH1_LEN
-    jsr @inc
-:   lda tmpL
-    and #2
-    beq :+
-    lda (sfx_p)
-    sta CH2_FLO
-    jsr @inc
-    lda (sfx_p)
-    sta CH2_FHI
-    jsr @inc
-    lda (sfx_p)
-    sta CH2_VOLDUTY
-    ldy #$FF
-    sty CH2_LEN
-    jsr @inc
-:   lda tmpL
-    and #4
-    beq :+
-    lda (sfx_p)
-    sta CH4_FREQVOL
-    ldy #$FF
-    sty CH4_LEN
-    jsr @inc
-:   lda tmpL                     ; vol-only rows (freq unchanged: envelope steps)
-    and #$10
-    beq :+
-    lda (sfx_p)
-    sta CH1_VOLDUTY
-    jsr @inc
-:   lda tmpL
-    and #$20
-    beq :+
-    lda (sfx_p)
-    sta CH2_VOLDUTY
-    jsr @inc
-:   lda (sfx_p)                  ; next row's delay: 0 = SAME frame (multi-channel rows)
-    cmp #$FF
-    beq @end
-    sta sfx_wait
-    bne :+
-    jmp @row                     ; 0-delay: keep applying this frame (was stretching time)
-:   rts
-@end:
-    lda sfx_used                 ; silence whatever the stream touched
-    and #1
-    beq :+
-    stz CH1_VOLDUTY
-:   lda sfx_used
-    and #2
-    beq :+
-    stz CH2_VOLDUTY
-:   lda sfx_used
-    and #4
-    beq :+
-    stz CH4_FREQVOL
-:   stz sfx_p+1
-    rts
-@inc:
-    inc sfx_p
-    bne :+
-    inc sfx_p+1
-:   rts
-.endproc
 
 .segment "LEVELS"                ; the sequencer lives with its data (FIXED is full)
 ; --- Music sequencer: interprets the ORIGINAL's bank-3 track data, extracted +
@@ -3617,6 +3907,110 @@ music_data:
 ; pause_strip: draw (paused=1) or clear (paused=0) the original's "♥PAUSE♥" window strip:
 ; tiles $2C,$84,P,A,U,S,E,$84,$2C at the screen bottom-right (row 18, cols 11-19). Clearing
 ; repaints the dirt fill ($61) that draw_column puts there.
+.proc sfx_tick
+    lda sfx_p+1
+    beq @idle
+    lda sfx_wait
+    beq @row
+    dec sfx_wait
+@idle:
+    rts
+@row:
+    lda (sfx_p)                  ; delay byte
+    cmp #$FF
+    bne :+
+    jmp @end
+:   jsr @inc
+    lda (sfx_p)                  ; mask
+    sta tmpL
+    and #$0F
+    sta tmpH
+    lda tmpL
+    lsr
+    lsr
+    lsr
+    lsr
+    ora tmpH
+    ora sfx_used
+    sta sfx_used
+    jsr @inc
+    lda tmpL
+    and #1
+    beq :+
+    lda (sfx_p)
+    sta CH1_FLO
+    jsr @inc
+    lda (sfx_p)
+    sta CH1_FHI
+    jsr @inc
+    lda (sfx_p)
+    sta CH1_VOLDUTY
+    ldy #$FF
+    sty CH1_LEN
+    jsr @inc
+:   lda tmpL
+    and #2
+    beq :+
+    lda (sfx_p)
+    sta CH2_FLO
+    jsr @inc
+    lda (sfx_p)
+    sta CH2_FHI
+    jsr @inc
+    lda (sfx_p)
+    sta CH2_VOLDUTY
+    ldy #$FF
+    sty CH2_LEN
+    jsr @inc
+:   lda tmpL
+    and #4
+    beq :+
+    lda (sfx_p)
+    sta CH4_FREQVOL
+    ldy #$FF
+    sty CH4_LEN
+    jsr @inc
+:   lda tmpL                     ; vol-only rows (freq unchanged: envelope steps)
+    and #$10
+    beq :+
+    lda (sfx_p)
+    sta CH1_VOLDUTY
+    jsr @inc
+:   lda tmpL
+    and #$20
+    beq :+
+    lda (sfx_p)
+    sta CH2_VOLDUTY
+    jsr @inc
+:   lda (sfx_p)                  ; next row's delay: 0 = SAME frame (multi-channel rows)
+    cmp #$FF
+    beq @end
+    sta sfx_wait
+    bne :+
+    jmp @row                     ; 0-delay: keep applying this frame (was stretching time)
+:   rts
+@end:
+    lda sfx_used                 ; silence whatever the stream touched
+    and #1
+    beq :+
+    stz CH1_VOLDUTY
+:   lda sfx_used
+    and #2
+    beq :+
+    stz CH2_VOLDUTY
+:   lda sfx_used
+    and #4
+    beq :+
+    stz CH4_FREQVOL
+:   stz sfx_p+1
+    rts
+@inc:
+    inc sfx_p
+    bne :+
+    inc sfx_p+1
+:   rts
+.endproc
+
 .proc pause_strip
     lda paused
     beq @clear
@@ -4084,6 +4478,19 @@ W3HDR = $B540                    ; W3 headers: PINNED bank-1 tail (pack_banks
 ; 1px/frame; the rest of the loop is suspended. Phase 1 ends by entering the room; phase 2
 ; ends back in normal control. Returns with the frame drawn.
 .proc pipe_animate
+    lda prev_vx                  ; restore_bg reads rb_* -- it does NOT read
+    sta rb_vx                    ; prev_* itself (render_all loads them). Calling
+    lda prev_y                   ; it bare erased whatever rectangle the LAST
+    sta rb_y                     ; render left in rb_*, so the sinking Mario
+    lda #3                       ; painted an unerased trail up the pipe
+    sta rb_cols                  ; (user-reported). 3x3 tiles, +1 row when the
+    ldy #2                       ; 1px/frame y is mid-tile -- the same setup
+    lda prev_y                   ; render_all's pass-3 uses for Mario.
+    and #7
+    beq :+
+    iny
+:   iny
+    sty rb_rows
     jsr restore_bg               ; erase Mario at his old spot
     lda pipe_phase
     cmp #2
@@ -5611,8 +6018,10 @@ spawn_popup_at = spawn_popup::at
     bcc :+
     rts
 :   ldx oi
-    dec o_y,x
-    dec o_tmr,x
+    lda o_y,x                    ; o_y is a BYTE (law E24): a stomp near the top
+    beq :+                       ; of the screen used to rise past 0, wrap to 255
+    dec o_y,x                    ; and finish its 64 frames painted at the BOTTOM
+:   dec o_tmr,x                  ; of the screen. Hold at the top instead.
     bne @done
     stz o_type,x
 @done:
@@ -5670,6 +6079,9 @@ bounce_dy: .byte $FE,$FE,$01,$02
 
 ; upd_platv: down 60px from the spawn point and back; carries the rider.
 .proc upd_platv
+    ldx oi
+    jsr cull_left                ; left behind -> free the slot (see cull_left)
+    bcs @done
     lda frame_count
     lsr
     bcc :+
@@ -5720,6 +6132,9 @@ riding_this:                     ; Z=1 if Mario rides slot oi
 
 ; upd_plath: left 53px from the spawn point and back; carries the rider.
 .proc upd_plath
+    ldx oi
+    jsr cull_left                ; left behind -> free the slot (see cull_left)
+    bcs @done
     lda frame_count
     lsr
     bcc :+
@@ -5749,23 +6164,7 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     inc o_xh,x
 :   jsr riding_this
     bne :+
-    lda spr_x                    ; carried past the pin: push the CAMERA, not
-    cmp #PIN_X+1                 ; spr_x -- rides used to shove Mario way past
-    bcc @mv                      ; PIN_X and the next walk step dumped ALL the
-    lda cam_x                    ; excess into cam at once = the user's "rough
-    cmp cam_max                  ; transition" on the 2-1 platform rides.
-    bne @push                    ; CAM_MAX GUARD (user-caught at the 2-2 top
-    lda cam_x+1                  ; platform, which rides AT the level end): an
-    cmp cam_max+1                ; unclamped push scrolled past max and broke
-    beq @mv                      ; goal_check's exact cam==max door test --
-@push:                           ; at max Mario moves on screen instead, like
-    inc cam_x                    ; the walk path's @atmax.
-    bne @rr
-    inc cam_x+1
-    bra @rr
-@mv:
-    inc spr_x
-@rr:
+    jsr carry_x1_rt              ; shared with the Ganchan ride (w3_carry_rt)
 :   ldx oi
     dec o_st,x
     bne @done
@@ -5920,7 +6319,11 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     cmp #OBJ_STONE
     beq :+
     cmp #OBJ_GIFT
-    bne @off
+    beq :+
+    cmp #36                      ; OBJ_W3: w3_stand owns the geometry and sets/
+    bne @off                     ; clears ride itself every frame -- while the
+    lda #1                       ; flag stands, Mario is supported (this is what
+    rts                          ; stops the tile probe flipping him airborne)
 :   jsr plat_xover
     bcs @off
     lda #1
@@ -6514,8 +6917,40 @@ ovl_width:  jmp (ovl_vec+10)     ; A = erase width for kit types
 
 ; upd_stone: static and rideable until Mario lands on it; then one script-step beat
 ; and a 1px/frame drop, carrying the rider ($36 -> $37, script $399D).
+; cull_left: free slot X once the camera has passed 20px beyond it -- the walker
+; rule, and it applies to the RIDEABLES too. GB-MEASURED (2026-08-22, 3-1 with a
+; PyBoy capture of $D100): the six $36 stepping stones over the first pit are
+; freed one by one, each as its screen x goes negative -- slot 2 at cam 384, 3+4
+; at 416, 5 at 432, 6+7 at 464. The port kept them (and the $0A/$0B lifts) alive
+; forever, so by the pit at col 101 the 10-slot table was full of dead weight and
+; obj_alloc_typed silently dropped the LIFT's spawn: the platform the player is
+; supposed to ride simply never appeared. C=1 -> culled.
+.proc cull_left
+    lda o_xl,x
+    clc
+    adc #20
+    sta tmpL3
+    lda o_xh,x
+    adc #0
+    cmp cam_x+1
+    bcc @cull
+    bne @keep
+    lda tmpL3
+    cmp cam_x
+    bcs @keep
+@cull:
+    stz o_type,x
+    sec
+    rts
+@keep:
+    clc
+    rts
+.endproc
+
 .proc upd_stone
     ldx oi
+    jsr cull_left                ; scrolled off -> free the slot (GB: measured)
+    bcs @done
     lda o_st,x
     bne @falling
     lda ride                     ; the landing itself is detected by plat_land
@@ -6550,22 +6985,10 @@ ovl_width:  jmp (ovl_vec+10)     ; A = erase width for kit types
 ; stomp -> squash + fixed bounce + "100"; side -> hurt (big: shrink, small: death).
 .proc upd_chib
     ldx oi                       ; walked off-screen-left? despawn (original: screen-exit
-    lda o_xl,x                   ; culls the slot -- keeping them alive exhausted slots and
-    clc                          ; even silently ate multi-coin spawn requests)
-    adc #20
-    sta tmpL3
-    lda o_xh,x
-    adc #0
-    sta tmpH3
-    lda tmpH3
-    cmp cam_x+1
-    bcc @cull
-    bne :+
-    lda tmpL3
-    cmp cam_x
-    bcs :+
-@cull:
-    stz o_type,x
+    jsr cull_left                ; culls the slot -- keeping them alive exhausted slots and
+    bcs @gone                    ; even silently ate multi-coin spawn requests)
+    bra :+
+@gone:                           ; (cull_left already freed the slot)
     rts
 :   lda frame_count
     lsr
@@ -7891,21 +8314,7 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     lda src_ptr+1
     adc #>chardata
     sta src_ptr+1
-    ldy #0                       ; flipbuf = rows 7..0 (2 bytes each)
-    ldx #14
-:   lda (src_ptr),y
-    sta flipbuf,x
-    iny
-    lda (src_ptr),y
-    sta flipbuf+1,x
-    iny
-    dex
-    dex
-    bpl :-
-    lda #<flipbuf
-    sta src_ptr
-    lda #>flipbuf
-    sta src_ptr+1
+    jsr flip_to_buf
     jsr set_dst
     stz blit_opaque
     jmp sprite_blit_subpx
@@ -9271,8 +9680,8 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     sta dy
     lda o_st,x
     tax
-    bra draw_quad
-; (tail call)
+    jmp draw_quad                ; (tail call; w3_behind pushed draw_quad out of
+                                 ;  relative-branch range)
 @bounce:
     lda spr_col                  ; the hopping block: its pre-bonk tile rides in o_vx
     sta dcol
@@ -9283,8 +9692,7 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     sta dy
     lda o_vx,x
     tax
-    bra draw_quad
-; (tail call)
+    jmp draw_quad                ; (tail call, now out of branch range)
 @plat:
     ldx oi                       ; platform: 3x tile $EF side by side (24px)
     lda o_y,x
@@ -9329,7 +9737,11 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
 .segment "LEVELS"
 .proc load_level
     lda #3                       ; the walker default; a vehicle blob raises it
-    sta bud_base
+    ldy cur_level                ; W3 (6-8): 5-6 walkers roam at once (Nokobon
+    cpy #6                       ; rows, Tokotokos, Ganchans) and 3 redraws/frame
+    bcc :+                       ; blew the NMI budget in the busy stretches --
+    lda #2                       ; 2 movers/frame + the rotated origin = each
+:   sta bud_base                 ; mover at worst 1 frame late (task #30)
     stz ending13                 ; a fresh level never inherits ending state
     stz e_phase
     stz e_own
@@ -9716,7 +10128,84 @@ wcyc: .byte 2, 5, 1              ; port pose ids for GB metasprites 1, 2, 3
 ; .incbin'd from src/datatables.s — see there.
 
 ; ---------------------------------------------------------------------------
+; w3_spawn_at: allocate an AI-VM object (OBJ_W3 = 36) at slot oi's exact
+; position -> X = the new slot, C=1 if the pool is full. The GB spawns the moai
+; pillar's missile at dx,dy = 0,0 from its parent, measured across the pillar's
+; whole cycle. Engine-side because the W3 kit's window and its bank-1 tail are
+; both full to the byte; the kit keeps only the type lookup, which needs its own
+; tables. In CODE, which every bank sees.
+.proc w3_spawn_at
+    lda #36
+    jsr obj_alloc_typed
+    bcs @rts
+    ldy oi
+    lda o_xl,y
+    sta o_xl,x
+    lda o_xh,y
+    sta o_xh,x
+    lda o_y,y
+    sta o_y,x
+    stz o_pdr,x                  ; nothing drawn yet -> no stale erase rect
+    stz o_vy,x                   ; fresh child: no inherited direction (the morph
+    clc                          ; path deliberately KEEPS o_vy -- see w3_init)
+@rts:
+    rts
+.endproc
+
+; w3_behind: X = tile -> blit_behind. The GB draws a few World-3 sprites with
+; OAM attr bit7 -- BEHIND the background. Measured from its own OAM across
+; 3-1/3-2/3-3: $87/$88 (the moai pillar and its missile chain), $92-$95, $EE.
+; That is how the pillar hides INSIDE its pipe instead of sitting in front of
+; it. Gated on the W3 levels, since other worlds use those ids for ordinary
+; sprites. It sits HERE, in draw_quad's own segment, because the W3 kit maps
+; BANK 6 around its tile walk and bank 6 carries no LEVELS prefix.
+.proc w3_behind
+    stz blit_behind
+    lda cur_level
+    cmp #6
+    bcc @rts
+    cpx #$EE
+    beq @yes
+    cpx #$87
+    bcc @rts
+    cpx #$89
+    bcc @yes
+    cpx #$92
+    bcc @rts
+    cpx #$96
+    bcs @rts
+@yes:
+    lda #1
+    sta blit_behind
+@rts:
+    rts
+.endproc
+
 ; draw_quad: X = tile index; dcol/dy set. src_ptr = chardata + X*16; blit transparent.
+; flip_to_buf: reverse the 8 rows of the tile at src_ptr into flipbuf and point
+; src_ptr there. Shared by draw_tile_yflip (corpse OAM y-flip) and draw_quad's
+; do_yflip path (the Ganchan's $47 tumble frame). FIXED ON PURPOSE: draw_quad
+; calls it while w3_draw has BANK 6 mapped at $8000 -- in BANK0 the jsr landed
+; in tile data and executed it (the frozen-Ganchan bug, bisected 2026-08-23).
+.proc flip_to_buf
+    ldy #0                       ; flipbuf = rows 7..0 (2 bytes each)
+    ldx #14
+:   lda (src_ptr),y
+    sta flipbuf,x
+    iny
+    lda (src_ptr),y
+    sta flipbuf+1,x
+    iny
+    dex
+    dex
+    bpl :-
+    lda #<flipbuf
+    sta src_ptr
+    lda #>flipbuf
+    sta src_ptr+1
+    rts
+.endproc
+
 .proc draw_quad
     txa                          ; src_ptr = chardata + X*16 -- except tiles
     stz src_ptr+1                ; $A0-$DC: the per-WORLD overlay (GB $8A00 load),
@@ -9746,8 +10235,58 @@ wcyc: .byte 2, 5, 1              ; port pose ids for GB metasprites 1, 2, 3
     adc #>chardata
 @haveb:
     sta src_ptr+1
+    lda do_yflip                 ; display-list control bit5 (the Ganchan's 180-
+    beq @noyf                    ; degree tumble frame): reverse the tile's rows
+    phy                          ; through flipbuf, like draw_tile_yflip
+    phx
+    jsr flip_to_buf
+    plx
+    ply
+@noyf:
+    jsr w3_behind                ; W3 priority: hidden where the background covers
+                                 ; -- BEFORE set_dst: set_dst does `ldx dy` and
+                                 ; w3_behind keys on X = THE TILE. Called after,
+                                 ; it tested the row number, so the gate armed at
+                                 ; random and the cannon drew over its pipe on
+                                 ; whatever rows happened to fall outside $87-$95
+                                 ; (the user's "intermittently visible" cannon,
+                                 ; reported three times before this was found).
     jsr set_dst
-    stz blit_opaque              ; Mario is transparent (GB colour 0 = see-through)
+    lda blit_behind              ; it (the GB shows such a sprite only over BG
+    beq :+                       ; colour 0, and the background is already painted
+    ldy #0                       ; by the time sprites run, so testing the cell IS
+    lda (dst_ptr),y              ; the test -- exact for the pillar inside its pipe).
+    iny                          ; Sample the quad's FULL 8px width (bytes 0+1) on
+    ora (dst_ptr),y              ; both rows: byte 0 alone is a 4px sliver, and the
+    ldy #VRAM_STRIDE*5           ; pipe's art is vertical stripes -- with the right
+    ora (dst_ptr),y              ; camera sub-byte phase the sliver landed on a
+    iny                          ; white stripe, read 0, and the cannon drew ON the
+    ora (dst_ptr),y              ; pipe it should hide in. Rows 0, 5 AND 7: rows
+    tax                          ; 0+2 both sat above the rim while the quad's
+    lda dst_ptr                  ; lower rows straddled INTO the pipe, and the
+    clc                          ; whole quad drew over it (user-reported twice).
+    adc #<(VRAM_STRIDE*7)        ; A straddling quad is now skipped whole: the
+    sta dst_ptr                  ; head emerges 8px at a time instead of 1 -- the
+    lda dst_ptr+1                ; port's per-quad blit cannot split a quad at
+    adc #>(VRAM_STRIDE*7)        ; the rim. (Y is 8-bit: stride*7=336 needs the
+    sta dst_ptr+1                ; pointer bumped; blit re-derives dst from
+    ldy #0                       ; set_dst state? NO -- restore it below.)
+    txa
+    ora (dst_ptr),y
+    iny
+    ora (dst_ptr),y
+    tax
+    lda dst_ptr                  ; restore dst_ptr for the blit
+    sec
+    sbc #<(VRAM_STRIDE*7)
+    sta dst_ptr
+    lda dst_ptr+1
+    sbc #>(VRAM_STRIDE*7)
+    sta dst_ptr+1
+    txa
+    beq :+
+    rts
+:   stz blit_opaque              ; Mario is transparent (GB colour 0 = see-through)
     jmp sprite_blit_subpx
 ; (tail call)
 .endproc
@@ -9866,6 +10405,30 @@ hud_go:      .res 1          ; hud_check verdict: NMI must latch + repaint
 hf_col:      .res 1          ; NMI HUD-copy: view byte col / row counter / seam n1
 hf_row:      .res 1
 hf_n1:       .res 1
+blit_behind: .res 1           ; W3 sprite PRIORITY (GB OAM attr bit7): draw_quad
+                              ; drops the tile where the background is not sky.
+feet_tile:   .res 1           ; the last tile read_solid judged (spike_check)
+; BSS ends at $11FF, flush against RCRAM: even 20 more .res bytes spilled the
+; tail into the RCODE copy and broke ALL NINE levels at once (gold caught it,
+; twice -- once as a mid-block shift, once as tail overflow). The W3 phys
+; mirrors live at the BOTTOM OF THE STACK PAGE instead: SP starts at $FF and
+; the measured depth never passes ~$60 bytes, so $0100-$0113 is dead space.
+w3_ph0 = $0100                ; per-slot mirror of GB phys byte0 (ffc7 flags)
+w3_ph1 = $010A                ; per-slot mirror of GB phys byte1 (box + bit7)
+do_yflip = $0132              ; draw_quad: y-flip the quad (W3 display-list
+                              ; control bit5 -- the Ganchan's tumble frame)
+mus_seen = $0133              ; last frame_count the audio ticked for: the GB
+                              ; runs its sequencer in VBLANK, so music NEVER
+                              ; drags when logic lags -- the port ticks audio
+                              ; once per elapsed DISPLAY frame (catch-up,
+                              ; clamped) to match (user: "slowdown in music
+                              ; too!"). Self-healing: any resync gap > 4 plays
+                              ; one tick and snaps mus_seen forward.
+w3_fcc = $0114                ; per-slot gravity cache: feet col low byte,
+w3_fcy = $011E                ;   o_y, and the verdict at that (col,y) --
+w3_fcv = $0128                ;   probing through the banked reader EVERY
+                              ;   frame for EVERY boulder blew the frame
+                              ;   budget (user: slowdown wrecks the scene)
 
 .segment "CODE"
 
@@ -10452,37 +11015,6 @@ HUD_SPLIT_LINE = 16              ; timer reload = split scanline (IPeriod=256 cy
 ; blit_tile: draw one 8x8 SV tile (16 bytes at src_ptr) to VRAM at dst_ptr.
 ; Byte-aligned (tile x must be a multiple of 4 px). 2 bytes/row, advancing the
 ; VRAM dest by the line stride ($30). src_ptr/dst_ptr are preserved (uses copies).
-; blit_blank: zero-fill one tile cell at dst_ptr (tile $2C = sky, bytes all $00).
-; Same addressing as blit_tile but no source reads -- the erase fast path.
-.proc blit_blank
-    lda dcol                     ; past the 48-byte ring row? set_dst's mod would
-    cmp #48                      ; put this on the NEXT scanline. restore_bg has
-    bcc @go                      ; guarded its erase like this all along; the DRAW
-    rts                          ; never did, which is why the pass-1 cull had to
-@go:                             ; sit at 168 = 192 - 24 and swallow sprites in the
-    lda dst_ptr
-    sta cur_dst
-    lda dst_ptr+1
-    sta cur_dst+1
-    ldx #8
-    lda #0
-@row:
-    ldy #1
-    sta (cur_dst),y
-    dey
-    sta (cur_dst),y
-    lda cur_dst                  ; dst += stride ($30)
-    clc
-    adc #VRAM_STRIDE
-    sta cur_dst
-    bcc :+
-    inc cur_dst+1
-:   lda #0
-    dex
-    bne @row
-    rts
-.endproc
-
 .proc blit_tile
     lda dcol                     ; past the 48-byte ring row? set_dst's mod would
     cmp #48                      ; put this on the NEXT scanline. restore_bg has

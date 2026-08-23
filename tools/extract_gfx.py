@@ -178,6 +178,14 @@ def main():
     # (chardata second half). Free slots verified: $F6-$F8 = coin spin; $F5,
     # $F9-$FF unused. W1 caps $68/$69/$6A -> $F9/$FA/$FB, 7C -> $FF; W2 caps
     # $60/$61/$63 (pixels inside ovl_9310, base id $31) -> $FC/$FD/$FE.
+    # WORLD 3 needs tiles $F9/$FA/$FB/$FE for the moai pillar's missile -- the
+    # very ids the one-way-cap remap below overwrites in the shared sheet. Keep
+    # the originals here; gen_w3data routes them through W3's overlay slice, so
+    # the caps keep their ids and the missile keeps its pixels.
+    obj0 = open(os.path.join(out, "w1_obj_8000.svt"), "rb").read()
+    with open(os.path.join(out, "w3_hi.svt"), "wb") as f:
+        for t in (0xF9, 0xFA, 0xFB, 0xFE):
+            f.write(obj0[t * 16:(t + 1) * 16])
     def slot(path, idx):
         return open(path, "rb").read()[idx * 16:(idx + 1) * 16]
     obj = bytearray(open(os.path.join(out, "w1_obj_8000.svt"), "rb").read())

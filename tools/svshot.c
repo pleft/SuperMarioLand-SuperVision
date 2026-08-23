@@ -26,6 +26,9 @@ static uint8 pad_of(char c) {
     switch (c) {
     case 'R': return 0x01; case 'L': return 0x02; case 'D': return 0x04;
     case 'U': return 0x08; case 'B': return 0x10; case 'A': return 0x20;
+    /* combinations: you cannot play a walker level one button at a time --
+       'J' = run right + jump, 'K' = left + jump, 'F' = right + fire */
+    case 'J': return 0x21; case 'K': return 0x22; case 'F': return 0x11;
     default:  return 0x00;
     }
 }
@@ -91,10 +94,6 @@ int main(int argc, char **argv) {
     }
     fclose(o);
     if (rf) fclose(rf);
-    { extern M6502 m6502_registers; /* PC probe: where is it stuck? */
-      fprintf(stderr, "svshot: final PC = $%04X  A=%02X X=%02X Y=%02X S=%02X\n",
-              m6502_registers.PC.W, m6502_registers.A, m6502_registers.X,
-              m6502_registers.Y, m6502_registers.S); }
     printf("svshot: %d samples of %d frames -> %s\n", n, frames, argv[5]);
     return 0;
 }
