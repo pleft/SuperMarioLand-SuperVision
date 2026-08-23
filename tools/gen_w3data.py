@@ -139,6 +139,7 @@ def main():
         f.write("w3_side:\n    .byte " + ",".join(f"${ROM[CONTACT_TBL+5*t+2]:02X}" for t in types) + "\n")
         # display lists: index by param through a compact table
         f.write(f"W3_NPARAM = {len(params)}\n")
+        f.write('.segment "W3X"\n')   # the draw walk executes under BANK 6 (docs/42)
         f.write("w3_paramtab:\n    .byte " + ",".join(f"${p:02X}" for p in params) + "\n")
         # COMPACT tile slice: the lists reference GB overlay tiles $A0-$DC;
         # ship only the ones actually drawn, renumbered to a contiguous port
@@ -176,6 +177,7 @@ def main():
         f.write("; display lists live in BANK 6 at W3DLB (pack_banks pin)\n")
         f.write("w3_dlo:\n    .byte " + ",".join(f"<(W3DLB+{s})" for s in starts) + "\n")
         f.write("w3_dhi:\n    .byte " + ",".join(f">(W3DLB+{s})" for s in starts) + "\n")
+        f.write('.segment "W2C"\n')   # back to the window for the includer
         # the left-facing pointers live in the bank-RESIDENT far segment: the
         # RAM window needs its space for the hot code (they are read before
         # any bank switch, so residency is safe)

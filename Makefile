@@ -38,7 +38,7 @@ all: $(ROM)
 godmode:                         # the TEST ROM -> build/super-mario-land-god.sv
 	$(MAKE) GODMODE=1
 
-$(ROM): $(OBJS) $(CFG) tools/pack_banks.py tools/gen_w2abi.py src/w2code.s src/kit_mar23.inc src/kit_w3.inc $(wildcard src/kit_sh*.inc) src/w2stub.s src/w3stub.s tools/gen_w3data.py cfg/w2code.cfg cfg/w2stub.cfg cfg/w3stub.cfg cfg/w3code.cfg $(W2GFX) build/gfx/w3_ovl_9310.svt
+$(ROM): $(OBJS) $(CFG) tools/pack_banks.py tools/gen_w2abi.py src/w2code.s src/kit_mar23.inc src/kit_w3.inc $(wildcard src/kit_sh*.inc) src/w2stub.s src/w3stub.s tools/gen_w3data.py src/w3aux.s cfg/w3aux.cfg tools/make_512k.py cfg/w2code.cfg cfg/w2stub.cfg cfg/w3stub.cfg cfg/w3code.cfg $(W2GFX) build/gfx/w3_ovl_9310.svt
 	$(LD) -C $(CFG) $(OBJS) -o $@ -m build/rom.map -Ln build/rom.lbl --dbgfile build/rel.dbg
 	python3 tools/gen_w2abi.py build/rel.dbg build/w2abi.inc
 	$(AS) $(ASFLAGS) -I build src/w2code.s -o build/w2code.o

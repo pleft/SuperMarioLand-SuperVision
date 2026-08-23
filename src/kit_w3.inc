@@ -580,7 +580,26 @@ W3FLG    = $0B                   ; NMI | TIMER_IRQ | LCD (load_level's mask)
 ; tile bytes have bit7 set. Tiles $A0-$DC resolve through the level header's
 ; overlay base (the W3 sheet in bank 6), everything else through chardata --
 ; draw_quad already does exactly that, so GB tile ids ship verbatim.
-.proc w3_draw
+.proc w3_draw                    ; WINDOW half: just the bank-6 dance around
+    stz W3LINKV                  ; the walk, which is BANK-6-RESIDENT now
+    lda #6                       ; (W3X, docs/42) -- the window space it used
+    sta W3LINK                   ; became the composer's context RAM
+    lda #$0F
+    sta W3LINKV
+    jsr w6_draw
+    stz do_yflip                 ; never leak the flips into engine draws
+    stz W3LINKV                  ; back to the W3 resident bank
+    lda #1
+    sta W3LINK
+    lda #$0F
+    sta W3LINKV
+    stz do_flip
+    rts
+.endproc
+
+.segment "W3X"
+.proc w6_draw                    ; BANK-6 half: param search + the list walk
+    ldx oi
     lda o_st,x                   ; param -> display-list index
     ldy #W3_NPARAM-1
 :   cmp w3_paramtab,y
@@ -596,12 +615,7 @@ W3FLG    = $0B                   ; NMI | TIMER_IRQ | LCD (load_level's mask)
     stz tmpL2                    ; dy accumulator
     stz tmpH2                    ; dcol accumulator (bytes)
     stz do_flip
-    stz W3LINKV        ; the lists AND the tile sheet live in bank 6;
-    lda #6                   ; every routine the walk calls is FIXED/RAM,
-    sta W3LINK
-    lda #$0F
-    sta W3LINKV
-    ldy #0                       ; so one map around the whole draw is safe
+    ldy #0
     ldx oi                       ; facing left? skip past the RIGHT list's $FF
     lda o_vy,x
     and #$01
@@ -680,12 +694,6 @@ W3FLG    = $0B                   ; NMI | TIMER_IRQ | LCD (load_level's mask)
     iny
     bra @walk
 @done:
-    stz do_yflip                 ; never leak the flip into engine draws
-    stz W3LINKV        ; back to the W3 resident bank
-    lda #1
-    sta W3LINK
-    lda #$0F
-    sta W3LINKV
-    stz do_flip
     rts
 .endproc
+.segment "W2C"

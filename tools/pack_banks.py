@@ -462,6 +462,15 @@ def pack_w3(img, sym, prefix, l11):
     w3c_sz = int(re.search(r"^W2C\s+\S+\s+\S+\s+([0-9A-F]+)", m3, re.M).group(1), 16)
     fm = re.search(r"^W2FAR\s+([0-9A-F]+)\s+\S+\s+([0-9A-F]+)", m3, re.M)
     far3_at, far3 = (int(fm.group(1), 16), full3[w3c_sz:w3c_sz + int(fm.group(2), 16)]) if fm else (0, b"")
+    xm = re.search(r"^W3X\s+([0-9A-F]+)\s+\S+\s+([0-9A-F]+)", m3, re.M)
+    if xm:                                      # bank-6-resident walk (docs/42)
+        x3_at, x3_sz = int(xm.group(1), 16), int(xm.group(2), 16)
+        assert x3_at == 0xBC00, "W3XM moved -- update pack_banks"
+        x3 = full3[w3c_sz + len(far3):w3c_sz + len(far3) + x3_sz]
+        xoff = BNK6 + 0xBC00 - BASE
+        assert all(b == 0xFF for b in img[xoff:xoff + len(x3)]), "bank 6 $BC00 busy"
+        img[xoff:xoff + len(x3)] = x3
+        print(f"pack_banks: W3X walk {len(x3)}B at bank 6 $BC00")
     cre3 = open("build/gfx/creature33.svt", "rb").read()
     assert len(cre3) == 128, "creature33.svt must be 8 tiles"
     coff3 = BNK6 + 0xBB80 - BASE
