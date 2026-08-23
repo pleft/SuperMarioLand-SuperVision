@@ -18,7 +18,18 @@ src = sys.argv[1] if len(sys.argv) > 1 else "build/super-mario-land.sv"
 out = sys.argv[2] if len(sys.argv) > 2 else "build/super-mario-land-512k.sv"
 img = open(src, "rb").read()
 assert len(img) == 0x40000, f"{src}: expected 256K"
-big = img + b"\xFF" * (0x80000 - 0x40000 - 0x4000) + img[-0x4000:]
+big = bytearray(img + b"\xFF" * (0x80000 - 0x40000 - 0x4000) + img[-0x4000:])
+# PAGE 8 = the aux page (docs/42): the bank-1 (W3 resident) image, so the
+# W3-flavour common prefix sits at its normal addresses, with the AUX blob
+# pasted at $A620 over the (dead in this copy) level region.
+import os
+P8 = 8 * 0x8000
+big[P8:P8 + 0x4000] = img[1 * 0x8000:1 * 0x8000 + 0x4000]   # bank 1 = page 1 low
+aux = "build/w3aux.bin"
+if os.path.exists(aux):
+    blob = open(aux, "rb").read()
+    assert len(blob) <= 0x1960, "w3aux blob exceeds the AUX window"
+    big[P8 + 0x2620:P8 + 0x2620 + len(blob)] = blob
 assert len(big) == 0x80000
-open(out, "wb").write(big)
-print(f"wrote {out} (512K; pages 8-14 free, FIXED mirrored at the tail)")
+open(out, "wb").write(bytes(big))
+print(f"wrote {out} (512K; page 8 = aux [bank-1 prefix + {os.path.getsize(aux) if os.path.exists(aux) else 0}B blob], 9-14 free)")

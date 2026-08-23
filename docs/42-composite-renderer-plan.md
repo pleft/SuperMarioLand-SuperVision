@@ -78,3 +78,35 @@ the same 512K/aux room, or from further FIXED evictions.
 - SuperPico: 512K UF2 acceptance + $2021 values 8-15 honored.
 - SYS_CTRL bit5 must NEVER be used for banking (LCD restart) — law-adjacent;
   add to docs/35 when the aux page ships.
+
+## DESIGN PIVOT (2026-08-23, before implementation): SAVE-UNDER, not map-compose
+
+Map-based composition dies on a mapping conflict: the compose phase needs the
+LEVEL bank (map reads) and the aux page at once. The classic save-under
+renderer needs NO map at all:
+
+- Each composed object owns a CONTEXT: the pristine background bytes of every
+  cell its sprite covers, saved from VRAM at the moment the sprite first
+  covers the cell (correct by induction: the previous compose left pure bg
+  everywhere else).
+- Per frame: vacated cells get their saved bytes written back; new cells are
+  saved; still-covered cells are rebuilt in a 16-byte buffer (saved bg +
+  sprite tiles shifted via shtab/MASKTAB) and written once. Pure writes and
+  buffered composes -- the sprite is NEVER absent from VRAM. Flicker-immune.
+- Contexts live in the unused video RAM tail $5E00-$5FFF (fb ends $5DFF):
+  3 contexts x ~170B (10 cells x 16B + meta). Objects beyond 3 fall back.
+- The OLD bookkeeping (o_pdr/o_pvx/o_pw) is maintained for composed objects
+  every frame, so ANY exit from composed mode -- entanglement, death,
+  ineligibility, context shortage, stale bg -- falls back to the old
+  erase+draw path, whose restore_bg is map-correct unconditionally.
+- Staleness needs NO hooks: the DMA shift moves sprite pixels and bg
+  together (contexts store ring positions; pass-0 folding applies); stream
+  repaints only threaten the right margin, so eligibility simply excludes
+  objects within 40px of the right edge; bonk effects spawn objects (bounce,
+  shards, popups) whose overlap entangles the enemy and forces the fallback.
+- Eligibility (checked in bank-6/kit code, zero FIXED bytes): single-quad
+  $84-class params, no behind-armed tiles, not entangled, clear of the right
+  margin, context available.
+- Code homes: phase A (display-list walk stores tile pixels + offsets to RAM)
+  in a BANK-6 pin (1KB free there, mapped during the walk); phase B (the
+  composer) in the AUX page; kit window only pays the dispatch seams.

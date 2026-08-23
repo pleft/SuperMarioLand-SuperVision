@@ -55,6 +55,8 @@ $(ROM): $(OBJS) $(CFG) tools/pack_banks.py tools/gen_w2abi.py src/w2code.s src/k
 	$(AS) $(ASFLAGS) -I build src/w3stub.s -o build/w3stub.o
 	$(LD) -C cfg/w3stub.cfg build/w3stub.o -o build/w3stub.bin
 	python3 tools/pack_banks.py $@ build/rom.map 0:7 2:2 3:3 4:4 5:5 6:1 7:1 8:1
+	$(AS) $(ASFLAGS) -I build src/w3aux.s -o build/w3aux.o
+	$(LD) -C cfg/w3aux.cfg build/w3aux.o -o build/w3aux.bin -Ln build/w3aux.lbl
 	python3 tools/make_512k.py $@ $@   # 512K default (docs/42; SuperPico set aside per user)
 	@cp build/rel.dbg build/dbg.txt   # the sim harness reads symbols from here:
 	@echo "built $@ ($$(wc -c < $@) bytes)"   # no separate debug build anymore
