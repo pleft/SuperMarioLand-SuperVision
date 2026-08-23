@@ -285,8 +285,14 @@ W3FLAGS = $0B                    ; NMI | TIMER_IRQ | LCD
 .proc w2_go                      ; the shared allocate+seed (A=type, Y=entry)
     jsr obj_alloc_typed
     bcs @full                    ; pool full: C=1 -> the spawner retries
-    stz o_pdr,x                  ; fresh slot: NOTHING to erase (a stale "was
-                                 ; drawn" flag ghost-restored map tiles)
+    lda o_pdr,x                  ; the previous occupant's image is STILL ON
+    beq :+                       ; SCREEN (it died this frame; its leftover
+    stz o_type,x                 ; erase runs next render). Clearing o_pdr here
+    sec                          ; ORPHANED those pixels -- the user's "trails
+    rts                          ; after killing enemies" and ghost artifacts.
+:                                ; Give the slot back and retry next frame;
+                                 ; spawns fire ~184px off-screen, so one frame
+                                 ; of delay is invisible.
     jsr spawn_tabx               ; world x = fire + 192 + x_off*4 (the GB rule)
     lda spawn_tab+2,y
     sta o_y,x
@@ -590,7 +596,11 @@ w2_rts:
     lda #OBJ_WBALL
     jsr obj_alloc_typed
     bcs @full                    ; pool full: the shot fizzles
-    stz o_pdr,x
+    lda o_pdr,x                  ; still-drawn corpse of a same-frame death:
+    beq :+                       ; don't orphan its pixels -- fizzle, the
+    stz o_type,x                 ; shooter's next volley refires (see w2_go)
+    bra @full
+:
     ldy oi                       ; from the shooter's mouth
     lda o_xl,y
     sta o_xl,x
@@ -995,7 +1005,11 @@ mek_award:                       ; +100 tag at the victim, slot X
     lda #OBJ_MHEAD
     jsr obj_alloc_typed
     bcs @full
-    stz o_pdr,x
+    lda o_pdr,x                  ; same still-drawn guard as w2_go/spawn_wball
+    beq :+
+    stz o_type,x
+    bra @full
+:
     ldy oi
     lda o_xl,y
     sta o_xl,x

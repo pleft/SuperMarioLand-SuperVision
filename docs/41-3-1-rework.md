@@ -526,3 +526,26 @@ Mario drops off the ride, like the GB's own screen-edge stop.
 
 Left for later: the last ~20 logic frames to exact GB parity in the Tokotoko
 zone belong to #24's composite renderer (erase+draw in one pass).
+
+## The kill-trail orphan (user-reported on the parity build)
+
+User: "trails especially after killing enemies and in some times artifacts
+would spawn out of nowhere." The hole: when an enemy dies ON SCREEN, its
+image waits one render for the dead-slot leftover erase -- but the spawner
+runs in the SAME logic phase, and the kit's allocate path stamped `stz
+o_pdr` on the reused slot ("fresh slot: nothing to erase"), orphaning the
+corpse's pixels on screen forever. Fix (w2_go + spawn_wball + mek_fire): a
+slot whose previous occupant is still drawn is REFUSED for one frame -- the
+render erases the leftover, the spawner retries next frame (spawns fire
+~184px off-screen; the delay is invisible). The engine-side spawns never had
+the hole: they keep o_pdr/o_pvx, so the new occupant's first dirty pass
+erases the old image.
+
+Verification limits, stated honestly: the hole is code-proven, and the fixed
+build shows ZERO persistent world-space strays across a 2,300-frame scrolled
+route replay plus tight-mask parked sweeps in three zones -- but the exact
+kill+same-frame-spawn collision did not occur under any scripted replay, so
+the user's sighting could not be reproduced pre-fix either. If trails
+reappear on this build, the next suspect is the eviction path (POPUP/SQUASH/
+CORPSE victims), which reads as self-healing but is untested under pool
+pressure.
