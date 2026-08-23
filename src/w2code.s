@@ -183,9 +183,9 @@ W3FLAGS = $0B                    ; NMI | TIMER_IRQ | LCD
     beq @big
     dey
     bpl :-
-    jsr @left8                   ; default box: 8px left, 16px tall, 32px wide
-    lda #$84                     ; ($84 = one 16x16 quad; big metasprites are
-    rts                          ;  ALL in the exception tables now, task #30)
+    jsr @left8                   ; default box: 8px left, 24px tall, 40px wide
+    lda #$C5                     ; (REVERTED from the tight $84: the Batadon's
+    rts                          ;  wing band trailed -- user-caught, docs/41)
 @big:
     lda o_pvy,x                  ; a taller metasprite: lift the erase origin
     sec

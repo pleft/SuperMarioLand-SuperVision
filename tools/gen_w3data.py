@@ -188,15 +188,9 @@ def main():
         # anchor, 24px tall). A few metasprites are bigger; list ONLY those,
         # with the y-origin adjust (in 8px rows) and the engine's width byte
         # (bit7 = +1 row, bit6 = +1, bit5 = +2, low bits = 8px columns).
-        # DEFAULT SHRUNK for task #30: it was 40x24 ($C5, sized for the
-        # Batadon's [wing|head|wing] band) and every 16x16 Tokotoko/Ganchan/
-        # missile paid 15-20 erased cells where 8-12 suffice -- the single
-        # fattest render cost in a busy 3-1 frame. New default = $84 (a 16x16
-        # quad: 4 cols from x-8, 16px tall from y-8, erase_slot adds the
-        # unaligned +1 row dynamically). Everything bigger gets an EXACT
-        # exception; the four legacy big ones keep their old (conservative)
-        # bytes so the boss erases stay byte-identical.
-        LEGACY = {0x4E, 0x4F, 0x54, 0x55}
+        # (the tight-$84 default experiment is REVERTED: the Batadon's 40px
+        # wing band under-erased and trailed -- user-caught on the first kill.
+        # Back to the proven conservative default; exceptions only for BIGGER.)
         exc = []
         for p in params:
             e = ents(p)
@@ -204,24 +198,15 @@ def main():
                 continue
             miny = min(y for y, _ in e); maxy = max(y for y, _ in e) + 8
             minx = min(x for _, x in e); maxx = max(x for _, x in e) + 8
-            if miny >= -8 and maxy <= 8 and minx >= -8 and maxx <= 16:
-                continue                      # fits the tight $84 default
-            if p in LEGACY:
-                yadj = (-miny - 8) // 8
-                rows = (maxy - miny) // 8 + 1
-                cols = (maxx - minx) // 8 + 1
-                wb = 0x80 | cols
-                if rows >= 3: wb |= 0x40
-                if rows >= 4: wb |= 0x20
-            else:
-                yadj = max(0, (-miny - 8) // 8)
-                srows = (maxy + 8 + yadj * 8) // 8   # from the lifted origin
-                cols = (maxx - minx) // 8 + 1
-                wb = {1: 0x80, 2: 0x80, 3: 0xC0,
-                      4: 0xA0, 5: 0xE0}[min(max(srows, 1), 5)] | cols
+            if miny >= -8 and maxy <= 16 and minx >= -8 and maxx <= 32:
+                continue                      # inside the default box
+            yadj = (-miny - 8) // 8
+            rows = (maxy - miny) // 8 + 1
+            cols = (maxx - minx) // 8 + 1
+            wb = 0x80 | cols
+            if rows >= 3: wb |= 0x40
+            if rows >= 4: wb |= 0x20
             exc.append((p, yadj, wb))
-        print(f"gen_w3data: erase exceptions: " +
-              ", ".join(f"${p:02X}:y{y*8}:${w:02X}" for p, y, w in exc))
         f.write(f"W3_NEXC = {len(exc)}\n")
         f.write("w3_excp:\n    .byte " + ",".join(f"${p:02X}" for p, _, _ in exc) + "\n")
         f.write("w3_excy:\n    .byte " + ",".join(f"{y*8}" for _, y, _ in exc) + "\n")
