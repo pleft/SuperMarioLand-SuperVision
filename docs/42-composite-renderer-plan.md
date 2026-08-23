@@ -140,3 +140,14 @@ NEXT (half 2 -- the stash + dispatch), with the decisions already made:
   image; the plan currently assumes yes).
 - Then: gates + flickermeter delta (baseline: cannons 14/199, tokotoko
   45/369, ganchan 2/26 flicker-frames) + stray sweep + ship.
+
+## Singles-erase answer (session-end finding, verify next)
+
+erase_slot's ONLY caller is pass 3a, gated on o_nfl bit0 + o_pdr. restore_bg's
+other callers are Mario and the pipe paths. Therefore bit0 is NOT just
+"entangled" -- it must be pass 1's "needs an erase" mark (moved/anim sprites),
+with @spread ADDING overlap victims to the same bit; that is how singles stay
+clean today. CONSEQUENCE for the composer: a composed object must keep bit0
+CLEAR (or o_pdr=0) so pass 3a never erases it -- re-plan the o_pdr=1
+bookkeeping idea from the handoff with this in mind, and VERIFY by reading
+pass 1's classification before wiring anything.
