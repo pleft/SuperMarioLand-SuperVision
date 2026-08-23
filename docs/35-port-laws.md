@@ -419,3 +419,14 @@ rotated 180 deg via display-list control bit5 = Y-flip. A session's worth of
 measurements filed under the wrong names survived the swap only because every
 number was tagged with its TYPE ID; keep tagging measurements with type ids,
 never nicknames.
+
+**E31. Validate a perceptual win in a scenario the player actually plays.**
+The composite renderer's metric -- object-frames blank while Mario is parked
+in the sky -- showed a 40x improvement; the player, whose Mario is always
+NEAR the enemies being watched (exactly the objects the eligibility rules
+exclude), saw nothing, and the churn cost him ~10% logic rate on top. The
+instrument was honest, the scenario was not. Before shipping anything whose
+value is "the user will see it": measure with Mario played into the scene by
+input, near the action, on the NORMAL build -- and A/B against the previous
+build with forced-clean rebuilds (make silently reuses stale objects across
+git checkouts; the first A/B compared a ROM against itself).

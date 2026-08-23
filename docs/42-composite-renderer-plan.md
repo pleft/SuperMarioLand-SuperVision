@@ -190,3 +190,32 @@ NEXT for more coverage: a second context needs 152B of RAM from somewhere
 (candidates: shrink the W3 column cache to 8 slots = 128B, still short; or
 group-compose in the aux page, which also lifts the overlap restriction --
 the real endgame for crowds and for 2-3).
+
+## v1 VERDICT (user-tested, 2026-08-23 night): GATED OFF
+
+The user saw no flicker improvement and FELT a slowdown; both verified by a
+proper A/B (after a first invalid A/B -- `make` silently skipped rebuilds
+across git checkouts and compared a ROM against itself; force-clean the god
+objdir when building historical flavors):
+
+    zone         pre   composed        (logic frames / 600, 585 = full)
+    two-cannon   553   552
+    tokotoko     458   411   <- the claim/release churn among overlapping
+    ganchan      502   511      rollers; each release = a 9-cell writeback
+
+Why invisible in play: ONE context (all RAM pools exhausted) + the overlap
+and near-Mario exclusions mean the protected object is almost never the one
+the player is watching. The 1/197-vs-82/394 blank measurement was real but
+taken with Mario parked in the SKY watching isolated enemies -- a scenario
+no player experiences. CX_EN (init 0) now gates the dispatch; everything
+stays in the image, dormant.
+
+What v1 leaves behind, all committed and unit-tested: the 512K image with
+the page-8 aux mechanism, the bank-6 W3X/W3X2 pins, the walk relocation, the
+save-under composer with the ring-seam wrap + the column-cache identity trap
+solved, the stash/eligibility machinery, the flickermeter, and the traps
+list. The group-compose evolution (compose overlapping CLUSTERS in one
+region) is the only design on the table that would be user-visible: it
+lifts both the coverage limit and the overlap exclusion, and would also fix
+2-3's parked flicker. Cost estimate: a multi-sprite stash, region merging,
+and 300+ bytes of aux code -- all of which now have room.
