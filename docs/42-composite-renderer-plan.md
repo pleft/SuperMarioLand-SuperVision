@@ -151,3 +151,16 @@ clean today. CONSEQUENCE for the composer: a composed object must keep bit0
 CLEAR (or o_pdr=0) so pass 3a never erases it -- re-plan the o_pdr=1
 bookkeeping idea from the handoff with this in mind, and VERIFY by reading
 pass 1's classification before wiring anything.
+
+## Pass-1 classification VERIFIED (reading the code, session end)
+
+o_nfl bit1 = visible, bit0 = DIRTY (mover/anim/stream-hit; also set on an
+invisible slot with o_pdr for the leftover erase). Pass 3a erases bit0+o_pdr.
+So the composed contract is simply **o_pdr = 0**: pass 3a never touches the
+object, dead-slot leftovers skip it too (no self-clean -- the composer's own
+release rules from the handoff must cover death, which they do: eligibility
+loss uncomposes while alive, corpses fall off-screen before culling). p4_one
+sets o_pdr=1 after every draw, so the composed dispatch must CLEAR it again
+(or return via a path that skips @wset) -- one stz in the window dispatch.
+The dirty budget applies to composed objects unchanged (fine: compose cost
+~= old draw cost). Everything needed for the wiring is now known.
