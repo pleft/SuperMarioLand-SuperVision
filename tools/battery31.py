@@ -151,7 +151,9 @@ if Aa and Bb:
             for dy in range(-3,4):
                 y0,x0=tb[3]+dy,tb[2]+dx
                 if not(0<=x0<=144 and 0<=y0<=144): continue
-                if int((rot!=Ff[tb[0],y0:y0+16,x0:x0+16]).sum())<=12: flip_ok=True; break
+                rb=Ff[tb[0],y0:y0+16,x0:x0+16]
+                m=(rot!=65535)&(rb!=65535)          # compare boulder pixels only:
+                if int(m.sum())>=100 and int(((rot!=rb)&m).sum())<=4: flip_ok=True; break  # the bg under it differs by position
             if flip_ok: break
         if flip_ok: break
 # drop frames LOCKED TO THE TRAJECTORY, not the clock: engine speed changes

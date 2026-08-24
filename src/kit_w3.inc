@@ -90,6 +90,7 @@ CXS_SPRC   = $014F
 CXS_MODE   = $0150               ; walk mode: 0 draw, 1 stash
 CXS_T2     = $0151
 CXS_T3     = $0152
+CXS_BOXOK  = $0153               ; 1 = CXA_* box computed this walk
 
 ; --- spawn: A = GB type, Y = spawn entry offset. C=0 consumed. -------------
 .segment "W2FAR"
@@ -816,7 +817,18 @@ CXS_T3     = $0152
     iny
     jmp @walk
 @stash:                          ; STASH mode (docs/42 v2): record the tile
-    ldx CXS_N
+    lda tmpH3                    ; BEHIND-capable tiles ($87-$88, $92-$95, $EE)
+    cmp #$EE                     ; keep the old path AND get no overlay entry:
+    beq @stash_over              ; their pixels hide behind the pipe (w3_behind)
+    cmp #$87
+    bcc :+
+    cmp #$89
+    bcc @stash_over
+:   cmp #$92
+    bcc :+
+    cmp #$96
+    bcc @stash_over
+:   ldx CXS_N
     cpx #4
     bcs @stash_over
     lda tmpH3
@@ -880,9 +892,20 @@ CXS_T3     = $0152
 @e: jsr cs_entryx                ; tmpL2 -> entry X
     lda (tmpL2)
     beq @n
-    and #$7F                     ; sanity: nt must be 1..4 (padding/garbage
+    and #$0F                     ; sanity: nt 1..4 and cols/rows 1..3 (garbage
     cmp #5                       ; would send the composer over 255x255 cells)
+    bcs @bad
+    ldy #3
+    lda (tmpL2),y
+    beq @bad
+    cmp #4
+    bcs @bad
+    iny
+    lda (tmpL2),y
+    beq @bad
+    cmp #4
     bcc :+
+@bad:
     lda #0
     sta (tmpL2)
     bra @n
@@ -963,6 +986,7 @@ CXS_T3     = $0152
     lda #1
     sta CXS_MODE
     stz CXS_N
+    stz CXS_BOXOK
     jsr w6_draw                  ; the walk in STASH mode (fills CXS_*)
     ldx oi
     jsr cs_entryx
@@ -1066,6 +1090,7 @@ CXS_T3     = $0152
     adc CXA_DCOL0
     cmp #41
     bcs @pj2
+    inc CXS_BOXOK                ; the box is valid from here on
     bra @pn0
 @pj2:
     jmp w6_cx_tail
@@ -1318,13 +1343,15 @@ CXS_T3     = $0152
     clc                          ; this frame: plain draw after the sweep; the
     rts                          ; overlay-only entry is filled next frame
 @pfill:
-    lda CXS_N                    ; PLAIN this frame: still record the tiles as an
+    lda CXS_BOXOK                ; PLAIN this frame: record the tiles as an
     beq @pnone                   ; OVERLAY-ONLY entry (bit6) so composed
-    cmp #5                       ; neighbours paint us instead of bailing
-    bcs @pnone
-    jsr w6_fill                  ; (box + tiles; needs CXA_* from above -- when
-    lda (tmpL2)                  ;  the bail happened before the box, CXS_N/box
-    ora #$40                     ;  may be incomplete: w6_fill guards via CXA_COLS)
+    lda CXS_N                    ; neighbours paint us instead of bailing --
+    beq @pnone                   ; ONLY when the box was computed (a bail before
+    cmp #5                       ; it leaves stale CXA_* -> a garbage box ->
+    bcs @pnone                   ; the composer over 255x255 cells = the user's
+    jsr w6_fill                  ; FREEZE) and never for BEHIND-tile objects
+    lda (tmpL2)                  ; (the cannon painted over its pipe, user-caught)
+    ora #$40
     sta (tmpL2)
     clc
     rts
