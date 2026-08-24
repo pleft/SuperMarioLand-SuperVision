@@ -485,6 +485,7 @@ def pack_w3(img, sym, prefix, l11):
     coff3 = BNK6 + 0xBB80 - BASE
     assert all(b == 0xFF for b in img[coff3:coff3 + 128]), "bank 6 $BB80 busy"
     img[coff3:coff3 + 128] = cre3
+    assert w3c_sz <= 0x770, f"W3 window code ({w3c_sz:#x}) runs into the composer stash at $1C70"
     win = full3[:w3c_sz]
     assert len(win) <= 0x800, "W3 kit exceeds the $800 window"
     assert all(b == 0xFF for b in img[BNK6 + W3WIN - BASE:BNK6 + W3WIN - BASE + 0x800]), \

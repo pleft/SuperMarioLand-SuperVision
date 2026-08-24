@@ -25,11 +25,20 @@ big = bytearray(img + b"\xFF" * (0x80000 - 0x40000 - 0x4000) + img[-0x4000:])
 import os
 P8 = 8 * 0x8000
 big[P8:P8 + 0x4000] = img[1 * 0x8000:1 * 0x8000 + 0x4000]   # bank 1 = page 1 low
+# v2 (docs/42): the composer runs under page 8 and needs, at their NORMAL
+# addresses, the prefix + bank-1 charset (bgc) -- the full bank-1 copy gives
+# both -- plus the W3 sprite slice, mirrored from bank 6 $B740 over the
+# bank-1 tail (scripts: never read during a draw), and its own code at $BB00.
+B6 = 6 * 0x8000
+# The bank-1 TAIL ($B540+) holds the W3 bg charset (bgc) -- it must stay
+# intact. The level-header region $A5EE-$B53F is dead during a draw: the
+# slice mirror goes to $A600 and the composer blob to $A9C0.
+big[P8 + 0x2600:P8 + 0x2600 + 960] = img[B6 + 0x3740:B6 + 0x3740 + 960]   # slice mirror at $A600
 aux = "build/w3aux.bin"
 if os.path.exists(aux):
     blob = open(aux, "rb").read()
-    assert len(blob) <= 0x1960, "w3aux blob exceeds the AUX window"
-    big[P8 + 0x2620:P8 + 0x2620 + len(blob)] = blob
+    assert len(blob) <= 0x0B80, "w3aux blob exceeds the AUX window ($A9C0-$B53F)"
+    big[P8 + 0x29C0:P8 + 0x29C0 + len(blob)] = blob
 assert len(big) == 0x80000
 open(out, "wb").write(bytes(big))
 print(f"wrote {out} (512K; page 8 = aux [bank-1 prefix + {os.path.getsize(aux) if os.path.exists(aux) else 0}B blob], 9-14 free)")

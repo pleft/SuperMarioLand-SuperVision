@@ -98,13 +98,14 @@ chk("boulder rolls + grounded + ping-pong",bool(moved and grounded and revs>=2),
 # and drop Mario onto where it will be (lead = its direction * fall time).
 Rs=run(NORM,920,".920","0xB4:0xD0@200,0xB5:0x07@200,0xA4:20@200,0x1B:96@200")
 tj={}
-for i in range(560,880):
+for i in range(300,880):
     for k in range(10):
         if Rs[i][0xFDA+k]==36 and Rs[i][0xBEB+k]==7:
             cam=Rs[i][0xB4]|(Rs[i][0xB5]<<8)
-            tj[i]=(Rs[i][0xFE4+k]|(Rs[i][0xFEE+k]<<8))-cam
+            sx=(Rs[i][0xFE4+k]|(Rs[i][0xFEE+k]<<8))-cam
+            if 20<=sx<=130: tj[i]=sx        # only ON-SCREEN roller positions
 ok=False; det=""
-for f0 in sorted(tj)[::12][:8]:
+for f0 in sorted(tj)[::10][:12]:
     lead=tj.get(f0+16,tj[f0])
     dx=max(8,min(150,lead))
     R=run(NORM,920,".920",f"0xB4:0xD0@200,0xB5:0x07@200,0xA4:20@200,0x1B:96@200,0xA4:{dx}@{f0},0x1B:80@{f0}")

@@ -219,3 +219,49 @@ region) is the only design on the table that would be user-visible: it
 lifts both the coverage limit and the overlap exclusion, and would also fix
 2-3's parked flicker. Cost estimate: a multi-sprite stash, region merging,
 and 300+ bytes of aux code -- all of which now have room.
+
+## v2 = GROUP COMPOSE, map-based (2026-08-24) -- SHIPPED ON
+
+Design (replaces save-under): page 8 = the FULL bank-1 image (prefix, the W3
+bg charset in the tail -- bgc resolves normally) with the W3 sprite slice
+mirrored at $A600 and the composer at $A9C0 (the dead level-header region).
+Each W3 object's draw runs the display-list walk in STASH mode (bank 6, W3X2)
+recording its tiles/box into a per-slot stash (20B, $1C70 / $1FA0), makes
+the map columns of old+new boxes cache-hot (w6_touch), then the composer
+(page 8) rebuilds every cell of old+new boxes from the MAP (column cache ->
+map_transform -> get_tile_src, sky fast path) with EVERY stash entry's
+tiles overlaid (prefiltered per compose), one 16-byte write per cell (ring
+seam wrapped). No contexts, no RAM squeeze, no overlap rule: overlapping
+sprites compose together because the bg source is sprite-free. Plain-path
+W3 objects (behind tiles, >4 tiles, HUD/bottom/right-margin boxes) get
+OVERLAY-ONLY entries (bit6) so composed neighbours paint them rather than
+bail. Composed objects hold o_pdr=0 (w3_step clears it each update AFTER
+w3_ffc7 -- cs_entry clobbers tmpL2 which ffc7 consumes: that ordering bug
+had broken the wall probe in both modes for a while); if o_pdr leaks on a
+stagger frame, w3_width parks o_pvy=$F0 so the old erase is a no-op.
+Unchanged objects early-out (identical stash + no foreign old image near).
+Dead/invisible owners are marked DYING once per frame (w6_frame, with their
+columns pre-touched) and their boxes recomposed without them (aux_sweep).
+
+MEASURED (E31: Mario PLAYED into the scene by the svauto route, same build,
+composer toggled by poking CX_EN=$1FE0):
+    ROUTE   torn sprites  54 -> 3  of ~363 object-frames   logic 1489 -> 1310 (-12%)
+    parked crowd (3 rollers, Mario in the sky): torn 5.5% -> 7.3%, blank 2.9% -> 3.1%
+        (both dominated by screen-edge partials), logic 546 -> 470 (-14%)
+    parked cannons: equal;  parked ganchan: torn 0 -> 7/29, logic -10%
+"Torn" (a sprite drawn partially -- the NMI catching erase-then-draw) is what
+reads as flicker; blank-rect counting had missed it entirely. Gates: battery
+10/10 (roomscript re-recorded), aux unit tests (tools/test_aux2.py, all flip
+combinations bit-exact), stray sweep clean (1 mask-edge false positive),
+svgold identical except level 6.
+
+Bugs the gates caught on the way: init's bpl loop >128 (stash left $FF ->
+composer over 255x255 cells = freeze); composer scratch colliding with the
+stack (physics chaos); page-8 layout clobbering the bgc charset in the
+bank-1 tail; sweep restoring X from a reused temp (hundreds of column
+fills per frame); the w3_step hook ordering vs w3_ffc7 (tmpL2).
+
+OPEN: the -12% logic cost (compose ~= 3x a plain draw per moving object;
+per-cell bg fetch + overlay tests dominate -- per-column id precompute and
+an unrolled cell write are the next cuts); Batadon/corpse coverage (>4
+tiles); 2-3 could get the same treatment (its own bank layout).

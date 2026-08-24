@@ -1,435 +1,257 @@
-; W3AUX -- the save-under composer (docs/42). Lives at $A620 in PAGE 8:
-; make_512k lays that page out as [bank-1 prefix copy][THIS BLOB][$FF...].
-; Reached ONLY via the plain-$2021 dance (the W3LINK mechanism); NEVER via
-; SYS_CTRL bit5 (every SYS_CTRL write restarts the LCD scan -- docs/42).
+; W3AUX v2 -- the GROUP composer (docs/42). Lives at $BB00 in PAGE 8, which
+; make_512k lays out as the FULL bank-1 image with the W3 sprite slice mirrored
+; at $B740 and this blob over the (never-read-during-a-draw) bank-1 tail. So
+; under page 8 everything resolves at its normal address: the prefix, the
+; bank-1 W3 charset (bgc -> get_tile_src), the sprite slice (quad_base math),
+; FIXED (set_dst, map_transform, chardata, revpix), all RAM.
 ;
-; Everything here touches RAM or FIXED only: the shift tables (shtab
-; $0200/$0600), MASKTAB ($0600 page 0), set_dst, zp scratch, the contexts in
-; the video-RAM tail. It never reads the map or any banked data -- that is
-; the point of save-under: the context holds the pristine background bytes
-; under the sprite, saved from VRAM (correct by induction), so a move is
-; "write back the vacated cells, save+compose the new ones", all single
-; stores. The sprite is never absent from VRAM => no flicker, ever, even
-; when the frame overruns and the beam catches the render mid-way.
+; The background of every composed cell is REBUILT FROM THE MAP (ids from the
+; W3 column cache, made hot by the kit under bank 6 right before), then every
+; stash entry's tiles that touch the cell are overlaid, and the 16 bytes are
+; written once. Sprites are never absent from VRAM; overlapping sprites share
+; cells correctly because the bg source is sprite-free by construction; no
+; per-object context, no RAM squeeze, no staleness (the map is the truth).
+;
+; Reached ONLY via the plain-$2021 dance; NEVER via SYS_CTRL bit5.
 
 .include "w2abi.inc"
 
 MASKTAB     = $0600              ; transparency mask of a 2bpp byte (shtab_hi p0)
-shtab_lo    = $0200              ; boot-built shift tables (page = subx)
+shtab_lo    = $0200              ; boot-built shift tables (page = subx; page 0
+                                 ; is the W3 COLUMN CACHE -> identity computed)
+W3CDATA     = $0200
+W3CTAG      = $1F80
+W3TILB      = $A600              ; the slice MIRROR in page 8 (ids $A0+ -> +(id-$A0)*16)
 VSTRIDE     = $30
 
-; --- the context: the kit window's TAIL ($1500+$6xx code, cap asserted by
-; pack_banks at $1C5F) -- RAM, persists across frames, and the level-load
-; window copy plus kit init reset it for free. NOT the VRAM tail: the fb is
-; a RING of $1FE0 bytes ($4000-$5FDF) and $5E00 sits inside it (docs/42).
-CTX0        = $1C60              ; one context, 152 bytes ($1C60-$1CF7)
-AUX_TILES   = $1FA0              ; 4 x 16B FINAL tile pixels ($1FA0-$1FDF;
-                                 ; $1F80 = W3CTAG, $1FE0+ spare)
-CX_OWN      = $1FE0              ; composing slot + 1 (0 = free)
-; ctx: +0 active($80)  +1 dcol0  +2 dy0  +3 cols  +4 rows
-;      +5/+6 ring_b snapshot (the DMA shift moves the whole ring: the stash
-;      re-bases dcol0 by the ring delta so cell identity survives)
-;      +8 saved[9*16]
+CS_A        = $1C70              ; stash slots 0..6 (20B each)
+CS_B        = $1FA0              ; stash slots 7..9
+; entry: +0 nt|dying($80) +1 dcol0 +2 dy0 +3 cols +4 rows +5 id[4] +9 tx[4]
+;        +13 ty[4] +17 flags (2 bits/tile)
 
-; --- scratch: stack page (live stack floor observed at $01ED) --------------
-SCRATCH     = $0136              ; 9 x 16 = 144B: the NEW saved-bg assembly
-AXV_DCOL0   = $01C6              ; NEW box: ring byte col of cell (0,0) (even)
-AXV_DY0     = $01C7              ; NEW box: pixel row of cell (0,0) (mult 8)
-AXV_COLS    = $01C8              ; 1..3
-AXV_ROWS    = $01C9              ; 1..3
-AXV_NT      = $01CA              ; 1..4 sprite tiles
-AXV_TX      = $01CB              ; 4B tile x (px, relative to the box origin)
-AXV_TY      = $01CF              ; 4B tile y
-AXV_CI      = $01D3              ; cell walkers
-AXV_RJ      = $01D4
-AXV_TN      = $01D5
-AXV_BCASE   = $01D6              ; x byte-offset case 0..3
-AXV_DYT     = $01D7              ; tile dy vs current cell (signed)
-AXV_B0      = $01D8              ; current tile row bytes
-AXV_B1      = $01D9
-AXV_S0      = $01DA              ; shifted row bytes
-AXV_S1      = $01DB
-AXV_S2      = $01DC
-AXV_R       = $01DD              ; source row
-AXV_BRB     = $01DE              ; dest row *2 in the cell buffer
-AXV_OCI     = $01DF              ; cell delta: old index = new index + delta
-AXV_ORJ     = $01E0
-AXV_ACT     = $01E1              ; ctx active snapshot
-AXV_S       = $01E2              ; mix scratch
-AXV_MIX     = $01E3              ; mix target index
-AXV_SUB0    = $01E4              ; 1 = identity shift (dx&3==0): shtab page 0
-                                 ; is the W3 COLUMN CACHE (W3CDATA), not a
-                                 ; table -- compute s0/s1 directly
-AXV_REL     = $01E5              ; dispatch: lost ownership, uncompose first
+CXA_DCOL0   = $01C6              ; NEW box (the kit filled these)
+CXA_DY0     = $01C7
+CXA_COLS    = $01C8
+CXA_ROWS    = $01C9
+CXA_ODCOL0  = $01CA              ; OLD box (OCOLS=0: none)
+CXA_ODY0    = $01CB
+CXA_OCOLS   = $01CC
+CXA_OROWS   = $01CD
+CXA_SLOT    = $01CE
+
+; composer scratch -- LOW in the stack page ($0160+): the composer nests
+; deeper than anything before it and the stack reaches $01E0 under an NMI
+AX_CDC      = $0160              ; current cell: ring byte col (even)
+AX_CDY      = $0161              ; current cell: scanline (mult 8)
+AX_E        = $0162              ; entry walker
+AX_TN       = $0163              ; tile walker
+AX_BCASE    = $0164
+AX_DYT      = $0165
+AX_B0       = $0166
+AX_B1       = $0167
+AX_S0       = $0168
+AX_S1       = $0169
+AX_S2       = $016A
+AX_R        = $016B
+AX_BRB      = $016C
+AX_FL       = $016D              ; current tile flags (bit0 xf, bit1 yf)
+AX_S        = $016E
+AX_MIX      = $016F
+AX_SUB0     = $0170
+AX_CI       = $0171              ; box walkers
+AX_RJ       = $0172
+AX_T0       = $0173
+AX_T1       = $0174
+AX_NT       = $0175
+AX_BX0      = $0176              ; box being walked
+AX_BY0      = $0177
+AX_BC       = $0178
+AX_BR       = $0179
+AX_LIST     = $017A              ; entries touching the current union box
+                                 ; (slot indexes, $FF-terminated, <= 11 bytes)
+AX_UX0      = $0185              ; union bbox for the prefilter
+AX_UY0      = $0186
+AX_UX1      = $0187              ; exclusive ends (bytes / scanlines)
+AX_UY1      = $0188
 
 .segment "AUX"
 
-; aux_ping: infrastructure proof (harness/battery).
-.proc aux_ping
-    lda #$77
-    sta $0135
-    rts
-.endproc
-
 ; ---------------------------------------------------------------------------
-; ax_dst: dst_ptr = the VRAM cell (AXV_CI/RJ) of the NEW box.
-; C=1: the cell is past the 48-byte ring row -- never displayed, skip whole.
-.proc ax_dst
-    lda AXV_CI
-    asl
-    clc
-    adc AXV_DCOL0
-    cmp #48
-    bcs @skip
-    sta dcol
-    lda AXV_RJ
-    asl
-    asl
-    asl
-    clc
-    adc AXV_DY0
-    sta dy
-    jsr set_dst
-    clc
-    rts
-@skip:
-    sec
-    rts
-.endproc
-
-; ax_odst: the same for an OLD-box cell (box read from the ctx at tmpL).
-.proc ax_odst
-    ldy #1
-    lda AXV_CI
-    asl
-    clc
-    adc (tmpL),y
-    cmp #48
-    bcs @skip
-    sta dcol
-    ldy #2
-    lda AXV_RJ
-    asl
-    asl
-    asl
-    clc
-    adc (tmpL),y
-    sta dy
-    jsr set_dst
-    clc
-    rts
-@skip:
-    sec
-    rts
-.endproc
-
-; ax_sptr: tmpL2 -> &SCRATCH[(AXV_RJ*3 + AXV_CI) * 16]
-.proc ax_sptr
-    lda AXV_RJ
-    asl
-    adc AXV_RJ                   ; rj*3 (rj<=2: asl leaves C=0)
-    clc
-    adc AXV_CI
-    asl
-    asl
-    asl
-    asl
-    clc
-    adc #<SCRATCH
-    sta tmpL2
-    lda #>SCRATCH
-    adc #0
-    sta tmpH2
-    rts
-.endproc
-
-; ax_kptr: tmpL3 -> &ctx.saved[(X=rj)*3 + (A=ci)]  (ctx base in tmpL)
-.proc ax_kptr
-    sta AXV_S                    ; ci
+; ax_entry: tmpL/tmpH -> stash entry X (X preserved)
+.proc ax_entry
+    phx
     txa
+    cmp #7
+    bcc :+
+    sbc #7
+    ldy #<CS_B
+    sty tmpL
+    ldy #>CS_B
+    bra @m
+:   ldy #<CS_A
+    sty tmpL
+    ldy #>CS_A
+@m: sty tmpH
     asl
-    adc AXV_S                    ; rj*2 + ci (rj<=2: C=0 after asl)
-    sta AXV_S
-    txa
+    asl
+    sta AX_T0
+    asl
+    asl
     clc
-    adc AXV_S                    ; rj*3 + ci
-    asl
-    asl
-    asl
-    asl                          ; *16 (<= 128)
-    clc
-    adc #8
+    adc AX_T0
     clc
     adc tmpL
-    sta tmpL3
-    lda tmpH
-    adc #0
-    sta tmpH3
-    rts
-.endproc
-
-; ax_rd16: the VRAM cell at dst_ptr -> 16 bytes at (tmpL2). Clobbers tmpL3.
-; The fb is a RING of $1FE0 bytes ($4000-$5FDF): row stepping must wrap at
-; the seam like the engine's ring_next_dst (a straddling cell painted a
-; full-height garbage band -- caught by the stray sweep).
-.proc ax_rd16
-    lda dst_ptr
-    sta tmpL3
-    lda dst_ptr+1
-    sta tmpH3
-    ldx #8
-@r: lda (tmpL3)
-    sta (tmpL2)
-    ldy #1
-    lda (tmpL3),y
-    sta (tmpL2),y
-    lda tmpL3
-    clc
-    adc #VSTRIDE
-    sta tmpL3
+    sta tmpL
     bcc :+
-    inc tmpH3
-:   jsr ax_wrap
-    lda tmpL2
-    clc
-    adc #2
-    sta tmpL2
-    bcc :+
-    inc tmpH2
-:   dex
-    bne @r
-    rts
-.endproc
-
-; ax_wr16: 16 bytes at (tmpL3) -> the VRAM cell at dst_ptr. Clobbers tmpL2.
-.proc ax_wr16
-    lda dst_ptr
-    sta tmpL2
-    lda dst_ptr+1
-    sta tmpH2
-    ldx #8
-@r: lda (tmpL3)
-    sta (tmpL2)
-    ldy #1
-    lda (tmpL3),y
-    sta (tmpL2),y
-    lda tmpL3
-    clc
-    adc #2
-    sta tmpL3
-    bcc :+
-    inc tmpH3
-:   lda tmpL2
-    clc
-    adc #VSTRIDE
-    sta tmpL2
-    bcc :+
-    inc tmpH2
-:   jsr ax_wrap2
-    dex
-    bne @r
-    rts
-.endproc
-
-; ax_wrap/ax_wrap2: wrap a roving VRAM pointer at the ring seam ($5FE0).
-.proc ax_wrap                    ; tmpL3/tmpH3
-    lda tmpH3
-    cmp #$5F
-    bcc @ok
-    bne @w
-    lda tmpL3
-    cmp #$E0
-    bcc @ok
-@w: lda tmpL3
-    sec
-    sbc #$E0
-    sta tmpL3
-    lda tmpH3
-    sbc #$1F
-    sta tmpH3
-@ok:
-    rts
-.endproc
-
-.proc ax_wrap2                   ; tmpL2/tmpH2
-    lda tmpH2
-    cmp #$5F
-    bcc @ok
-    bne @w
-    lda tmpL2
-    cmp #$E0
-    bcc @ok
-@w: lda tmpL2
-    sec
-    sbc #$E0
-    sta tmpL2
-    lda tmpH2
-    sbc #$1F
-    sta tmpH2
-@ok:
+    inc tmpH
+:   plx
     rts
 .endproc
 
 ; ---------------------------------------------------------------------------
-; ax_mix: masked-merge A into flipbuf[AXV_MIX]. A=0 = wholly transparent.
+; ax_mix: masked-merge A into flipbuf[AX_MIX]. A=0 = wholly transparent.
 .proc ax_mix
     beq @out
-    sta AXV_S
+    sta AX_S
     tay
     lda MASKTAB,y
     eor #$FF
-    ldx AXV_MIX
+    ldx AX_MIX
     and flipbuf,x
-    ora AXV_S
+    ora AX_S
     sta flipbuf,x
 @out:
     rts
 .endproc
 
-; ax_over: overlay sprite tile AXV_TN onto flipbuf for cell (AXV_CI, AXV_RJ).
-; dx/dy = tile px - cell px; overlap iff -8 < d < 8. subx = dx & 3 selects a
-; shtab page; the byte-offset case = (dx+8)>>2:
-;   0 (B=-2): s2 -> buf+0        2 (B= 0): s0 -> buf+0, s1 -> buf+1
-;   1 (B=-1): s1 -> buf+0, s2+1  3 (B=+1): s0 -> buf+1
+; ---------------------------------------------------------------------------
+; ax_over: overlay one tile onto flipbuf. In: tmpL3 = tile pixels (16B),
+; AX_FL = flips, X = dx (signed, -7..7), AX_DYT = dy (signed, -7..7).
+; subx = dx & 3 -> shtab page (page 0 = identity, computed); byte-offset
+; case = (dx+8)>>2: 0: s2->buf+0 | 1: s1->+0,s2->+1 | 2: s0->+0,s1->+1 | 3: s0->+1
 .proc ax_over
-    ldx AXV_TN
-    lda AXV_CI
-    asl
-    asl
-    asl
-    sta AXV_S                    ; ci*8
-    lda AXV_TX,x
-    sec
-    sbc AXV_S                    ; dx
-    tay
-    clc
-    adc #8
-    cmp #16
-    bcc :+                       ; no x overlap
-    jmp @out
-:   lsr
-    lsr
-    sta AXV_BCASE
-    tya
+    txa
     and #3
-    sta AXV_SUB0                 ; 0 = identity (page 0 is the column cache!)
+    sta AX_SUB0
     clc
     adc #>shtab_lo
     sta p_shlo+1
     stz p_shlo
-    tya
+    txa
     and #3
     clc
-    adc #>shtab_lo + 4           ; the hi tables sit 4 pages above
+    adc #>shtab_lo + 4
     sta p_shhi+1
     stz p_shhi
-    lda AXV_RJ
-    asl
-    asl
-    asl
-    sta AXV_S                    ; rj*8
-    lda AXV_TY,x
-    sec
-    sbc AXV_S
-    sta AXV_DYT
+    txa
     clc
     adc #8
-    cmp #16
-    bcc :+                       ; no y overlap
-    jmp @out
-:   txa                          ; src = AUX_TILES + tn*16
-    asl
-    asl
-    asl
-    asl
-    clc
-    adc #<AUX_TILES
-    sta tmpL3
-    lda #>AUX_TILES
-    adc #0
-    sta tmpH3
-    stz AXV_R
+    lsr
+    lsr
+    sta AX_BCASE
+    stz AX_R
 @row:
-    lda AXV_R
+    lda AX_R
     clc
-    adc AXV_DYT                  ; br = r + dy
+    adc AX_DYT                   ; br = r + dy
     cmp #8
-    bcc @in                      ; clipped (negatives wrap >= $F8)
+    bcc @in
     jmp @next
 @in:
     asl
-    sta AXV_BRB
-    lda AXV_R
+    sta AX_BRB
+    lda AX_FL
+    and #2                       ; y-flip: source row 7-r
+    beq :+
+    lda AX_R
+    eor #$FF
+    clc
+    adc #8
+    bra @sr
+:   lda AX_R
+@sr:
     asl
     tay
     lda (tmpL3),y
-    sta AXV_B0
+    sta AX_B0
     iny
     lda (tmpL3),y
-    sta AXV_B1
-    lda AXV_SUB0
+    sta AX_B1
+    lda AX_FL
+    and #1                       ; x-flip: swap bytes + reverse pixels
+    beq @nxf
+    ldy AX_B1
+    lda revpix,y
+    pha
+    ldy AX_B0
+    lda revpix,y
+    sta AX_B1
+    pla
+    sta AX_B0
+@nxf:
+    lda AX_SUB0
     bne @tables
-    lda AXV_B0                   ; identity shift: never read page 0 (it is
-    sta AXV_S0                   ; the W3 column cache, not a table)
-    lda AXV_B1
-    sta AXV_S1
-    stz AXV_S2
+    lda AX_B0
+    sta AX_S0
+    lda AX_B1
+    sta AX_S1
+    stz AX_S2
     bra @cases
 @tables:
-    ldy AXV_B0                   ; s0 = shlo[b0]
+    ldy AX_B0
     lda (p_shlo),y
-    sta AXV_S0
-    lda (p_shhi),y               ; s1 = shhi[b0] | shlo[b1]
-    sta AXV_S1
-    ldy AXV_B1
+    sta AX_S0
+    lda (p_shhi),y
+    sta AX_S1
+    ldy AX_B1
     lda (p_shlo),y
-    ora AXV_S1
-    sta AXV_S1
-    lda (p_shhi),y               ; s2 = shhi[b1]
-    sta AXV_S2
+    ora AX_S1
+    sta AX_S1
+    lda (p_shhi),y
+    sta AX_S2
 @cases:
-    lda AXV_BCASE
+    lda AX_BCASE
     beq @c0
     cmp #1
     beq @c1
     cmp #2
     beq @c2
-    lda AXV_BRB                  ; case 3: s0 -> buf+1
+    lda AX_BRB                   ; case 3
     ina
-    sta AXV_MIX
-    lda AXV_S0
+    sta AX_MIX
+    lda AX_S0
     jsr ax_mix
     bra @next
 @c0:
-    lda AXV_BRB                  ; case 0: s2 -> buf+0
-    sta AXV_MIX
-    lda AXV_S2
+    lda AX_BRB
+    sta AX_MIX
+    lda AX_S2
     jsr ax_mix
     bra @next
 @c1:
-    lda AXV_BRB                  ; case 1: s1 -> buf+0, s2 -> buf+1
-    sta AXV_MIX
-    lda AXV_S1
+    lda AX_BRB
+    sta AX_MIX
+    lda AX_S1
     jsr ax_mix
-    lda AXV_BRB
+    lda AX_BRB
     ina
-    sta AXV_MIX
-    lda AXV_S2
+    sta AX_MIX
+    lda AX_S2
     jsr ax_mix
     bra @next
 @c2:
-    lda AXV_BRB                  ; case 2: s0 -> buf+0, s1 -> buf+1
-    sta AXV_MIX
-    lda AXV_S0
+    lda AX_BRB
+    sta AX_MIX
+    lda AX_S0
     jsr ax_mix
-    lda AXV_BRB
+    lda AX_BRB
     ina
-    sta AXV_MIX
-    lda AXV_S1
+    sta AX_MIX
+    lda AX_S1
     jsr ax_mix
 @next:
-    inc AXV_R
-    lda AXV_R
+    inc AX_R
+    lda AX_R
     cmp #8
     beq @out
     jmp @row
@@ -438,221 +260,538 @@ AXV_REL     = $01E5              ; dispatch: lost ownership, uncompose first
 .endproc
 
 ; ---------------------------------------------------------------------------
-; aux_compose: draw the object's NEW state, flicker-free.
-;   1. assemble the new box's pristine bg into SCRATCH: from the old ctx
-;      where the boxes overlap, from VRAM elsewhere (pure bg there).
-;   2. per new cell: buf = bg, overlay tiles, single-write to VRAM.
-;   3. write back every old cell the new box no longer covers.
-;   4. commit: SCRATCH -> ctx.saved, new box, active.
-; In: tmpL/tmpH = ctx base; the AXV block + AUX_TILES loaded by phase A.
-.proc aux_compose
-    lda (tmpL)
-    sta AXV_ACT
-    bpl @deltas0                 ; inactive: deltas irrelevant
-    ldy #1                       ; OCI = (new_dcol0 - old_dcol0) / 2 (signed,
-    lda AXV_DCOL0                ; even) -- old index = new index + delta
+; ax_bg: flipbuf = the map background of cell (AX_CDC, AX_CDY).
+; C=1: the cell is not a playfield cell (HUD/off) -> skip it whole.
+.proc ax_bg
+    lda AX_CDY
+    lsr
+    lsr
+    lsr
     sec
-    sbc (tmpL),y
-    cmp #$80
-    ror
-    sta AXV_OCI
-    ldy #2                       ; ORJ = (new_dy0 - old_dy0) / 8 (signed, x8)
-    lda AXV_DY0
-    sec
-    sbc (tmpL),y
-    cmp #$80
-    ror
-    cmp #$80
-    ror
-    cmp #$80
-    ror
-    sta AXV_ORJ
-    bra @step1
-@deltas0:
-    stz AXV_OCI
-    stz AXV_ORJ
-@step1:
-    stz AXV_RJ
-@s1r:
-    stz AXV_CI
-@s1c:
-    jsr ax_sptr                  ; tmpL2 -> scratch cell
-    lda AXV_ACT
-    bpl @fromvram
-    lda AXV_CI                   ; old ci = ci + OCI; inside the old box?
+    sbc #2                       ; map row = VRAM row - 2
+    cmp #18
+    bcs @skip
+    sta mrow
+    cmp #16
+    bcc @map
+    lda #$61                     ; the dirt band (restore_bg's rule)
+    bra @have
+@map:
+    lda AX_CDC                   ; world col = fb_col0 + dcol/2
+    lsr
     clc
-    adc AXV_OCI
-    ldy #3
-    cmp (tmpL),y                 ; unsigned: negatives wrap high and fail
-    bcs @fromvram
-    sta AXV_S
-    lda AXV_RJ
+    adc fb_col0
+    sta feet_col
+    lda fb_col0+1
+    adc #0
+    sta feet_col+1
+    lda feet_col                 ; the column cache (kit made it hot)
+    and #15
+    asl
+    tax
+    lda W3CTAG,x
+    cmp feet_col
+    bne @miss
+    lda W3CTAG+1,x
+    cmp feet_col+1
+    bne @miss
+    txa
+    asl
+    asl
+    asl
     clc
-    adc AXV_ORJ
-    ldy #4
-    cmp (tmpL),y
-    bcs @fromvram
-    tax                          ; rj_old
-    lda AXV_S                    ; ci_old
-    jsr ax_kptr                  ; tmpL3 -> old saved cell
+    adc mrow
+    tax
+    lda W3CDATA,x
+    jsr map_transform            ; the mod/multi-coin rules (FIXED)
+    bra @have
+@miss:
+    lda #$2C                     ; never (pre-touched) -- sky is the safe id
+@have:
+    cmp #$2C
+    beq @sky
+    jsr get_tile_src             ; src_ptr = the tile's pixels (bgc / chardata)
     ldy #15
-:   lda (tmpL3),y
-    sta (tmpL2),y
-    dey
-    bpl :-
-    bra @s1n
-@fromvram:
-    jsr ax_dst
-    bcs @zfill                   ; off-ring: content never shown; zero it so
-    jsr ax_rd16                  ; a later write-back stays harmless
-    bra @s1n
-@zfill:
-    lda #0
-    ldy #15
-:   sta (tmpL2),y
-    dey
-    bpl :-
-@s1n:
-    inc AXV_CI
-    lda AXV_CI
-    cmp AXV_COLS
-    bne @s1c
-    inc AXV_RJ
-    lda AXV_RJ
-    cmp AXV_ROWS
-    bne @s1r
-    ; ---- step 2: compose + write every new cell ----
-    stz AXV_RJ
-@s2r:
-    stz AXV_CI
-@s2c:
-    jsr ax_sptr
-    ldy #15                      ; buf = pristine bg
-:   lda (tmpL2),y
+:   lda (src_ptr),y
     sta flipbuf,y
     dey
     bpl :-
-    stz AXV_TN
-@s2t:
-    jsr ax_over
-    inc AXV_TN
-    lda AXV_TN
-    cmp AXV_NT
-    bne @s2t
-    jsr ax_dst
-    bcs @s2n
-    lda #<flipbuf
-    sta tmpL3
-    lda #>flipbuf
-    sta tmpH3
-    jsr ax_wr16
-@s2n:
-    inc AXV_CI
-    lda AXV_CI
-    cmp AXV_COLS
-    bne @s2c
-    inc AXV_RJ
-    lda AXV_RJ
-    cmp AXV_ROWS
-    bne @s2r
-    ; ---- step 3: write back old cells the new box no longer covers ----
-    lda AXV_ACT
-    bpl @commit
-    stz AXV_RJ                   ; AXV_CI/RJ now walk the OLD box
-@s3r:
-    stz AXV_CI
-@s3c:
-    lda AXV_CI                   ; new ci = old ci - OCI; inside the new box?
-    sec
-    sbc AXV_OCI
-    cmp AXV_COLS
-    bcs @s3w                     ; outside -> write back
-    sta AXV_S
-    lda AXV_RJ
-    sec
-    sbc AXV_ORJ
-    cmp AXV_ROWS
-    bcs @s3w
-    bra @s3n                     ; covered by the new image: leave it
-@s3w:
-    ldx AXV_RJ
-    lda AXV_CI
-    jsr ax_kptr                  ; tmpL3 -> old saved cell
-    jsr ax_odst
-    bcs @s3n
-    jsr ax_wr16
-@s3n:
-    inc AXV_CI
-    ldy #3
-    lda AXV_CI
-    cmp (tmpL),y
-    bne @s3c
-    inc AXV_RJ
-    ldy #4
-    lda AXV_RJ
-    cmp (tmpL),y
-    bne @s3r
-@commit:
-    ; ---- step 4: SCRATCH -> ctx.saved; store the new box; activate ----
-    lda tmpL
     clc
-    adc #8
-    sta tmpL2
-    lda tmpH
-    adc #0
-    sta tmpH2
-    ldx #0                       ; 144-byte copy in two Y sweeps
-    ldy #0
-:   lda SCRATCH,y
-    sta (tmpL2),y
-    iny
-    cpy #144
-    bne :-
-    ldy #1
-    lda AXV_DCOL0
-    sta (tmpL),y
-    iny
-    lda AXV_DY0
-    sta (tmpL),y
-    iny
-    lda AXV_COLS
-    sta (tmpL),y
-    iny
-    lda AXV_ROWS
-    sta (tmpL),y
-    lda #$80
-    sta (tmpL)
+    rts
+@sky:
+    ldy #15
+    lda #0
+:   sta flipbuf,y
+    dey
+    bpl :-
+    clc
+    rts
+@skip:
+    sec
     rts
 .endproc
 
 ; ---------------------------------------------------------------------------
-; aux_uncompose: leave composed mode -- write every saved cell back and
-; deactivate. Pure writes; the object's image vanishes with its bg restored
-; in the same stores (the caller redraws it through the old path if it still
-; lives). In: tmpL/tmpH = ctx.
-.proc aux_uncompose
-    lda (tmpL)
-    bmi :+
+; ax_cell: compose + write cell (AX_CDC, AX_CDY): bg, then every LIVE stash
+; entry's tiles that touch it, then one 16-byte write (ring-wrapped rows).
+.proc ax_cell
+    lda AX_CDC
+    cmp #48
+    bcc :+
+    rts                          ; past the ring row: never displayed
+:   jsr ax_bg
+    bcc :+
     rts
-:   stz AXV_RJ
-@r: stz AXV_CI
-@c: ldx AXV_RJ
-    lda AXV_CI
-    jsr ax_kptr
-    jsr ax_odst
-    bcs @n
-    jsr ax_wr16
-@n: inc AXV_CI
+:   ldx #0
+@e:
+    stx AX_E
+    lda AX_LIST,x
+    bmi @wr0J                    ; end of the prefiltered list
+    tax
+    jsr ax_entry                 ; tmpL -> entry X
+    lda (tmpL)
+    beq @enJ
+    bmi @enJ                     ; dying: excluded (that IS its erase)
+    and #$0F                     ; (bit6 = overlay-only plain-path entry)
+    sta AX_NT
+    ldy #1                       ; box test: dcol in [dcol0, dcol0+cols*2)
+    lda AX_CDC
+    sec
+    sbc (tmpL),y
+    bcc @enJ
+    sta AX_T0                    ; cell x offset (bytes) within the box
     ldy #3
-    lda AXV_CI
-    cmp (tmpL),y
-    bne @c
-    inc AXV_RJ
+    lda (tmpL),y
+    asl
+    cmp AX_T0
+    beq @enJ
+    bcc @enJ
+    ldy #2                       ; dy in [dy0, dy0+rows*8)
+    lda AX_CDY
+    sec
+    sbc (tmpL),y
+    bcc @enJ
+    sta AX_T1
     ldy #4
-    lda AXV_RJ
-    cmp (tmpL),y
+    lda (tmpL),y
+    asl
+    asl
+    asl
+    cmp AX_T1
+    beq @enJ
+    bcc @enJ
+    lda AX_T0                    ; cell px within the box
+    asl
+    asl
+    sta AX_T0
+    stz AX_TN
+    bra @t
+@enJ:
+    jmp @en
+@wr0J:
+    jmp @wr0
+@t:
+    ldy AX_TN
+    cpy AX_NT
+    bne :+
+    jmp @en
+:   tya
+    clc
+    adc #9
+    tay
+    lda (tmpL),y                 ; tx
+    sec
+    sbc AX_T0                    ; dx = tx - cell px
+    tax
+    clc
+    adc #8
+    cmp #16
+    bcc :+
+    jmp @tn                      ; no x overlap
+:   lda AX_TN
+    clc
+    adc #13
+    tay
+    lda (tmpL),y                 ; ty
+    sec
+    sbc AX_T1
+    sta AX_DYT
+    clc
+    adc #8
+    cmp #16
+    bcc :+
+    jmp @tn
+:   phx
+    lda AX_TN                    ; flags: 2 bits at tn*2
+    asl
+    tay
+    ldy #17
+    lda (tmpL),y
+    ldy AX_TN
+    beq :++
+:   lsr
+    lsr
+    dey
+    bne :-
+:   and #3
+    sta AX_FL
+    lda AX_TN                    ; tile pixels: id -> slice mirror / chardata
+    clc
+    adc #5
+    tay
+    lda (tmpL),y
+    stz tmpH3
+    asl
+    rol tmpH3
+    asl
+    rol tmpH3
+    asl
+    rol tmpH3
+    asl
+    rol tmpH3
+    sta tmpL3
+    lda (tmpL),y
+    cmp #$A0
+    bcc @chr
+    lda tmpL3
+    clc
+    adc #<(W3TILB - $A0*16)
+    sta tmpL3
+    lda tmpH3
+    adc #>(W3TILB - $A0*16)
+    sta tmpH3
+    bra @src
+@chr:
+    lda tmpL3
+    clc
+    adc #<chardata
+    sta tmpL3
+    lda tmpH3
+    adc #>chardata
+    sta tmpH3
+@src:
+    plx
+    jsr ax_over
+@tn:
+    inc AX_TN
+    jmp @t
+@en:
+    ldx AX_E
+    inx
+    jmp @e
+@wr0:
+    ; --- write ---
+    lda AX_CDC
+    sta dcol
+    lda AX_CDY
+    sta dy
+    jsr set_dst
+    lda dst_ptr
+    sta tmpL2
+    lda dst_ptr+1
+    sta tmpH2
+    ldy #0
+    ldx #8
+@w: lda flipbuf,y
+    sta (tmpL2)
+    iny
+    lda flipbuf,y
+    phy
+    ldy #1
+    sta (tmpL2),y
+    ply
+    iny
+    lda tmpL2
+    clc
+    adc #VSTRIDE
+    sta tmpL2
+    bcc :+
+    inc tmpH2
+:   lda tmpH2                    ; ring seam ($5FE0): wrap like ring_next_dst
+    cmp #$5F
+    bcc :+
+    bne @wr
+    lda tmpL2
+    cmp #$E0
+    bcc :+
+@wr:
+    lda tmpL2
+    sec
+    sbc #$E0
+    sta tmpL2
+    lda tmpH2
+    sbc #$1F
+    sta tmpH2
+:   dex
+    bne @w
+@out:
+    rts
+.endproc
+
+; ---------------------------------------------------------------------------
+; ax_box: compose every cell of the box (AX_BX0, AX_BY0, AX_BC x AX_BR),
+; skipping cells inside the EXCLUSION box (CXA_DCOL0.. when AX_T? -- the
+; caller passes exclusion via ax_box_ex) .
+.proc ax_box
+    stz AX_RJ
+@r: stz AX_CI
+@c: lda AX_CI
+    asl
+    clc
+    adc AX_BX0
+    sta AX_CDC
+    lda AX_RJ
+    asl
+    asl
+    asl
+    clc
+    adc AX_BY0
+    sta AX_CDY
+    jsr ax_cell
+    inc AX_CI
+    lda AX_CI
+    cmp AX_BC
+    bne @c
+    inc AX_RJ
+    lda AX_RJ
+    cmp AX_BR
     bne @r
+    rts
+.endproc
+
+; ax_box_ex: same, but skip cells inside the NEW box (CXA_DCOL0/DY0/COLS/ROWS)
+.proc ax_box_ex
+    stz AX_RJ
+@r: stz AX_CI
+@c: lda AX_CI
+    asl
+    clc
+    adc AX_BX0
+    sta AX_CDC
+    lda AX_RJ
+    asl
+    asl
+    asl
+    clc
+    adc AX_BY0
+    sta AX_CDY
+    ; inside the new box?
+    lda AX_CDC
+    sec
+    sbc CXA_DCOL0
+    bcc @go
+    sta AX_T0
+    lda CXA_COLS
+    asl
+    cmp AX_T0
+    beq @go
+    bcc @go
+    lda AX_CDY
+    sec
+    sbc CXA_DY0
+    bcc @go
+    sta AX_T1
+    lda CXA_ROWS
+    asl
+    asl
+    asl
+    cmp AX_T1
+    beq @go
+    bcc @go
+    bra @n                       ; covered by the new box: already composed
+@go:
+    jsr ax_cell
+@n:
+    inc AX_CI
+    lda AX_CI
+    cmp AX_BC
+    bne @c
+    inc AX_RJ
+    lda AX_RJ
+    cmp AX_BR
+    bne @r
+    rts
+.endproc
+
+; ---------------------------------------------------------------------------
+; ax_prefilter: AX_LIST = the live entries whose box intersects the union
+; bbox AX_UX0..UX1 (ring bytes) x AX_UY0..UY1 (scanlines). Once per compose:
+; the per-cell loop then tests 1-3 entries instead of 10.
+.proc ax_prefilter
+    ldy #0
+    sty AX_T1                    ; list length
+    ldx #0
+@e: jsr ax_entry
+    lda (tmpL)
+    beq @n
+    bmi @n
+    ldy #1                       ; e.x0 < UX1 && e.x1 > UX0
+    lda (tmpL),y
+    cmp AX_UX1
+    bcs @n
+    sta AX_T0
+    ldy #3
+    lda (tmpL),y
+    asl
+    clc
+    adc AX_T0
+    cmp AX_UX0
+    bcc @n
+    beq @n
+    ldy #2
+    lda (tmpL),y
+    cmp AX_UY1
+    bcs @n
+    sta AX_T0
+    ldy #4
+    lda (tmpL),y
+    asl
+    asl
+    asl
+    clc
+    adc AX_T0
+    cmp AX_UY0
+    bcc @n
+    beq @n
+    ldy AX_T1
+    txa
+    sta AX_LIST,y
+    inc AX_T1
+@n: inx
+    cpx #10
+    bne @e
+    ldy AX_T1
+    lda #$FF
+    sta AX_LIST,y
+    rts
+.endproc
+
+; ax_union: AX_U* = bbox of the NEW box (+ the OLD box when present)
+.proc ax_union
+    lda CXA_DCOL0
+    sta AX_UX0
+    lda CXA_DY0
+    sta AX_UY0
+    lda CXA_COLS
+    asl
+    clc
+    adc CXA_DCOL0
+    sta AX_UX1
+    lda CXA_ROWS
+    asl
+    asl
+    asl
+    clc
+    adc CXA_DY0
+    sta AX_UY1
+    lda CXA_OCOLS
+    beq @out
+    lda CXA_ODCOL0
+    cmp AX_UX0
+    bcs :+
+    sta AX_UX0
+:   lda CXA_ODY0
+    cmp AX_UY0
+    bcs :+
+    sta AX_UY0
+:   lda CXA_OCOLS
+    asl
+    clc
+    adc CXA_ODCOL0
+    cmp AX_UX1
+    bcc :+
+    sta AX_UX1
+:   lda CXA_OROWS
+    asl
+    asl
+    asl
+    clc
+    adc CXA_ODY0
+    cmp AX_UY1
+    bcc @out
+    sta AX_UY1
+@out:
+    rts
+.endproc
+
+; ---------------------------------------------------------------------------
+; aux_group: draw the current object -- compose its NEW box, then the cells
+; of its OLD box the new one no longer covers (its trail).
+.proc aux_group
+    jsr ax_union
+    jsr ax_prefilter
+    lda CXA_DCOL0
+    sta AX_BX0
+    lda CXA_DY0
+    sta AX_BY0
+    lda CXA_COLS
+    sta AX_BC
+    lda CXA_ROWS
+    sta AX_BR
+    jsr ax_box
+    lda CXA_OCOLS
+    beq @out
+    sta AX_BC
+    lda CXA_ODCOL0
+    sta AX_BX0
+    lda CXA_ODY0
+    sta AX_BY0
+    lda CXA_OROWS
+    sta AX_BR
+    jsr ax_box_ex
+@out:
+    rts
+.endproc
+
+; ---------------------------------------------------------------------------
+; aux_sweep: every DYING entry (bit7): compose its box with itself excluded
+; (bg + the live others = its erase), then clear it.
+.proc aux_sweep
+    ldx #9
+@e: stx AX_T1+1                  ; (AX_BX0.. are free here; keep X in $01E8)
+    stx AX_NT
+    jsr ax_entry
+    lda (tmpL)
+    bpl @n
+    ldy #1
+    lda (tmpL),y
+    sta AX_BX0
+    iny
+    lda (tmpL),y
+    sta AX_BY0
+    iny
+    lda (tmpL),y
+    sta AX_BC
+    iny
+    lda (tmpL),y
+    sta AX_BR
+    lda AX_BC
+    beq @clr
+    lda AX_BX0                   ; prefilter on this box alone
+    sta AX_UX0
+    lda AX_BY0
+    sta AX_UY0
+    lda AX_BC
+    asl
+    clc
+    adc AX_BX0
+    sta AX_UX1
+    lda AX_BR
+    asl
+    asl
+    asl
+    clc
+    adc AX_BY0
+    sta AX_UY1
+    jsr ax_prefilter
+    jsr ax_box
+@clr:
+    ldx AX_NT
+    jsr ax_entry
     lda #0
     sta (tmpL)
+@n: ldx AX_NT
+    dex
+    bpl @e
     rts
 .endproc

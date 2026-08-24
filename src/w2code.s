@@ -68,9 +68,18 @@ init:                            ; $1500: bind our vector table
     lda #>w3_read                ; code can juggle the mapping (docs/33)
     sta mapread_vec+1
     stz W3CMB                    ; a fresh level starts with an empty column cache
-    stz CX_CTX                   ; and no composed context (docs/42): the window
-    stz CX_OWN                   ; copy just filled $1C60+ with blob padding
-    stz CX_EN                    ; composer OFF by default (docs/42)
+    ldx #140                     ; and empty composer stashes (docs/42 v2): the
+:   dex                          ; window copy just filled $1C60+ with padding
+    stz CS_A,x                   ; (bne, not bpl: 140 > 128 -- a bpl loop
+    bne :-                       ;  quit after ONE store and left $FF entries)
+    ldx #60
+:   dex
+    stz CS_B,x
+    bne :-
+    stz CX_STAMP
+    stz CX_DYING
+    lda #1
+    sta CX_EN                    ; the group composer is ON
     jmp w3_cinval
 .else
     rts
@@ -180,6 +189,15 @@ W3FLAGS = $0B                    ; NMI | TIMER_IRQ | LCD
 ; where a metasprite reaching outside the default box gets its erase rectangle
 ; corrected -- otherwise it smears the background as it moves.
 .proc w3_width                   ; X = slot -> A = the engine's width byte
+.ifdef EAS3
+    jsr cs_composed              ; COMPOSED (docs/42 v2)? then the old erase
+    beq :+                       ; must be a NO-OP even if o_pdr leaks to 1
+    lda #$F0                     ; (update stagger): park o_pvy at row 30 --
+    sta o_pvy,x                  ; restore_bg skips every map row >= 18 -- and
+    lda #1                       ; return the narrowest box
+    rts
+:
+.endif
     lda o_st,x                   ; the metasprite param drawn last
     ldy #W3_NEXC-1
 :   cmp w3_excp,y
@@ -196,9 +214,7 @@ W3FLAGS = $0B                    ; NMI | TIMER_IRQ | LCD
     bcs :+
     lda #0
 :   sta o_pvy,x
-    phy
-    jsr @left8
-    ply
+    jsr @left8                   ; (clobbers A only)
     lda w3_excw,y
     rts
 @left8:
