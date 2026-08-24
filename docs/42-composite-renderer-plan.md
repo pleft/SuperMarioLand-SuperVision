@@ -265,3 +265,24 @@ OPEN: the -12% logic cost (compose ~= 3x a plain draw per moving object;
 per-cell bg fetch + overlay tests dominate -- per-column id precompute and
 an unrolled cell write are the next cuts); Batadon/corpse coverage (>4
 tiles); 2-3 could get the same treatment (its own bank layout).
+
+## VERDICT (2026-08-24 evening): PARKED, gated OFF
+
+The user played the ON trial: "slowdown hell and eventually emulator freeze
+... flickering looks reduced but its full of other bugs". The screenshot
+shows Batadon wing fragments stuck at several positions, a duplicated moai
+head, and junk near the pipe -- plain-path objects (the >4-tile Batadon has
+no stash entry) whose pixels composed neighbours paint over and whose own
+erase/redraw no longer lines up, plus an unreproduced freeze. My stress runs
+(route replay + parked zones, 4,000+ frames, zero stalls) do NOT capture
+real play: Mario stomping, morph chains and crowds of mixed plain/composed
+objects. Law E31 again, harder: the instrument must play the level the way
+the player does before any renderer change reaches them.
+
+State: CX_EN defaults to 0 (the safe build is byte-for-byte the plain path
+plus today's genuine fixes: the w3_width X clobber, the w3_step hook order
+vs w3_ffc7). Everything else -- page-8 layout, stash walk, group composer,
+unit tests, tearing metric -- stays in the tree for a future attempt whose
+FIRST task is a player-realistic harness (a scripted stomp-through of the
+first 40 seconds with mixed objects) and whose second is the cost.
+Measured potential when it works: torn sprites 60 -> 5 on the route.
