@@ -78,8 +78,9 @@ init:                            ; $1500: bind our vector table
     bne :-
     stz CX_STAMP
     stz CX_DYING
-    lda #1
-    sta CX_EN                    ; the group composer is ON
+    stz CX_EN                    ; the group composer is OFF by default: v2
+                                 ; trailed on the FIRST Batadon (user-caught,
+                                 ; docs/42) -- poke $1FE0=1 to enable
     jmp w3_cinval
 .else
     rts
@@ -190,8 +191,10 @@ W3FLAGS = $0B                    ; NMI | TIMER_IRQ | LCD
 ; corrected -- otherwise it smears the background as it moves.
 .proc w3_width                   ; X = slot -> A = the engine's width byte
 .ifdef EAS3
-    jsr cs_composed              ; COMPOSED (docs/42 v2)? then the old erase
-    beq :+                       ; must be a NO-OP even if o_pdr leaks to 1
+    phx                          ; (cs_entry clobbers X = the slot -- the
+    jsr cs_composed              ; unguarded call mis-sized EVERY W3 erase box:
+    plx                          ; the user's first-Batadon trails, docs/42)
+    beq :+                       ; COMPOSED? then the old erase must be a NO-OP
     lda #$F0                     ; (update stagger): park o_pvy at row 30 --
     sta o_pvy,x                  ; restore_bg skips every map row >= 18 -- and
     lda #1                       ; return the narrowest box
