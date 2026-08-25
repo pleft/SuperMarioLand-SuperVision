@@ -58,6 +58,7 @@ W3FLG    = $0B                   ; NMI | TIMER_IRQ | LCD (load_level's mask)
 CS_A       = $1C70               ; slots 0..6 (7 x 20 = 140B, to $1CFB); code cap $1C6F
 CS_B       = $1FA0               ; slots 7..9 (3 x 20 = 60B, to $1FDB)
 CX_EN      = $1FE0               ; nonzero = composer on (init sets 1)
+; CX_BUILD: defined in w2code.s (the kit init reads it before this include)
 CX_STAMP   = $1FE1               ; frame_count at the last per-frame sweep
 CX_FB      = $1FE2               ; fb_col0 at the last sweep (shift fold)
 CX_DYING   = $1FE3               ; nonzero = some entry needs a cleanup compose
@@ -141,11 +142,14 @@ CXS_BOXOK  = $0153               ; 1 = CXA_* box computed this walk
 ; --- one frame of VM for slot X -------------------------------------------
 .proc w3_step
     jsr w3_ffc7                  ; the GB's PER-FRAME ffc7 physics (below)
+.if CX_BUILD
     jsr cs_composed              ; a COMPOSED object holds o_pdr=0 so pass 3a
     beq :+                       ; never erases it mid-frame -- but p4_one sets
     ldx oi                       ; o_pdr=1 after every draw; clear it again in
     stz o_pdr,x                  ; the update phase (after the render, docs/42)
-:   ldx oi                       ; AFTER ffc7: cs_entry clobbers tmpL2/tmpL3
+:
+.endif
+    ldx oi                       ; AFTER ffc7: cs_entry clobbers tmpL2/tmpL3
     lda o_type,x                 ; gravity may have culled the slot
     cmp #OBJ_W3
     beq :+
@@ -223,7 +227,23 @@ CXS_BOXOK  = $0153               ; 1 = CXA_* box computed this walk
     lda o_vy,x
     and #$02
     bne @fall
-    lda o_y,x                    ; rising
+    jsr w3_ceil                  ; rising: solid above it? (GB Call_000_2c21,
+    bcc @rise                    ; probed BEFORE the move)
+    ldy w3_ti,x                  ; blocked: phys byte 0 & $C0 -- $00 pass
+    lda w3_phys0,y               ; through, $40 turn to falling, $C0 RESTART the
+    and #$C0                     ; script. The Suu ($E0) climbs a scripted 96px
+    beq @rise                    ; but rests at its ceiling: 3-2 RE, GB restarts
+    cmp #$40                     ; it at y55 -- without this the port Suu hung
+    bne :+                       ; 16-40px above its tile.
+    lda o_vy,x
+    ora #$02
+    sta o_vy,x
+    rts
+:   stz w3_pc,x
+    stz o_tmr,x
+    rts
+@rise:
+    lda o_y,x
     sec
     sbc tmpH3
     sta o_y,x
@@ -328,8 +348,48 @@ CXS_BOXOK  = $0153               ; 1 = CXA_* box computed this walk
     bne :+                       ; spawns $4A, which morphs to $4B). Never
     jsr w3_child                 ; implemented, so the cannon fired nothing at all
     bra @loop                    ; (user-reported).
-:   bra @loop                    ; F9 sfx / FA: not yet
+:   cmp #$F6                     ; F6 nn: WAIT FOR MARIO (w3_f6, far)
+    bne :+
+    jsr w3_f6                    ; C set = condition met, proceed
+    bcc @done                    ; else: PC rewound, retry next tick
+    jmp @loop
+:   cmp #$F9                     ; F9 sfx / FA music-cue: the GB stores the
+    beq @endtick                 ; operand and RETs -- the tick ENDS here (the
+    cmp #$FA                     ; next opcode runs on the following tick). The
+    bne @other                   ; old fall-through fired $49's missile a tick
+@endtick:                        ; early. The cue itself: w3_cue.
+    jsr w3_cue
+    lda #1
+    sta o_tmr,x
+@done:
+    rts
+@other:
+    jmp @loop                    ; F2/F5/F7/FB/FC/FD: unused by W3 kit types
 .endproc
+
+.proc w3_cue                     ; tmpH2 = F9/FA, tmpL3 = the GB sound id.
+    lda tmpL3                    ; F9 nn -> $dff8 nn (SFX_DFF8_01.. are 11..14,
+    dec                          ; contiguous), FA nn -> $dfe0 nn (SFX_DFE0_01..
+                                 ; 0B are 0..10: extract_sfx numbers them in id
+                                 ; order; nn=0 wraps to $FF and fails the cmp)
+    ldy tmpH2                    ; order, the cannon's $09 included). Ids outside
+    cpy #$FA                     ; the captured sets are dropped.
+    beq @fa
+    cmp #4
+    bcs @no
+    adc #SFX_DFF8_01
+    bra @play
+@fa:
+    cmp #11
+    bcs @no
+@play:
+    jsr sfx_play
+@no:
+    ldx oi
+    rts
+.endproc
+; (w3_f6 lives in FIXED -- main.s -- the window is full; exported via w2abi)
+.segment "W2C"
 .segment "W2FAR"
 .segment "W2C"
 
@@ -444,7 +504,19 @@ CXS_BOXOK  = $0153               ; 1 = CXA_* box computed this walk
 .segment "W2C"
 
 ; --- terrain probes (the port's own tile semantics) -----------------------
+.proc w3_ceil                    ; C=1 when the tile ABOVE the object is SOLID:
+    lda w3_ph1,x                 ; the GB probes ffc2 - (h-1)*8 at the floor
+    and #$07                     ; probe's column (h = phys1 & 7). The port's
+    eor #$FF                     ; "feet row" sits one row under the GB's probe
+    ina                          ; row, so the delta is -(h-1): measured, the
+    ina                          ; Suu restarts at GB y55 exactly like the GB
+    bra w3_probe                 ; (-h fired a row early, y63).
+.endproc
 .proc w3_floor                   ; C=1 when the tile under the object is SOLID
+    lda #0
+.endproc                         ; falls through
+.proc w3_probe                   ; A = row delta from the feet row
+    pha
     lda o_xl,x                   ; column = (world x + 4) >> 3
     clc
     adc #4
@@ -466,6 +538,10 @@ CXS_BOXOK  = $0153               ; 1 = CXA_* box computed this walk
     lsr
     sec
     sbc #2
+    sta mrow
+    pla
+    clc
+    adc mrow
     sta mrow
     phx
     jsr read_solid               ; A = 1 solid / 0 open
@@ -635,6 +711,7 @@ CXS_BOXOK  = $0153               ; 1 = CXA_* box computed this walk
     rts
 .endproc
 
+.if CX_BUILD
 ; cs_composed: A != 0 iff slot oi is COMPOSED (entry nt 1..4, overlay-only
 ; bit6 clear). Z=1 otherwise. Clobbers tmpL2/tmpH2/tmpL3, X, Y.
 .proc cs_composed
@@ -676,10 +753,12 @@ CXS_BOXOK  = $0153               ; 1 = CXA_* box computed this walk
     inc tmpH2
 :   rts
 .endproc
+.endif
 
 .proc w3_draw                    ; WINDOW half: bank juggling + the composed
     lda #6                       ; dispatch (docs/42 v2). Walk/stash are BANK-6
     jsr w3_bank                  ; resident (W3X); the composer is page-8
+.if CX_BUILD
     lda CX_EN                    ; resident (w3aux).
     beq @plain
     jsr w6_frame                 ; once per frame: shift fold + mark the dead
@@ -702,6 +781,7 @@ CXS_BOXOK  = $0153               ; 1 = CXA_* box computed this walk
     jsr w3_bank
     jsr aux_group
     bra @done
+.endif
 @plain:
     stz CXS_MODE
     jsr w6_draw

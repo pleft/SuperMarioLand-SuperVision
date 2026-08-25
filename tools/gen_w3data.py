@@ -129,6 +129,16 @@ def main():
         f.write("w3_phys2:\n    .byte " + ",".join(f"${ROM[PHYS_TBL+3*t+2]:02X}" for t in types) + "\n")
         f.write("; contact table $3186 column +0: the type to MORPH INTO when\n")
         f.write("; stomped ($00 = not stompable -- Mario passes through the head)\n")
+        # Superball column (contact row byte 3, GB $2A68/$2A89) as sparse
+        # (type index, morph type) pairs, $FF-terminated: FIXED has no room for
+        # a full table (main.s w3_ball).
+        with open("build/w3ball.inc", "w") as fb:
+            fb.write("w3_ballt:\n")
+            for i, t in enumerate(types):
+                b3 = ROM[CONTACT_TBL + 5 * t + 3]
+                if b3:                       # + phys byte2: HP (& $3F) and score class (>> 6)
+                    fb.write(f"    .byte {i}, ${b3:02X}, ${ROM[PHYS_TBL+3*t+2]:02X}\n")
+            fb.write("    .byte $FF\n")
         f.write("w3_stomp:\n    .byte " + ",".join(f"${ROM[CONTACT_TBL+5*t]:02X}" for t in types) + "\n")
         f.write("; contact table column +2: the SIDE-contact result -- $FF hurts,\n")
         f.write("; $00 does NOTHING, anything else morphs the slot into that type.\n")
@@ -147,21 +157,32 @@ def main():
         # overlay base). Tiles < $A0 come from the shared chardata sheet and
         # keep their GB ids.
         order, remap = [], {}
+        # The slice is ID-PRESERVING for the GB overlay range: slot $A0..$DC
+        # holds overlay tile $A0..$DC (pack_banks: w3_ovl_8A00), because the
+        # ENGINE draws its own objects through draw_quad with raw ids -- 3-2's
+        # Fly is tiles $A0-$A3/$B0-$B3 -- and a compact, renumbered slice
+        # handed it the lift/missile/Kumo tiles (user: "garbled sprite", "its
+        # corpse is a fly"). Ids OUTSIDE $A0-$DC that the kit lists reference
+        # ($DF Kumo, $EF, $FE, the missile's $F9-$FB, ...) are parked in slots
+        # no W3 list and no engine object uses; pack_banks sources their pixels
+        # (w3_hi.svt for the missile, w1_obj_8000.svt otherwise).
+        ENGINE_IDS = {0xA0, 0xA1, 0xA2, 0xA3, 0xB0, 0xB1, 0xB2, 0xB3,  # the Fly (W3: the Kumo)
+                      0xA8, 0xA9}                                    # its squashed corpse (FLY_SQ)
+        raw = []
+        for p in params:
+            raw.append(dlist(p, DL_RIGHT)); raw.append(dlist(p, DL_LEFT))
+        used = set(b for l in raw for b in l if b & 0x80 and b != 0xFF)
+        extra = sorted(b for b in used if b >= 0xDD)
+        free = [i for i in range(0xDD, 0xE4)] + \
+               [i for i in range(0xA0, 0xDD) if i not in used and i not in ENGINE_IDS]
+        assert len(extra) <= len(free), f"W3: {len(extra)} out-of-range tile ids, {len(free)} free slots"
+        remap = {b: free[k] for k, b in enumerate(extra)}
+        order = list(range(0xA0, 0xE4))   # 68 slots: $A0-$DC overlay + 7 parking slots
+                                          # ($DD-$E3); ends exactly at $BB80 (creature33)
+        for b, slot in remap.items():
+            order[slot - 0xA0] = b
         def conv(lst):
-            out = bytearray()
-            for b in lst:
-                # $F9/$FA/$FB/$FE are W3's missile art, and the port's shared
-                # sheet has one-way-platform caps at those ids (extract_gfx) --
-                # the missile drew as a comb. Route them through the overlay
-                # slice too; pack_banks takes their pixels from w3_hi.svt.
-                if b & 0x80 and b != 0xFF and (0xA0 <= b <= 0xDC or b in (0xF9, 0xFA, 0xFB, 0xFE)):
-                    if b not in remap:
-                        remap[b] = 0xA0 + len(order)
-                        order.append(b)
-                    out.append(remap[b])
-                else:
-                    out.append(b)
-            return out
+            return bytearray(remap.get(b, b) if (b & 0x80 and b != 0xFF) else b for b in lst)
         # each param's RIGHT list is followed immediately by its LEFT list, so
         # one pointer serves both: the draw walks past the $FF terminator to
         # reach the left-facing form (that saves a whole pointer table, and the
@@ -173,7 +194,7 @@ def main():
             body += conv(dlist(p, DL_RIGHT))
             body += conv(dlist(p, DL_LEFT))
         open("build/w3tiles.txt", "w").write(" ".join(f"{t:02X}" for t in order))
-        assert len(order) <= 0x3D, "W3 tile slice exceeds the $A0-$DC window"
+        assert len(order) == 0x44, "W3 tile slice must be the full $A0-$E3 table (draw_quad)"
         f.write("; display lists live in BANK 6 at W3DLB (pack_banks pin)\n")
         f.write("w3_dlo:\n    .byte " + ",".join(f"<(W3DLB+{s})" for s in starts) + "\n")
         f.write("w3_dhi:\n    .byte " + ",".join(f">(W3DLB+{s})" for s in starts) + "\n")

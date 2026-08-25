@@ -113,8 +113,8 @@ with the creature tiles byte-asserted.
 - **Hiyoihoi ($32) is not a boss yet**: it spawns and the VM runs its script
   (it throws its child $33), but there is no HP/defeat handling, so it cannot
   be killed -- the level is finished by reaching the sphere, which works.
-- Ball/star kill columns of the contact table are not wired (only the stomp
-  column); superball kills on W3 enemies do nothing yet.
+- Ball column of the contact table: WIRED 2026-08-25 (docs/43 `w3_ball`:
+  HP + morph + score). The star column is still not wired.
 - $36's engine-side stone and the shared types are inherited, not re-verified
   against W3 specifically.
 

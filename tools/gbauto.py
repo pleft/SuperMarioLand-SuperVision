@@ -44,8 +44,8 @@ LOOK = 180                       # lookahead horizon (long enough to see the far
 # (pre, delay, hold, drift): pre = hold RIGHT (1) or STAND STILL (0) before the
 # jump -- standing is what lets the search WAIT for a moving platform to come
 # to it instead of walking off the lip every time.
-CAND = [(pre, d, h, w) for pre in (1, 0) for d in range(0, 42, 6)
-        for h in (0, 10, 14, 18, 22, 26, 30) for w in (1, 0)]
+CAND = [(pre, d, h, w) for pre in (1, 0) for d in (0, 6, 12, 18, 24, 30, 36, 48, 64, 90)
+        for h in (0, 10, 14, 18, 22, 26, 30) for w in (1, 0)]   # long delays: wait for a Ganchan (3-2)
 
 
 def cam_of(m):
@@ -133,45 +133,71 @@ def main():
     # candidate down the ranking -- without that the search cannot get past a pit
     # whose only crossing needs an unlikely-looking first hop.
     rec, f, best_progress, stuck, deaths = [], 0, -1, 0, 0
-    stack = []
-    while f < frames:
+    # (the machine is tools/svauto.c's: MAXBACK bounds it, `back` grows 1,2,3..
+    # per consecutive failure and resets on progress)
+    back, backtracks, MAXBACK = 1, 0, 400
+
+    def checkpoint():
         snap = io.BytesIO(); p.save_state(snap)
         here = cam_of(m) + m[0xC202]
         ranked = []
-        for (pre, d, h, w) in CAND:
+        for ci, (pre, d, h, w) in enumerate(CAND):
+            if d >= 48 and (w == 0 or h > 18):
+                continue                    # thin the long-wait fan
             snap.seek(0); p.load_state(snap)
             plan = plan_of(pre, d, h, LOOK, w)
-            ranked.append((run_plan(p, m, plan, LOOK, NEAR, here), d, h, w, pre))
+            ranked.append((run_plan(p, m, plan, LOOK, NEAR, here), d, h, w, pre, ci))
         # score DESC, but ties go to the EARLIEST jump: a tie usually means
         # 'both clear it', and the later jump is the one that walks to the
         # lip of the pit first (measured: sorting ties the other way lost
         # 3-1's first pit every time)
         ranked.sort(key=lambda r: (-r[0], -r[4], r[1], r[2], -r[3]))
-        # the winner is the best-scoring candidate that is STILL ALIVE at the end
-        # of its lookahead (score >= 0); if every one of them dies, take the one
-        # that got furthest and let the next window try to save it
-        _, d, h, w, pre = ranked[0]
-        if ranked[0][0] < 20000:
-            deaths += 1
-        snap.seek(0); p.load_state(snap)
-        plan = plan_of(pre, d, h, COMMIT, w)
-        for i in range(COMMIT):
-            apply(p, plan[i]); rec.append(plan[i]); f += 1
+        return dict(snap=snap, rec_len=len(rec), best=best_progress, stuck=stuck,
+                    ranked=ranked, tried=set())
+
+    hist = [checkpoint()]
+    while f < frames:
+        top = hist[-1]
+        cand = next((r for r in top["ranked"] if r[5] not in top["tried"]), None)
+        fail = cand is None
+        if not fail:
+            top["tried"].add(cand[5])
+            _, d, h, w, pre, _ = cand
+            if cand[0] < 20000:
+                deaths += 1
+            top["snap"].seek(0); p.load_state(top["snap"])
+            del rec[top["rec_len"]:]
+            f, best_progress, stuck = top["rec_len"], top["best"], top["stuck"]
+            plan = plan_of(pre, d, h, COMMIT, w)
+            for i in range(COMMIT):
+                apply(p, plan[i]); rec.append(plan[i]); f += 1
+                if m[0xFFB3] not in PLAY:
+                    break
+            prog = cam_of(m) + m[0xC202]
             if m[0xFFB3] not in PLAY:
+                fail = True
+            elif prog > best_progress + 8:
+                best_progress, stuck, back = prog, 0, 1
+            else:
+                stuck += 1
+                if stuck > 24:
+                    fail = True
+        if fail:
+            if backtracks >= MAXBACK:
+                print(f"  gave up at frame {f}, x {best_progress} -- backtrack budget spent")
                 break
-        if m[0xFFB3] not in PLAY:
-            print(f"  died at frame {f}, cam {cam_of(m)}")
-            break
-        prog = cam_of(m) + m[0xC202]
-        if prog > best_progress + 8:
-            best_progress, stuck = prog, 0
-        else:
-            stuck += 1
-            if stuck > 24:
-                print(f"  stuck at world x {prog} (frame {f})")
-                break
+            backtracks += 1
+            for _ in range(min(back, len(hist) - 1)):
+                hist.pop()
+            if back < 12:
+                back += 1
+            if backtracks % 20 == 0:
+                print(f"  backtrack #{backtracks} to frame {hist[-1]['rec_len']} (x {hist[-1]['best']})")
+            continue
+        hist.append(checkpoint())
         if f % 240 < COMMIT:
-            print(f"  f{f} world x {prog} ({deaths} deaths)")
+            print(f"  f{f} world x {prog} ({deaths} deaths, {backtracks} backtracks)")
+    rec = rec[:f]
 
     LET = {1: "R", 3: "J", 2: "A", 0: "."}   # svshot letters (J = right+A)
     segs, cur, n = [], rec[0] if rec else 1, 0

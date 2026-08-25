@@ -38,6 +38,7 @@ NEED = [
     "award_kill_at", "tmpL2", "tmpH2", "tmpH3", "tmpL", "tmpH",
     # sfx
     "sfx_play",
+    "w3_f6",
     # shared-kit dependencies (the kit_sh*.inc bodies)
     "mario_dx", "rc_wball_aim", "rc_wball_move", "tmpL3", "mario_starT", "award_kill", "l3_above", "hurt_mario",
     "ride", "carry_y_up", "spawn_item_snd", "obj_set_x8", "mrow", "spr_col", "mark_used", "read_solid", "feet_col",

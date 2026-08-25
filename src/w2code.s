@@ -10,6 +10,12 @@
 ; Next: Honen ($10) and the Yurarin leaper ($24).
 ; ---------------------------------------------------------------------------
 .include "w2abi.inc"
+.define CX_BUILD 0               ; 0 = the PARKED composer (docs/42) is compiled
+                                 ; out of the W3 window/far segments (their
+                                 ; bytes went to the 3-2 VM opcodes); the
+                                 ; bank-6/page-8 halves stay in the tree. Re-
+                                 ; enabling needs the window back under $1C70.
+
 SFX_IDS_ONLY = 1                 ; ids only -- the engine owns the tables
 .include "../build/audio/sfx.inc"
 
@@ -68,6 +74,7 @@ init:                            ; $1500: bind our vector table
     lda #>w3_read                ; code can juggle the mapping (docs/33)
     sta mapread_vec+1
     stz W3CMB                    ; a fresh level starts with an empty column cache
+.if CX_BUILD
     ldx #140                     ; and empty composer stashes (docs/42 v2): the
 :   dex                          ; window copy just filled $1C60+ with padding
     stz CS_A,x                   ; (bne, not bpl: 140 > 128 -- a bpl loop
@@ -78,7 +85,10 @@ init:                            ; $1500: bind our vector table
     bne :-
     stz CX_STAMP
     stz CX_DYING
-    stz CX_EN                    ; the group composer is OFF by default: v2
+.endif                           ; CX_BUILD=0: the kit CODE now reaches $1CFA --
+    stz CX_EN                    ; clearing "stash A" at $1C70 zeroed its tail
+                                 ; (3-2: battery31 lost stomps/spikes/boulders).
+                                 ; The composer is OFF by default anyway: v2
                                  ; trailed on the FIRST Batadon (user-caught,
                                  ; docs/42) -- poke $1FE0=1 to enable
     jmp w3_cinval
@@ -191,6 +201,7 @@ W3FLAGS = $0B                    ; NMI | TIMER_IRQ | LCD
 ; corrected -- otherwise it smears the background as it moves.
 .proc w3_width                   ; X = slot -> A = the engine's width byte
 .ifdef EAS3
+.if CX_BUILD
     phx                          ; (cs_entry clobbers X = the slot -- the
     jsr cs_composed              ; unguarded call mis-sized EVERY W3 erase box:
     plx                          ; the user's first-Batadon trails, docs/42)
@@ -200,6 +211,7 @@ W3FLAGS = $0B                    ; NMI | TIMER_IRQ | LCD
     lda #1                       ; return the narrowest box
     rts
 :
+.endif
 .endif
     lda o_st,x                   ; the metasprite param drawn last
     ldy #W3_NEXC-1
@@ -237,10 +249,17 @@ W3FLAGS = $0B                    ; NMI | TIMER_IRQ | LCD
 .endif
 
 .proc w2_gift                    ; content $F0 (GB $18C0, READ this time): the
-    jmp mark_used                ; hidden cell MATERIALIZES as a solid block (GB
-.endproc                         ; stamps $80; our mod renders $5F as used-solid).
-                                 ; No object, no lift -- a stepping block. Its
-                                 ; re-bonk = the content-0 "nothing" case.
+.ifdef EAS3                      ; hidden cell MATERIALIZES as a solid block (GB
+    cmp #$07                     ; stamps $80; our mod renders $5F as used-solid).
+    bne :+                       ; No object, no lift -- a stepping block. Its
+    jmp l3_gift                  ; re-bonk = the content-0 "nothing" case.
+:   cmp #$FE                     ; W3: 3-2's col-112 block carries $07 = the
+    bne :+                       ; 1-3 hidden-block LIFT (kit_sh4; user-caught:
+    jmp w3_morph                 ; "should be a lift to reach the pipe"). $FE =
+:                                ; the engine's Superball kill (w3_ball): morph
+.endif                           ; slot X to tmpL3 -- the vector doubles as the
+    jmp mark_used                ; kit's only engine-callable entry.
+.endproc
 
 .proc w2_spawn                   ; A = GB type, Y = spawn entry byte offset
 .ifdef YUR22
@@ -355,7 +374,7 @@ w2_updtab:
     .word upd_mek-1, upd_mhead-1, upd_msq-1, upd_mcorp-1
 .else
 .ifdef EAS3
-    .word w2_rts-1, upd_suu-1, w2_nop-1       ; W3 spawns no rock/honen/leaper:
+    .word upd_gift-1, upd_suu-1, w2_nop-1     ; W3 spawns no rock/honen/leaper:
     .word w2_nop-1, w2_nop-1, w2_nop-1, w2_nop-1, w2_nop-1
     .word w3_step-1              ; OBJ_W3: the AI-VM
 .else
@@ -391,7 +410,7 @@ w2_drwtab:
     .word draw_mek-1, draw_mhead-1, draw_msq-1, draw_mcorp-1
 .else
 .ifdef EAS3
-    .word w2_rts-1, draw_suu-1, w2_rts-1
+    .word draw_gift-1, draw_suu-1, w2_rts-1
     .word w2_nop-1, w2_nop-1, w2_nop-1, w2_nop-1, w2_nop-1
     .word w3_draw-1              ; OBJ_W3
 .else
@@ -1314,6 +1333,10 @@ draw_msq:
 .include "kit_sh2.inc"           ; l3_hurt
 .include "kit_sh3.inc"           ; l3_xoff
 ; (kit_sh4 rising-lift: DEAD in W2 -- $F0 materializes, no object spawns)
+.ifdef EAS3
+.include "kit_sh4.inc"           ; W3: 3-2's $07 lift block (upd_gift, l3_gift)
+.include "kit_sh6.inc"           ; draw_gift
+.endif
 .include "kit_sh5.inc"           ; suu_frame, draw_suu, draw_rock, l3_pair, l3_one
-; (kit_sh6 draw_gift: dead too)
+; (kit_sh6 draw_gift: dead too in W2)
 ; (kit_sh7 l3_width/l3_token replaced by the W2-native w2_width/w2_token)

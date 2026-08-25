@@ -2677,7 +2677,7 @@ quad_rows: .byte 0, 0, 8, 8
     ldy ending13                 ; the fake Daisy's creature is per WORLD: 1-3
     dey                          ; keeps the moth already in RAM; 2-3 and 3-3
     beq @w1moth                  ; overwrite those tiles from their own sheets
-    lda #5                       ; the SOURCE bank, in set_bank's encoding: under
+    lda #6                       ; the SOURCE bank, in set_bank's encoding: under
                                  ; MAGNUM $2021 takes the PAGE NUMBER, which IS the
                                  ; bank number (docs/37), and its bits 3:0 are the
                                  ; whole field. This used to write (5<<5)|sysflags
@@ -2687,9 +2687,9 @@ quad_rows: .byte 0, 0, 8, 8
                                  ; came back $FF and the fake Daisy turned into a
                                  ; solid BLACK SQUARE. 3-3's arm below always wrote
                                  ; a plain 6, which is why only 2-3 was affected.
-    ldx #<$BF80                  ; 2-3: its own bank ($BF80 -- the sheet sits in
+    ldx #<$BF00                  ; 2-3: BANK 6 $BF00 (moved out of bank 5's tail
     stx tmpL                     ; the last 128B so the level's tile slice, which
-    ldx #>$BF80                  ; grows from below, can use everything under it)
+    ldx #>$BF00                  ; 2026-08-25: the LEVELS prefix needed the room)
     dey
     beq :+
     lda #6                       ; MAGNUM page 6 = the W3 data bank (docs/37)
@@ -3114,6 +3114,11 @@ moth_tiles: .incbin "../build/gfx/moth.svt"
     sta CH4_CTRL                 ; the fly death is the GB's 7-bit buzz; the rest 15-bit)
     rts
 .endproc
+
+
+
+sfx_aux:                         ; SFX streams that outgrew the LEVELS prefix
+    .incbin "../build/audio/sfx_aux.bin"   ; (extract_sfx FAR_SFX: the cannon shot)
 
 
 .segment "LEVELS"                ; the sequencer lives with its data (FIXED is full)
@@ -5600,6 +5605,7 @@ FLOWER_RISE = 7                  ; emerge: rise 7px out of the block, then sit (
     rts
 @ok:
     stz o_hp,x                   ; fresh slot: full health
+    stz w3_hp,x                  ; (W3: Superball hits taken)
     clc
     rts
 .endproc
@@ -6461,6 +6467,7 @@ riding_this:                     ; Z=1 if Mario rides slot oi
 ; so DIFFERENT overlays (the 1-3 kit / the W2 kit) can back the same calls.
 ovl_spawn:  jmp (ovl_vec+0)      ; A = GB type, Y = spawn entry (C=0 spawned/consumed)
 ovl_update: jmp (ovl_vec+2)      ; X = slot (types >= OBJ_GIFT)
+ovl_gift:   jmp (ovl_vec+6)      ; A = block content; W3: A=$FE -> w3_morph (the ball kill)
 ovl_width:  jmp (ovl_vec+10)     ; A = erase width for kit types
 .proc ovl_bind                   ; call RIGHT AFTER load_level (level bank mapped):
     stz veh_vec+1                ; walking physics unless the blob's init opts in
@@ -6995,25 +7002,7 @@ ovl_width:  jmp (ovl_vec+10)     ; A = erase width for kit types
     bcs :+
     jmp @combat                  ; movement at 30Hz; combat EVERY frame
 :   ldx oi
-    lda o_xl,x                   ; feet_col = (o_x + 4) >> 3
-    clc
-    adc #4
-    sta feet_col
-    lda o_xh,x
-    adc #0
-    sta feet_col+1
-    lsr feet_col+1
-    ror feet_col
-    lsr feet_col+1
-    ror feet_col
-    lsr feet_col+1
-    ror feet_col
-    lda o_y,x
-    lsr
-    lsr
-    lsr
-    sta mrow
-    jsr read_solid
+    jsr obj_feet                 ; (o_x+4)>>3 / o_y>>3 -> read_solid (A: solid?)
     bne @grounded
     ldx oi                       ; airborne: fall 2px/update
     lda o_y,x
@@ -7157,18 +7146,22 @@ ovl_width:  jmp (ovl_vec+10)     ; A = erase width for kit types
     lda o_tmr,x                  ; --- hopping: phase 0..47 ---
     cmp #48
     bcc :+
-    stz o_st,x                   ; landed: back to sitting
-    lda #FLY_SIT
-    sta o_tmr,x
-    bra @contact
-:   tay
-    and #1                       ; x drift: 1px every 2 frames, in the hop direction
-    bne @ystep
+    jmp fly_fall                 ; arc done: FALL until the ground (GB script
+:   tay                          ; '41' held through 5xEF; land response $30)
+    stz tmpL3                    ; tmpL3 = phase/3 (the tick index), A = phase%3
+@m3:
+    cmp #3                       ; x: 2px per TICK (every 3rd frame) in the hop
+    bcc :+                       ; direction -- the GB script's x nibble is 2 on
+    sbc #3                       ; all 16 hop ticks = 32px per hop (was 1px/2f =
+    inc tmpL3                    ; 24px: 3-2's Kumo landed 8px short, in a pit)
+    bra @m3
+:   cmp #0                       ; (the flags above are cmp #3's, not A's)
+    bne @nody                    ; not a tick frame: nothing moves
     lda o_vx,x
     bmi @xl
     lda o_xl,x
     clc
-    adc #1
+    adc #2
     sta o_xl,x
     bcc @ystep
     inc o_xh,x
@@ -7176,12 +7169,13 @@ ovl_width:  jmp (ovl_vec+10)     ; A = erase width for kit types
 @xl:
     lda o_xl,x
     sec
-    sbc #1
+    sbc #2
     sta o_xl,x
     bcs @ystep
     dec o_xh,x
 @ystep:
-    lda fly_dy,y                 ; per-frame y delta (the 15px trace arc, 0 between steps)
+    ldy tmpL3
+    lda fly_dy,y                 ; per-tick y delta (the 15px trace arc)
     beq @nody
     clc
     adc o_y,x
@@ -7193,15 +7187,83 @@ ovl_width:  jmp (ovl_vec+10)     ; A = erase width for kit types
 
 ; trace f2436-2481: rise 4,4,2,2,1,1,1 / hover (+1 drift) / fall 1,1,2,2,4,4 -- one
 ; step every 3rd frame, 48 frames total, deltas sum to zero.
-fly_dy:
-    .byte 256-4,0,0, 256-4,0,0, 256-2,0,0, 256-2,0,0, 256-1,0,0, 256-1,0,0, 256-1,0,0
-    .byte 0,0,0, 1,0,0, 0,0,0
-    .byte 1,0,0, 1,0,0, 2,0,0, 2,0,0, 4,0,0, 4,0,0
+fly_dy:                          ; one entry per TICK (16 ticks = 48 frames)
+    .byte 256-4, 256-4, 256-2, 256-2, 256-1, 256-1, 256-1
+    .byte 0, 1, 0
+    .byte 1, 1, 2, 2, 4, 4
 .endproc
 
 ; enemy_contact: shared enemy-vs-Mario resolution (walkers + the fly): bottom cull,
 ; overlap test, star kill, position-rule stomp (result branched by type), side hurt.
 .segment "LEVELS"                
+
+.proc obj_feet                   ; X = slot: feet_col = (o_x+4)>>3, mrow = o_y>>3,
+    lda o_xl,x                   ; A = read_solid (nonzero = solid). Shared by
+    clc                          ; upd_chib and fly_fall (FIXED is full).
+    adc #4
+    sta feet_col
+    lda o_xh,x
+    adc #0
+    sta feet_col+1
+    lsr feet_col+1
+    ror feet_col
+    lsr feet_col+1
+    ror feet_col
+    lsr feet_col+1
+    ror feet_col
+    lda o_y,x
+    lsr
+    lsr
+    lsr
+    sta mrow
+    jmp read_solid
+.endproc
+
+.proc fly_fall                   ; (LEVELS prefix; FIXED is full) upd_fly, after the arc: 3-2's Kumo (= this
+    jsr obj_feet                 ; (o_x+4)>>3 / o_y>>3 -> read_solid (A: solid?)
+    bne @land
+    ldx oi
+    inc o_tmr,x                  ; tick every 3rd frame: y += 4
+    lda o_tmr,x
+    sec
+    sbc #48
+    cmp #3
+    bcc @done
+    lda #48
+    sta o_tmr,x
+    lda o_y,x
+    clc
+    adc #4
+    sta o_y,x
+    lda o_vx,x                   ; ...and x 1 per tick ($41's low nibble): the GB
+    bmi @fxl                     ; Kumo lands ~11px further along -- on the strip
+    inc o_xl,x                   ; between two pits at px 640 (trace f653-669)
+    bne @done
+    inc o_xh,x
+    bra @done
+@fxl:
+    dec o_xl,x
+    lda o_xl,x
+    cmp #$FF
+    bne @done
+    dec o_xh,x
+    bra @done
+@land:
+    ldx oi
+    lda mrow                     ; snap the feet to the row top (4px steps sink)
+    asl
+    asl
+    asl
+    sta o_y,x
+    stz o_st,x                   ; landed: back to sitting
+    lda #FLY_SIT
+    sta o_tmr,x
+@done:
+    jmp enemy_contact
+.endproc
+
+
+
 .proc enemy_contact
     ldx oi
     lda o_y,x                    ; cull once fallen off the bottom
@@ -7582,25 +7644,7 @@ death_curve:                     ; ROM $0C19 verbatim (signed y deltas + $7F end
 ; upd_squash: a squashed corpse -- sits still, then vanishes.
 .proc upd_squash
     ldx oi
-    lda o_xl,x                   ; gravity: fall 1px/f until solid ground under the
-    clc                          ; feet (a fly shot mid-hop drops flat, GB $0F)
-    adc #4
-    sta feet_col
-    lda o_xh,x
-    adc #0
-    sta feet_col+1
-    lsr feet_col+1
-    ror feet_col
-    lsr feet_col+1
-    ror feet_col
-    lsr feet_col+1
-    ror feet_col
-    lda o_y,x
-    lsr
-    lsr
-    lsr
-    sta mrow
-    jsr read_solid
+    jsr obj_feet                 ; (o_x+4)>>3 / o_y>>3 -> read_solid (A: solid?)
     bne :+
     ldx oi
     inc o_y,x
@@ -8105,6 +8149,8 @@ title_tiles:                     ; the used tiles, SV-packed
     beq :+
     cmp #OBJ_SUU                 ; the pipe flower dies to the ball while POKING
     beq :+                       ; OUT (user-proven + wiki; upward variety = 100)
+    cmp #36                      ; OBJ_W3: HP + the contact table's ball column
+    beq :+
     cmp #OBJ_HONEN               ; the W2 leapers die to the ball too
     bcc @nj
     cmp #OBJ_LEAP+1
@@ -8148,7 +8194,14 @@ title_tiles:                     ; the used tiles, SV-packed
 :   lda #$01                     ; value code: walkers 100
     sta tmpH2
     lda o_type,x
-    cmp #OBJ_BAT
+    cmp #36
+    bne :+
+    jsr w3_ball                  ; C=0: the ball passes; else it expires, A = score
+    bcc @next2b                  ; code or 0 (absorbed)
+    beq @ballgone
+    jsr award_kill_at
+    bra @ballgone
+:   cmp #OBJ_BAT
     bne :+
     jmp l3_boss_hit              ; X = the boss slot; the ball = oi
 :   cmp #OBJ_SUU
@@ -8571,25 +8624,7 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
 @walker:
     ; ===== WALKER: floor check -> DROP (airborne) or WALK (grounded) =====
     ldx oi
-    lda o_xl,x                   ; feet_col = (o_x + 4) >> 3
-    clc
-    adc #4
-    sta feet_col
-    lda o_xh,x
-    adc #0
-    sta feet_col+1
-    lsr feet_col+1
-    ror feet_col
-    lsr feet_col+1
-    ror feet_col
-    lsr feet_col+1
-    ror feet_col
-    lda o_y,x
-    lsr
-    lsr
-    lsr
-    sta mrow
-    jsr read_solid
+    jsr obj_feet                 ; (o_x+4)>>3 / o_y>>3 -> read_solid (A: solid?)
     bne @grounded
     ; --- DROP: x stays frozen, fall ~1px/frame (2px/update) ---
     ldx oi
@@ -9346,42 +9381,17 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     ldx #NOKO_T1
     jmp draw_tile_yflip
 @cfly:
-    ldx oi                       ; --- fly 16x16: bottom row flipped on top ---
-    lda o_y,x
-    sta dy
-    ldx #FLY_BL
-    jsr draw_tile_yflip
-    lda spr_col
-    ina
-    ina
-    sta dcol
-    ldx oi
-    lda o_y,x
-    sta dy
-    ldx #FLY_BL+1
-    jsr draw_tile_yflip
-    lda spr_col
-    sta dcol
-    ldx oi
-    lda o_y,x
-    clc
-    adc #8
-    sta dy
-    ldx #FLY_TL
-    jsr draw_tile_yflip
-    lda spr_col
-    ina
-    ina
-    sta dcol
-    ldx oi
-    lda o_y,x
-    clc
-    adc #8
-    sta dy
-    ldx #FLY_TL+1
-    jmp draw_tile_yflip
+    stz do_flip                  ; --- fly 16x16 corpse: the whole sprite y-flipped
+    lda #1                       ; (draw_16w3 flips row order AND each quad) ---
+    sta do_yflip
+    lda #FLY_TL
+    jmp draw_16w3
 @squash:
-    lda spr_col
+    jsr @sqbank                  ; W3 + an overlay tile (the Kumo's $A8/$A9):
+    lda #6                       ; the slice is bank-6 data (see draw_16w3)
+    bcs :+
+    jsr bank_set
+:   lda spr_col
     sta dcol
     ldx oi
     lda o_y,x
@@ -9408,6 +9418,23 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     tax
     jsr draw_quad
 @sqd:
+    jsr @sqbank
+    lda #1
+    bcs :+
+    jsr bank_set                 ; back to bank 1
+:   rts
+@sqbank:                         ; C=0 when the corpse needs bank 6 (W3 level,
+    lda cur_level                ; tile >= $A0)
+    cmp #6
+    bcc @sqno
+    ldx oi
+    lda o_vx,x
+    cmp #$A0
+    bcc @sqno
+    clc
+    rts
+@sqno:
+    sec
     rts
 @noko:
     ldx oi
@@ -9520,74 +9547,15 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     lda #1
     bra :++
 :   lda #0
-:   sta tmpH3                    ; facing (do_flip per quad; draw_quad preserves it? set each)
+:   sta do_flip
     lda frame_count              ; wing buzz (matches the dirty-skip anim token cadence)
     and #8
     beq :+
     lda #2                       ; frame B tile offset ($A2/$B2)
-:   sta tmpL3
-    ; TL
-    ldx oi
-    lda o_y,x
-    sta dy                       ; top row at o_y (bottom row at o_y+8, feet line)
-    lda spr_col
-    sta dcol
-    lda tmpH3
-    sta do_flip
-    lda #FLY_TL
-    clc
-    adc tmpL3
-    tax
-    jsr draw_quad
-    ; TR
-    ldx oi
-    lda o_y,x
-    sta dy
-    lda spr_col
-    ina
-    ina
-    sta dcol
-    lda tmpH3
-    sta do_flip
-    lda #FLY_TL+1
-    clc
-    adc tmpL3
-    tax
-    jsr draw_quad
-    ; BL
-    ldx oi
-    lda o_y,x
-    clc
-    adc #8
-    sta dy
-    lda spr_col
-    sta dcol
-    lda tmpH3
-    sta do_flip
-    lda #FLY_BL
-    clc
-    adc tmpL3
-    tax
-    jsr draw_quad
-    ; BR
-    ldx oi
-    lda o_y,x
-    clc
-    adc #8
-    sta dy
-    lda spr_col
-    ina
-    ina
-    sta dcol
-    lda tmpH3
-    sta do_flip
-    lda #FLY_BL+1
-    clc
-    adc tmpL3
-    tax
-    jsr draw_quad
-    stz do_flip
-    rts
+:   clc
+    adc #FLY_TL
+    stz do_yflip
+    jmp draw_16w3
 @stard:
     lda spr_col
     sta dcol
@@ -10162,11 +10130,10 @@ wcyc: .byte 2, 5, 1              ; port pose ids for GB metasprites 1, 2, 3
 .proc w3_behind
     stz blit_behind
     lda cur_level
-    cmp #6
-    bcc @rts
-    cpx #$EE
-    beq @yes
-    cpx #$87
+    cmp #6                       ; ($EE, the stone, WAS here: a whole-quad skip
+    bcc @rts                     ; hid 3-2's 13 stones inside the waterfall --
+    cpx #$87                     ; the GB shows them; a per-pixel priority blit
+                                 ; cost ~5% of a frame, so: not behind, docs/43)
     bcc @rts
     cpx #$89
     bcc @yes
@@ -10219,8 +10186,9 @@ wcyc: .byte 2, 5, 1              ; port pose ids for GB metasprites 1, 2, 3
     rol src_ptr+1
     cpx #$A0
     bcc @common
-    cpx #$DD
-    bcs @common
+    cpx #$E4                     ; $A0-$E3: 68 slice slots -- W3's overlay at its
+    bcs @common                  ; own ids + parking for its base-sheet ids
+                                 ; (docs/43); $E6/$EE/$EF stay chardata
     clc
     adc hdr_buf+18
     sta src_ptr
@@ -10289,6 +10257,175 @@ wcyc: .byte 2, 5, 1              ; port pose ids for GB metasprites 1, 2, 3
 :   stz blit_opaque              ; Mario is transparent (GB colour 0 = see-through)
     jmp sprite_blit_subpx
 ; (tail call)
+.endproc
+
+; draw_16w3: a 16x16 OBJ (2x2 quads) whose tiles live in the $A0-$DF range.
+; A = top-left tile; do_flip preset (per-quad x-flip, tile order unchanged --
+; the Fly's long-standing look); do_yflip = 1 draws the bottom row on top and
+; flips every quad (the corpse). In World 3 the $A0+ ids resolve through the
+; W3 tile slice, which is BANK-6 data: the kit maps bank 6 around its draws,
+; the engine drew with bank 1 mapped and read garbage (3-2's "garbled Kumo"
+; -- the W3 Fly IS the Kumo: same $0E engine object, W3 overlay tiles).
+.proc draw_16w3
+    pha                          ; [id] rides the stack (every scratch byte is
+    lda cur_level                ; the blit's)
+    cmp #6
+    bcc :+
+    lda #6                       ; to bank 6 via a FIXED twin of set_bank: the
+    jsr bank_set                 ; real one lives in the LEVELS prefix and bank 6
+:   ldy #0                       ; carries no prefix -- calling it switched the
+                                 ; code out from under itself (hung 3-2 on the
+                                 ; first Kumo). quad 0..3: bit0 = right half,
+                                 ; bit1 = bottom row
+@lp:
+    phy                          ; [id][y]
+    ldx oi
+    lda o_y,x
+    cpy #2
+    bcc :+
+    clc
+    adc #8
+:   sta dy
+    lda spr_col
+    sta dcol
+    tya
+    and #1
+    beq :+
+    inc dcol
+    inc dcol
+:   tsx
+    lda $102,x                   ; the id
+    pha                          ; [id][y][t]
+    tya
+    lsr                          ; row (0/1) ^ y-flip -> the bottom tiles (+$10)
+    eor do_yflip
+    beq :+
+    pla
+    clc
+    adc #$10
+    pha
+:   tya
+    and #1                       ; half (0/1) ^ x-flip -> the right tile (+1):
+    eor do_flip                  ; the GB's R list swaps the halves as well as
+    beq :+                       ; flipping them (the Kumo is not symmetric;
+    pla                          ; user-caught)
+    ina
+    pha
+:   pla
+    tax
+    jsr draw_quad
+    ply
+    iny
+    cpy #4
+    bne @lp
+    stz do_flip
+    stz do_yflip
+    pla
+    lda cur_level
+    cmp #6
+    bcc @done
+    lda #1                       ; back to bank 1
+    jsr bank_set
+@done:
+    rts
+.endproc
+
+; bank_set: A = MAGNUM page. set_bank's FIXED twin (shared by draw_16w3 and
+; the squash draw): the real one lives in the LEVELS prefix, which bank 6
+; does not carry.
+.proc bank_set
+    stz LINK_DATA
+    sta LINK_DDR
+    lda #$0F
+    sta LCD_DRIVE
+    rts
+.endproc
+
+; --- Superball vs a W3 kit object (GB $2A68): HP = phys byte2 & $3F; while hits
+; taken < HP the ball is absorbed (vanishes, no score); then the contact
+; table's ball column (row byte 3, build/w3ball.inc: sparse (type index, new
+; type, phys byte2) triples) morphs the object -- 00 = no effect, the ball passes -- and
+; the score is the phys byte2 class. X = slot. C=0 pass; C=1 ball gone, A =
+; score code (0 = absorbed). The morph runs in the kit through the gift vector
+; (A=$FE, tmpL3 = type): FIXED cannot name kit code.
+w3_hp = $0128                    ; per-slot hits taken (stack-page scratch, next
+                                 ; to w3_fcc/w3_fcy; cleared by find_free_obj)
+.proc w3_ball
+    ldy #0
+:   lda w3_ballt,y               ; (index, morph type, phys byte2), $FF-terminated
+    cmp #$FF
+    beq @pass
+    cmp w3_ti,x
+    beq @hit
+    iny
+    iny
+    iny
+    bne :-
+@hit:
+    lda w3_ballt+2,y
+    and #$3F                     ; HP
+    cmp w3_hp,x
+    beq @k
+    inc w3_hp,x                  ; absorbed
+    lda #0
+    sec
+    rts
+@k: lda w3_ballt+1,y
+    sta tmpL3                    ; the new type
+    lda w3_ballt+2,y             ; score class = byte2 >> 6
+    clc
+    rol
+    rol
+    rol
+    and #3
+    tay
+    lda @val,y
+    pha
+    jsr victim_xy                ; popup at the victim
+    lda #$FE
+    jsr ovl_gift                 ; -> w3_morph (W3 kit)
+    pla
+    sec
+    rts
+@pass:
+    clc
+    rts
+@val: .byte $01, $04, $08, $10
+.endproc
+.include "../build/w3ball.inc"
+
+
+; W3 kit: VM opcode F6 (wait for Mario). The $1500 window is full; FIXED
+; hosts it (the prefix is full too); w2abi exports it to the kit.
+.proc w3_f6                      ; GB $27F4: a = objX - marioX + $14; C = a < $20
+    lda o_xl,x                   ; (Mario inside (objX-12, objX+20]). nn=1 waits
+    sec                          ; until he IS near, nn=0 until he is NOT. While
+    sbc cam_x                    ; waiting the GB rewinds the PC by 2 and RETs
+    sec                          ; (velocity untouched) -- the retry is on the
+    sbc spr_x                    ; next tick. The Suu ($25) and Kumo ($35) hang
+    clc                          ; on this; without it the port dropped them on
+    adc #$10                     ; a fixed timer (3-2 RE, GB trace onset dx=-10).
+    cmp #$20                     ; C set = far. $10 not the GB's $14: pixel-
+                                 ; calibrated (GB OAM: c202 = Mario's left+15,
+                                 ; ffc3 = the object's left+7 -> it fires with
+                                 ; Mario's left 20px short of the Suu's; the
+                                 ; port's spr_x/o_x read 4px closer, so the
+                                 ; window opens 4px sooner). User-
+                                 ; reported "drops too late" (3-2 test 1).
+    lda #0
+    rol                          ; A = far
+    eor tmpL3                    ; proceed = far XOR (nn == 1)
+    lsr                          ; C = proceed
+    bcs @ok
+    lda w3_pc,x
+    dec
+    dec
+    sta w3_pc,x
+    lda #1                       ; retry on the next tick
+    sta o_tmr,x
+    clc
+@ok:
+    rts
 .endproc
 
 ; set_dst: dst_ptr = $4000 + ((ring_b + dy*48 + dcol) mod $1FE0) — the window
@@ -10908,6 +11045,7 @@ ok:
 @out:
     rts
 .endproc
+
 
 ; ---------------------------------------------------------------------------
 ; NMI: per-frame tick (~61 Hz). Mirrors the GB VBlank ISR role. Also begins the

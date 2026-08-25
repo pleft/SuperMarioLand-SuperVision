@@ -194,7 +194,7 @@ def main():
             assert len(win23_img) <= 0x800, "2-3 window kit exceeds the $800 window"
             far23 = full23[w2c_sz:w2c_sz + far_sz]
             carve23 = full23[w2c_sz + far_sz:w2c_sz + far_sz + fv_sz]
-            assert far_at == 0xA600, "W2FARM moved -- update pack_banks"
+            assert far_at == 0xA6C0, "W2FARM moved -- update pack_banks"
             if fv_sz:
                 # the carve = bank5 chardata tiles $20-$4F (Mario poses; he
                 # never draws in the sub level). Guard the address drift.
@@ -204,7 +204,7 @@ def main():
                 lvl5 = open("build/levels/level_05.bin", "rb").read()
                 hot = set(b for b in lvl5 if b < 0x2C)
                 assert not hot, f"2-3 map uses carved BG tiles: {sorted(hot)}"
-            assert addr <= far_at, "level 5 header overlaps the far kit"
+            assert addr <= far_at, f"level 5 header (${addr:04X}) overlaps the far kit at ${far_at:04X}"
             addr = far_at + len(far23)
             # (the spawn list used to ride bank 6 behind a loader stub: bank 5
             # had no room for the kit before maps were column-deduped. It does
@@ -343,10 +343,10 @@ def main():
 
         region = hdr
         if level == 5:
-            assert lvl_hdr_addr + HDR_SIZE <= 0xA600, \
+            assert lvl_hdr_addr + HDR_SIZE <= 0xA6C0, \
                 f"level 5 header runs into the far kit by "\
-                f"{lvl_hdr_addr + HDR_SIZE - 0xA600} bytes"
-            region += b"\xFF" * (0xA600 - (lvl_hdr_addr + HDR_SIZE)) + far23
+                f"{lvl_hdr_addr + HDR_SIZE - 0xA6C0} bytes"
+            region += b"\xFF" * (0xA6C0 - (lvl_hdr_addr + HDR_SIZE)) + far23
         region += b"".join(tabs) + pool \
                      + blobs["pipes"] + blobs["blocks"] + blobs["spawns"]
         if level >= 3:
@@ -376,11 +376,13 @@ def main():
         # the L13E room machine copies it over the moth tiles (main.s @pdone)
         creat = open("build/gfx/creature23.svt", "rb").read()
         assert len(creat) == 128, "creature23.svt must be 8 tiles (128B)"
-        coff = 5 * STRIDE + 0xBF80 - BASE
+        # 2026-08-25: moved to BANK 6 $BF00 (its tail is free; bank 5 needed
+        # its last 128 bytes back for the LEVELS prefix -- 3-2's fixes).
+        coff = 6 * STRIDE + 0xBF00 - BASE
         assert all(b == 0xFF for b in img[coff:coff + 128]), \
-            "bank 5 $BF80 not free for the creature sheet"
+            "bank 6 $BF00 not free for the 2-3 creature sheet"
         img[coff:coff + 128] = creat
-        print(f"pack_banks: 2-3 kit in its own bank; creature (128B) -> bank 5 $BF80")
+        print(f"pack_banks: 2-3 kit in its own bank; creature (128B) -> bank 6 $BF00")
     if w3_jobs:
         pack_w3(img, sym, prefix, l11)
     open(img_path, "wb").write(bytes(img))
@@ -452,8 +454,12 @@ def pack_w3(img, sym, prefix, l11):
     order = [int(t, 16) for t in open("build/w3tiles.txt").read().split()]
     hi3 = open("build/gfx/w3_hi.svt", "rb").read()      # $F9/$FA/$FB/$FE originals
     HI = {0xF9: 0, 0xFA: 1, 0xFB: 2, 0xFE: 3}
-    slice_ = b"".join(hi3[HI[t] * 16:(HI[t] + 1) * 16] if t in HI
-                      else ovl[(t - 0xA0) * 16:(t - 0xA0 + 1) * 16] for t in order)
+    w1obj = open("build/gfx/w1_obj_8000.svt", "rb").read()   # the W1 base sheet =
+    def slice_tile(t):                                        # GB VRAM for ids outside
+        if t in HI: return hi3[HI[t] * 16:(HI[t] + 1) * 16]   # the $A0-$DC overlay
+        if 0xA0 <= t <= 0xDC: return ovl[(t - 0xA0) * 16:(t - 0xA0 + 1) * 16]
+        return w1obj[t * 16:(t + 1) * 16]
+    slice_ = b"".join(slice_tile(t) for t in order)
     off = BNK6 + 0xB740 - BASE
     assert all(b == 0xFF for b in img[off:off + len(slice_)]), "bank 6 $B780 busy"
     img[off:off + len(slice_)] = slice_
@@ -485,7 +491,8 @@ def pack_w3(img, sym, prefix, l11):
     coff3 = BNK6 + 0xBB80 - BASE
     assert all(b == 0xFF for b in img[coff3:coff3 + 128]), "bank 6 $BB80 busy"
     img[coff3:coff3 + 128] = cre3
-    assert w3c_sz <= 0x770, f"W3 window code ({w3c_sz:#x}) runs into the composer stash at $1C70"
+    # CX_BUILD=1 (kit_w3.inc) puts the composer stash at $1C70 -> limit 0x770
+    assert w3c_sz <= 0x800, f"W3 window code ({w3c_sz:#x}) overflows the $800 window"
     win = full3[:w3c_sz]
     assert len(win) <= 0x800, "W3 kit exceeds the $800 window"
     assert all(b == 0xFF for b in img[BNK6 + W3WIN - BASE:BNK6 + W3WIN - BASE + 0x800]), \
