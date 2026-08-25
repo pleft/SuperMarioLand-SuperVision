@@ -8632,7 +8632,10 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     lda o_y,x
     adc #2
     sta o_y,x
-    bra @consume
+    cmp #168                     ; fell into a pit: gone (o_y is a byte -- it
+    bcc @consume                 ; wrapped and re-entered from the top: 3-2's
+    stz o_type,x                 ; mushroom rained forever, user-caught)
+    rts
 @grounded:
     ldx oi                       ; snap to the floor tile top
     lda mrow

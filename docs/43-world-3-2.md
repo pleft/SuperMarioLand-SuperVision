@@ -301,3 +301,9 @@ the ball passes) and the score is byte2's class. Port:
   x 45 under the Suu, facing left, B every 30 frames): f662 hit 1 absorbed
   (w3_hp 1), f685 hit 2 -> w3_ti 6 -> 2 ($19), score +400, then the $0D
   corpse. battery31 ALL PASS, svgold identical. Shipped ~/Desktop/sml32.sv.
+
+### Round 3 (user): the raining mushroom
+
+A mushroom (or heart) that fell into a pit kept falling: `o_y` is a byte, it
+wrapped past 255 and re-entered from the top for ever. `upd_mush`'s drop
+now culls at o_y >= 168 like the corpses. battery31 ALL PASS, svgold identical.
