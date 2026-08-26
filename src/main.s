@@ -1823,7 +1823,14 @@ no:
     lda #1
     sta jump_state
     stz fall_v
-    jmp @done
+    lda #$30                      ; GB bank3 $49ed: the jump seeds the momentum
+    sta move_t                    ; counter ($c20c) with $30 -- after the d-pad is
+    lda h_idx                     ; released mid-air Mario GLIDES on at the slow
+    cmp #4                        ; speed until it runs out or he lands (landing
+    beq :+                        ; clamps it back to 6, $0b7f). Also: a walk (not a
+    lda #2                        ; run) restarts at speed index 2 ($c20e).
+    sta h_idx
+:   jmp @done
 @ascend:
     lda pad_held                  ; VARIABLE JUMP (harness-measured vs the original: releasing
     and #GB_A                     ; A leaves only the deceleration tail of the ascent -- each
@@ -4919,7 +4926,28 @@ PIN_X   = 64
 ; past it his rightward motion scrolls the camera (cam_x) instead, until the level
 ; end (CAM_MAX) where he walks to the right screen edge. The level never scrolls back.
 .proc move_player                ; accelerating walk via the real speed table (px-precise)
-    lda skid_t                   ; turn-around brake (GB $c20d=1 state, $1d1e): input is
+    lda jump_state               ; grounded: the landing clamp ($0b7f/$121a): a
+    bne :+                       ; momentum > 6 (the $30 jump seed) collapses to 6
+    lda move_t
+    cmp #7
+    bcc :+
+    lda #6
+    sta move_t
+:   lda pad_pressed              ; bank3 $49b5: Down NEWLY pressed seeds $c20c=$20
+    and #GB_DOWN
+    beq :+
+    lda #$20
+    sta move_t
+:   lda pad_pressed              ; bank3 $49fd: B newly pressed with the momentum at
+    and #GB_B                    ; exactly 6 and no Superball power zeroes it
+    beq :+
+    lda mario_superball
+    bne :+
+    lda move_t
+    cmp #6
+    bne :+
+    stz move_t
+:   lda skid_t                   ; turn-around brake (GB $c20d=1 state, $1d1e): input is
     beq @nobrake                 ; ignored and Mario is frozen for 8 frames, showing the
     dec skid_t                   ; skid pose (grounded) with the OLD facing
     bne :+
@@ -5003,9 +5031,9 @@ PIN_X   = 64
     beq @brake
     lda #1                       ; remember the motion direction ($c20d=$10)
     sta mdir
-    lda move_t                   ; momentum ramp, cap 6 ($c20c, $1dd8)
-    cmp #6
-    bcs @rmove
+    lda move_t                   ; momentum ramp ($c20c, $1dd8): +1 unless EXACTLY 6
+    cmp #6                       ; (the $30 jump seed keeps counting up in the air)
+    beq @rmove
     inc move_t
 @rmove:
     stz mario_facing
@@ -5084,9 +5112,9 @@ PIN_X   = 64
     jmp @brake
 :   lda #2                       ; remember the motion direction ($c20d=$20)
     sta mdir
-    lda move_t                   ; momentum ramp, cap 6 ($c20c, $1dd8)
+    lda move_t                   ; momentum ramp ($c20c, $1e8b): +1 unless EXACTLY 6
     cmp #6
-    bcs @lmove
+    beq @lmove
     inc move_t
 @lmove:
     lda #1
@@ -8843,8 +8871,7 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
                                  ; blit_tile/blit_blank now clip at the row end
                                  ; themselves, so the cut can sit at 176, which
                                  ; covers every fully-visible position (144 + 31).
-    ldx oi
-    lda o_y,x                    ; dy clip 16..152
+    lda o_y,x                    ; dy clip 16..152 (X = oi throughout the pass)
     clc
     adc #8
     cmp #16
@@ -8883,8 +8910,7 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     ora #1
     sta o_nfl,x
     bra @p1next
-@p1vis0:
-    ldx oi
+@p1vis0:                         ; (X = oi on both paths here)
     lda o_pdr,x                  ; not visible: dirty iff something old needs erasing
     beq @p1next
     lda #1
@@ -9708,11 +9734,13 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
 .segment "LEVELS"
 .proc load_level
     lda #3                       ; the walker default; a vehicle blob raises it
-    ldy cur_level                ; W3 (6-8): 5-6 walkers roam at once (Nokobon
+    ldy cur_level                ; W3 (6-7): 5-6 walkers roam at once (Nokobon
     cpy #6                       ; rows, Tokotokos, Ganchans) and 3 redraws/frame
     bcc :+                       ; blew the NMI budget in the busy stretches --
-    lda #2                       ; 2 movers/frame + the rotated origin = each
-:   sta bud_base                 ; mover at worst 1 frame late (task #30)
+    cpy #8                       ; 2 movers/frame + the rotated origin = each
+    beq :+                       ; mover at worst 1 frame late (task #30). 3-3 keeps
+    lda #2                       ; 3: its lift clusters are 3 movers and the 1-slot
+:   sta bud_base                 ; rotation starved the third one (docs/44)
     stz ending13                 ; a fresh level never inherits ending state
     stz e_phase
     stz e_own

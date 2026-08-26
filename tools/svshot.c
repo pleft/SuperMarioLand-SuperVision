@@ -28,7 +28,7 @@ static uint8 pad_of(char c) {
     case 'U': return 0x08; case 'B': return 0x10; case 'A': return 0x20;
     /* combinations: you cannot play a walker level one button at a time --
        'J' = run right + jump, 'K' = left + jump, 'F' = right + fire */
-    case 'J': return 0x21; case 'K': return 0x22; case 'F': return 0x11;
+    case 'J': return 0x21; case 'K': return 0x22; case 'F': return 0x11; case 'Q': return 0x31; case 'G': return 0x12; case 'H': return 0x32; /* Q=R+A+B G=L+B H=L+A+B */
     default:  return 0x00;
     }
 }

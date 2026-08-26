@@ -26,6 +26,8 @@
 #define SELECT 0x40
 #define PAD_R 0x01
 #define PAD_A 0x20
+#define PAD_B 0x10
+#define PAD_L 0x02                     /* left: 3-3's brick maze needs left jumps */                     /* run: the lift-to-lift gaps of 3-3 need it */
 
 /* port RAM (build/rom.lbl) */
 #define CAM_L 0xB4
@@ -66,9 +68,12 @@ static int dead(void)
    then RIGHT */
 static uint8 plan_pad(int pre, int d, int h, int drift, int i)
 {
-    if (i < d) return pre ? PAD_R : 0;
-    if (i < d + h) return drift ? (PAD_R | PAD_A) : PAD_A;
-    return PAD_R;
+    int run = drift & 2 ? PAD_B : 0;              /* drift bit 1 = hold B (run) */
+    int dir = drift & 4 ? PAD_L : PAD_R;          /* drift bit 2 = the plan moves LEFT */
+    drift &= 1;
+    if (i < d) return pre ? (dir | run) : 0;
+    if (i < d + h) return drift ? (dir | PAD_A | run) : PAD_A;
+    return dir | run;
 }
 
 static void write_script(const char *out, const uint8 *rec, int n)
@@ -82,7 +87,10 @@ static void write_script(const char *out, const uint8 *rec, int n)
         int j = i;
         while (j < n && rec[j] == rec[i]) j++;
         char c = rec[i] == (PAD_R | PAD_A) ? 'J' : rec[i] == PAD_R ? 'R'
-               : rec[i] == PAD_A ? 'A' : '.';
+               : rec[i] == PAD_A ? 'A' : rec[i] == (PAD_R | PAD_A | PAD_B) ? 'Q'
+               : rec[i] == (PAD_R | PAD_B) ? 'F' : rec[i] == PAD_L ? 'L'
+               : rec[i] == (PAD_L | PAD_A) ? 'K' : rec[i] == (PAD_L | PAD_B) ? 'G'
+               : rec[i] == (PAD_L | PAD_A | PAD_B) ? 'H' : '.';
         fprintf(o, "%s%c%d", i ? "," : "", c, j - i);
         i = j;
     }
@@ -126,7 +134,10 @@ int main(int argc, char **argv)
         if (!pf) { perror("prefix"); return 2; }
         char c; int k;
         while (fscanf(pf, " %c%d", &c, &k) == 2) {
-            uint8 pad = c == 'J' ? (PAD_R | PAD_A) : c == 'R' ? PAD_R : c == 'A' ? PAD_A : 0;
+            uint8 pad = c == 'J' ? (PAD_R | PAD_A) : c == 'R' ? PAD_R : c == 'A' ? PAD_A
+                      : c == 'Q' ? (PAD_R | PAD_A | PAD_B) : c == 'F' ? (PAD_R | PAD_B)
+                      : c == 'L' ? PAD_L : c == 'K' ? (PAD_L | PAD_A) : c == 'G' ? (PAD_L | PAD_B)
+                      : c == 'H' ? (PAD_L | PAD_A | PAD_B) : 0;
             for (int i = 0; i < k && n < frames; i++) { step1(pad); rec[n++] = pad; }
             fscanf(pf, ",");
         }
@@ -139,9 +150,9 @@ int main(int argc, char **argv)
        delays (48..90, only with 'nothing' or holding right) exist for the
        Ganchan mounts of 3-2: the ride comes to Mario, so the right move is to
        WAIT for it -- a fan of immediate jumps never finds that. */
-    static const int DELAY[] = {0, 6, 12, 18, 24, 30, 36, 48, 64, 90};
-    static const int HOLD[]  = {0, 10, 14, 18, 22, 26, 30};
-    enum { ND = sizeof DELAY / sizeof *DELAY, NH = sizeof HOLD / sizeof *HOLD, NC = 2 * ND * NH * 2 };
+    static const int DELAY[] = {0, 3, 6, 9, 12, 18, 24, 30, 36, 48, 64, 90, 120, 150, 180, 210, 240};
+    static const int HOLD[]  = {0, 4, 7, 10, 14, 18, 22, 26, 30};
+    enum { ND = sizeof DELAY / sizeof *DELAY, NH = sizeof HOLD / sizeof *HOLD, NC = 2 * ND * NH * 8 };
     /* CHECKPOINT STACK (gbauto's): every committed window keeps the state it
        started from and which candidates it already tried. A death or a stall
        pops back -- one window, then two, three... -- and takes the next-best
@@ -171,10 +182,12 @@ int main(int argc, char **argv)
         for (int pi = 0; pi < 2; pi++)
         for (int di = 0; di < ND; di++)
         for (int hi = 0; hi < NH; hi++)
-        for (int w = 1; w >= 0; w--, ci++) {
+        for (int w = 7; w >= 0; w--, ci++) {          /* bit0 drift, bit1 run, bit2 LEFT */
             int pre = pi ? 0 : 1, d = DELAY[di], h = HOLD[hi];
             if (htried[depth][ci]) continue;
-            if (d >= 48 && (w == 0 || hi > 3)) continue;   /* thin the long-wait fan */
+            if (d >= 48 && ((w & 1) == 0 || hi > 3)) continue;   /* thin the long-wait fan */
+            if ((w & 3) == 2) continue;                /* run without drift = pointless */
+            if ((w & 4) && (d >= 48 || w == 4)) continue;   /* left plans: short waits, drift only */
             supervision_load_state_buf(snap, ssz);
             int p60 = -1, score;
             int i;

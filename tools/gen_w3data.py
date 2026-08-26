@@ -10,7 +10,7 @@ Emits:
 
 RULE 5: reads the ROM only as a build input; every output is gitignored.
 """
-import sys, os
+import os, sys, os
 
 ROM = open(sys.argv[1] if len(sys.argv) > 1 else "super-mario-land-gb.gb", "rb").read()
 OUT_BIN = "build/w3scripts.bin"
@@ -219,6 +219,14 @@ def main():
                 continue
             miny = min(y for y, _ in e); maxy = max(y for y, _ in e) + 8
             minx = min(x for _, x in e); maxx = max(x for _, x in e) + 8
+            if os.environ.get("W3DBG"): print(f"param ${p:02X}: y {miny}..{maxy} x {minx}..{maxx}")
+            if p in (0x12, 0x22) and miny == 0 and maxy == 8 and minx == 0:
+                # the 3-3 lifts (24x8 / 16x8 bars): 3 lifts moving at once
+                # with the 40x24 default box dropped up to 24% of the logic
+                # frames (docs/44) -- a 2-row box from the anchor, cols
+                # covering the 8px-left shift + the bar
+                exc.append((p, 0, 0x80 | ((maxx + 8) // 8 + 1)))
+                continue
             if miny >= -8 and maxy <= 16 and minx >= -8 and maxx <= 32:
                 continue                      # inside the default box
             yadj = (-miny - 8) // 8

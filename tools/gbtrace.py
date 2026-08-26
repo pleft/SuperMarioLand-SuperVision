@@ -27,11 +27,15 @@ if os.environ.get("HARD"):        # $FF9A != 0: the spawner takes the bit-7 (har
     m[0xFF9A] = 1                 # mode) entries too (ObjectPhysics_Init_24EF)
 rows = []
 for f, w in enumerate(seq):
-    for b in ("right", "a"): p.button_release(b)
-    if w in ("R", "J"): p.button_press("right")
-    if w in ("J", "A"): p.button_press("a")
+    for b in ("right", "a", "b", "left"): p.button_release(b)
+    if w in ("R", "J", "Q", "F"): p.button_press("right")   # svshot letters:
+    if w in ("J", "A", "Q", "K", "H"): p.button_press("a")  # J=R+A Q=R+A+B F=R+B
+    if w in ("Q", "F", "B", "G", "H"): p.button_press("b")  # L K=L+A G=L+B H=L+A+B
+    if w in ("L", "K", "G", "H"): p.button_press("left")
     p.tick(1, True)
-    cam = (m[0xC0AB] | (m[0xC0AC] << 8)) * 16 - 192
+    cam = (m[0xC0AB] | (m[0xC0AC] << 8)) * 16 - 192   # 16-px spawn-column camera
+    d = (m[0xFFA4] - cam) & 0xFF                        # refine with ffa4 (pixel scroll)
+    cam += d - 256 if d > 128 else d
     objs = []
     for k in range(10):
         b = 0xD100 + 16 * k
