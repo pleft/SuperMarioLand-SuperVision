@@ -8907,12 +8907,14 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     beq @p1next
 @p1move:
     dec dirty_bud                ; pure movement/anim: over budget -> keep last
-    bpl @p1dirty                 ; frame's image (overlap propagation may still
+    bpl @p1serve                 ; frame's image (overlap propagation may still
     lda o_pvx,x                  ; force it later — consistency preserved)...
     jsr stream_hit               ; UNLESS the kept image intersects the strip a
     bcs @p1dirty                 ; streamed column just wiped — must redraw
     bra @p1next
-@p1dirty:
+@p1serve:
+    stx rot1                     ; ROUND-ROBIN among movers: next frame's scan
+@p1dirty:                        ; starts after the last mover served (docs/44)
     lda o_nfl,x
     ora #1
     sta o_nfl,x

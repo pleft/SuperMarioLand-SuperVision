@@ -153,3 +153,16 @@ Gates on the shipped build: battery31 10/10, svgold identical.
 * Boss "almost invisible" was reported on the budget-3 build; to re-check on
   the budget-2 build once a route reaches the arena again (all recorded
   routes/prefixes diverged with the landing-window change).
+* "4th moving platform is choppy": measured on the drawn coordinates --
+  `$38`#2 (the third mover in slot order) updated its image every ~7 frames
+  in 8px steps (62 moves/432f) while the other two updated every 3rd frame
+  (200 moves/600f): the 1-slot-per-frame origin rotation starves the third
+  of three movers (2 frames in 10). Fixed: pass 1 records the last mover
+  served (`stx rot1`) so the next frame's scan starts after it -- true
+  round-robin. After: 149 moves, max step 2. Costs ~6% logic frames with
+  three lifts (was measured "slightly worse" on not-drawn counts earlier,
+  but not-drawn with the image kept is invisible; the 8px steps were not).
+* Arena erase boxes: the boss's ($54/$55) row encoding gave 5 rows for a
+  24px sprite (rows>=4 set both bits); now 4 ($A3). Ganchan poses $31/$47
+  get a 4x3 box ($C4) instead of the 40x24 default. Arena logic-frame drop
+  was 13% (213/246) before these.

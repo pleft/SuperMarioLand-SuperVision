@@ -220,6 +220,13 @@ def main():
             miny = min(y for y, _ in e); maxy = max(y for y, _ in e) + 8
             minx = min(x for _, x in e); maxx = max(x for _, x in e) + 8
             if os.environ.get("W3DBG"): print(f"param ${p:02X}: y {miny}..{maxy} x {minx}..{maxx}")
+            if p in (0x31, 0x47) and miny >= -8 and maxy <= 8 and minx == 0 and maxx <= 16:
+                # 16x16-or-smaller sprites anchored at x 0 (Ganchan, Tokotoko,
+                # the boss's thrown $33, corpses): 3 rows (straddle) x 4 cols
+                # (the 8px-left shift + the bar) instead of the 40x24 default --
+                # the boss arena overran the frame (docs/44, playtest round 1)
+                exc.append((p, (-miny - 8) // 8 if miny < -8 else 0, 0xC0 | ((maxx + 8) // 8 + 1)))
+                continue
             if p in (0x12, 0x22) and miny == 0 and maxy == 8 and minx == 0:
                 # the 3-3 lifts (24x8 / 16x8 bars): 3 lifts moving at once
                 # with the 40x24 default box dropped up to 24% of the logic
@@ -232,9 +239,8 @@ def main():
             yadj = (-miny - 8) // 8
             rows = (maxy - miny) // 8 + 1
             cols = (maxx - minx) // 8 + 1
-            wb = 0x80 | cols
-            if rows >= 3: wb |= 0x40
-            if rows >= 4: wb |= 0x20
+            # width byte rows: base 1 + bit7 (+1) + bit6 (+1) + bit5 (+2)
+            wb = cols | {1: 0x00, 2: 0x80, 3: 0xC0, 4: 0xA0}.get(rows, 0xE0)
             exc.append((p, yadj, wb))
         f.write(f"W3_NEXC = {len(exc)}\n")
         f.write("w3_excp:\n    .byte " + ",".join(f"${p:02X}" for p, _, _ in exc) + "\n")
