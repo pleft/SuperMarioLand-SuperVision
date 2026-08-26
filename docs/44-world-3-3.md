@@ -133,3 +133,23 @@ to the 1560 floor (`.10,R20,.40,F20`). svauto continues from there.
 
 Route: docs/routes/level_08.txt (completes on the frozen god build).
 Gates on the shipped build: battery31 10/10, svgold identical.
+
+## User playtest round 1 (2026-08-26)
+
+* "Cannot stand on the 3rd platform / falls like it does not exist" (then
+  intermittent): `w3_stand` measured Mario's distance from o_x+4 -- an 8px
+  object's centre -- for every width, so a 24px lift was standable 12px LEFT
+  of its bar and not on its right third. Now Mario's x is biased by 4(w-1)
+  around the shared `mario_dx` (window centred on o_x+4w, half-width 4w+2):
+  measured standable span = the drawn bar +/-2px. `mario_dx` folded (+8/-4)
+  to pay for it in the LEVELS prefix. Gates green.
+* "Platforms flicker like hell": the 3-3 mover budget of 3 made the frame
+  overrun -- o_pdr=0 (not drawn) 28-40% of frames vs 3-13% at budget 2.
+  Reverted to 2; with the tight lift erase boxes three lifts on screen now
+  draw 187/188 frames each (round-robin origin measured slightly worse).
+* "Movement seems slippery": the GB air-momentum rule (above) -- releasing
+  the d-pad mid-jump keeps Mario gliding at 0.5px/f until he lands; measured
+  identical to the GB on 1-1 (ground release, run release, run-jump release).
+* Boss "almost invisible" was reported on the budget-3 build; to re-check on
+  the budget-2 build once a route reaches the arena again (all recorded
+  routes/prefixes diverged with the landing-window change).

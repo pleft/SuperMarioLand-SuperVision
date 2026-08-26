@@ -1301,15 +1301,28 @@ main_loop:
     adc #8
     cmp #14
     bcs @no
-    jsr mario_dx                 ; tmpH3:tmpL3 = |mario centre - (o_x+4)|
-    lda tmpH3
-    bne @no
-    lda tmpH                     ; half-window = width/2 + 2
-    and #$70
-    lsr
-    lsr
+    lda tmpH                     ; CENTRE the window on the metasprite: mario_dx
+    and #$70                     ; measures from o_x+4 (an 8px object's centre);
+    lsr                          ; a w-tile object's centre is o_x+4w, so shift
+    lsr                          ; Mario by bias = 4(w-1) around the call. (3-3's
+    sec                          ; 24px lifts were standable 12px LEFT of the bar
+    sbc #4                       ; and not on its right third -- user: "falls like
+    pha                          ; the platform does not exist". spr_x < 8 with a
+    eor #$FF                     ; wide object would wrap: Mario is never there.)
+    sec
+    adc spr_x                    ; spr_x - bias
+    sta spr_x
+    jsr mario_dx                 ; tmpH3:tmpL3 = |mario centre - (o_x+4w)|
+    pla
+    pha
     clc
-    adc #2
+    adc spr_x                    ; restore
+    sta spr_x
+    lda tmpH3
+    bne @nop
+    pla                          ; half-window = width/2 + 2 = bias + 6
+    clc
+    adc #6
     cmp tmpL3
     bcc @no
     lda tmpL                     ; ON IT: snap, and stay grounded
@@ -1318,10 +1331,13 @@ main_loop:
     stz fall_v
     sec
     rts
+@nop:
+    pla
 @no:
     clc
     rts
 .endproc
+
 
 ; carry_x1_rt: move the RIDER 1px right with the carrying object. Past the pin
 ; it pushes the CAMERA, not spr_x (rides used to shove Mario way past PIN_X and
@@ -7848,33 +7864,24 @@ title_tiles:                     ; the used tiles, SV-packed
 ; (FIXED is full; the common prefix is always mapped)
 ; mario_dx: tmpL3(+H3) = |mario centre - slot X's centre (o_x+4)|, 16-bit.
 .segment "LEVELS"
-.proc mario_dx
-    lda cam_x                    ; mario centre = cam + spr_x + 8
+.proc mario_dx                   ; (cam + spr_x + 8) - (o_x + 4) = (cam + spr_x + 4) - o_x
+    lda spr_x
     clc
-    adc spr_x
+    adc #4
+    sta tmpL2
+    lda cam_x
+    clc
+    adc tmpL2
     sta tmpL2
     lda cam_x+1
     adc #0
     sta tmpH2
-    lda tmpL2
-    clc
-    adc #8
-    sta tmpL2
-    bcc :+
-    inc tmpH2
-:   lda o_xl,x
-    clc
-    adc #4
-    sta tmpL3
-    lda o_xh,x
-    adc #0
-    sta tmpH3
     sec
     lda tmpL2
-    sbc tmpL3
+    sbc o_xl,x
     sta tmpL3
     lda tmpH2
-    sbc tmpH3
+    sbc o_xh,x
     sta tmpH3
     bpl @pdx
     sec
@@ -9737,10 +9744,11 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     ldy cur_level                ; W3 (6-7): 5-6 walkers roam at once (Nokobon
     cpy #6                       ; rows, Tokotokos, Ganchans) and 3 redraws/frame
     bcc :+                       ; blew the NMI budget in the busy stretches --
-    cpy #8                       ; 2 movers/frame + the rotated origin = each
-    beq :+                       ; mover at worst 1 frame late (task #30). 3-3 keeps
-    lda #2                       ; 3: its lift clusters are 3 movers and the 1-slot
-:   sta bud_base                 ; rotation starved the third one (docs/44)
+    lda #2                       ; 2 movers/frame + the rotated origin = each
+:   sta bud_base                 ; mover at worst 1 frame late (task #30). (3 on
+                                 ; 3-3 was tried for its lift trios: the frame
+                                 ; overran and the lifts went UNDRAWN 28-40% of
+                                 ; frames -- user: "flicker like hell". docs/44)
     stz ending13                 ; a fresh level never inherits ending state
     stz e_phase
     stz e_own
