@@ -185,3 +185,15 @@ the Down/B momentum rules it had displaced are back.)
 
 Respawn "in the gap next to the block" at the 640 checkpoint: the GB does
 exactly the same (screenshot-matched), not a port bug.
+
+Round 3b (strict metric: the boss's own 24x24 image box, full pose = 68-69
+dark px): after the erase reorder the boss is intact in 73 of 105 arena
+frames, partly wiped in 22, mostly gone in 10 -- still ~30% flicker frames.
+The wiped stretches (2-7 frames) coincide with Mario or a Ganchan
+overlapping the boss while the arena runs late (logic 578/650). A pass-1
+"unmoved but not drawn last frame -> draw-only refresh" was added (paid with
+the Down-seed rule) but measured NO change, as did a budget exemption: the
+boss is not being deferred -- the whole render lands late against the beam
+and the boss, the largest sprite, pays most. The arena is simply over the
+software-sprite budget; the structural fix is the composed draw (CX_BUILD,
+one protected object = the boss), parked after the 3-1 trial.

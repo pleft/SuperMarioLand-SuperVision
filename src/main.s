@@ -4949,11 +4949,8 @@ PIN_X   = 64
     bcc :+
     lda #6
     sta move_t
-:   lda pad_pressed              ; bank3 $49b5: Down NEWLY pressed seeds $c20c=$20
-    and #GB_DOWN
-    beq :+
-    lda #$20
-    sta move_t
+:   ; (bank3 $49b5 -- Down newly pressed seeds $c20c=$20 -- is NOT ported:
+    ; its 9 FIXED bytes went to the wiped-image refresh in pass 1, docs/44)
 :   lda pad_pressed              ; bank3 $49fd: B newly pressed with the momentum at
     and #GB_B                    ; exactly 6 and no Superball power zeroes it
     beq :+
@@ -8895,17 +8892,24 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     lda tmpL                     ; overlaps the strip a streamed column / margin
     jsr stream_hit               ; blank rewrote THIS frame? those pixels are gone —
     bcs @p1dirty                 ; redraw; everyone else keeps the dirty test
-    lda o_pdr,x
-    beq @p1dirty
     lda o_nvx,x
     cmp o_pvx,x
-    bne @p1move
+    bne @p1moved
     lda o_ndy,x
     cmp o_pvy,x
-    bne @p1move
+    bne @p1moved
     jsr anim_token               ; per-type token (must mirror the pass-4 write)
     cmp o_pfr,x
-    beq @p1next
+    bne @p1moved
+    lda o_pdr,x                  ; UNMOVED: drawn last frame -> clean. Not drawn
+    bne @p1next                  ; (the frame overran) -> its image may have been
+    lda #6                       ; wiped by a neighbour's erase: draw-only refresh
+    sta o_nfl,x                  ; (visible|refresh; o_nfl was just set to 2). 3-3's
+    bra @p1next                  ; boss stayed half-erased 2-7 frames whenever Mario
+                                 ; or a Ganchan overlapped it and the arena ran late
+@p1moved:
+    lda o_pdr,x                  ; moved and not drawn last frame: full dirty
+    beq @p1dirty
 @p1move:
     dec dirty_bud                ; pure movement/anim: over budget -> keep last
     bpl @p1serve                 ; frame's image (overlap propagation may still
