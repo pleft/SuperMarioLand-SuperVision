@@ -292,6 +292,13 @@ CXS_BOXOK  = $0153               ; 1 = CXA_* box computed this walk
 .endproc
 
 .proc w3_child                   ; tmpL3 = the GB type to spawn
+    lda cur_level                ; 3-3 ONLY (user decision, docs/44): Hiyoihoi throws
+    cmp #8                       ; every OTHER cycle -- with two boulders hopping
+    bne @go                      ; through it the arena overran the frame and the
+    lda frame_count              ; boss flickered unplayably. One boulder at a time
+    and #$80                     ; keeps the fight; frame_count bit 7 vs the 116-
+    beq @none                    ; frame cycle = roughly alternate throws. (The GB
+@go:                             ; throws every cycle -- a deliberate deviation.)
     jsr w3_spawn_at              ; engine: a slot at the parent's exact position
     bcs @none
     jsr w3_morph                 ; kit: the type lookup + a fresh VM context
@@ -312,9 +319,7 @@ CXS_BOXOK  = $0153               ; 1 = CXA_* box computed this walk
     cmp #$E0
     bcs @wait
     sta o_vx,x                   ; a velocity byte: applies for one tick
-    lda #1
-    sta o_tmr,x
-    rts
+    bra @set1                    ; (shares F9/FA's "tick ends here" tail)
 @wait:
     and #$0F                     ; $E0-$EF = wait N ticks ($EF = 15)
     sta o_tmr,x
@@ -359,6 +364,7 @@ CXS_BOXOK  = $0153               ; 1 = CXA_* box computed this walk
     bne @other                   ; old fall-through fired $49's missile a tick
 @endtick:                        ; early. The cue itself: w3_cue.
     jsr w3_cue
+@set1:
     lda #1
     sta o_tmr,x
 @done:

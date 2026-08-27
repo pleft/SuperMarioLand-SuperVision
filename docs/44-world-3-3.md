@@ -200,3 +200,16 @@ one protected object = the boss), parked after the 3-1 trial.
 The refresh was then REVERTED (no gain, and it invalidated the just-recorded
 route); the shipped 3-3 build is the round-3 one (Down/B rules present),
 route docs/routes/level_08.txt completes on it (goal at frame 3597).
+
+## Round 4: fewer boulders (user decision, 2026-08-27)
+
+Elimination on the warp route (tools/svarena.py, strict boss-image metric,
+105 arena frames): GB-faithful throws -> boss intact 73 / partly wiped 22 /
+mostly gone 10; NO throws at all -> 106/2/0 (the boulders are the whole
+cause: each throw's boulder is born inside the boss's box and hops out
+through it). Hiyoihoi on 3-3 now throws every OTHER cycle (w3_child: level 8,
+frame_count bit 7 -- ~one boulder alive at a time): intact 77/17/11. A wider
+propagation window (dy<40), a boss redraw priority and a wiped-image refresh
+all measured zero effect. The boss tiles are not in the behind-BG range.
+This is a deliberate deviation from the GB for playability; the structural
+fix stays the composer (docs/42).
