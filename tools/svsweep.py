@@ -7,7 +7,7 @@ rom = os.environ.get("SML_SV", "build/super-mario-land-god.sv"); shot = os.envir
 def run(v):
     sc = base + "," + v; n = sum(int(s[1:]) for s in sc.split(','))
     fb = tempfile.mktemp(suffix=".fb"); ram = tempfile.mktemp(suffix=".ram")
-    subprocess.run([shot, rom, level, str(n), "1", fb, ram, sc], capture_output=True)
+    subprocess.run([shot, rom, level, str(n), "1", fb, ram, sc, os.environ.get("POKES", "")], capture_output=True)
     R = np.fromfile(ram, dtype=np.uint8).reshape(-1, 0x2000); os.remove(fb); os.remove(ram)
     cam = R[:, 0xB4].astype(int) | (R[:, 0xB5].astype(int) << 8); x = cam + R[:, 0xA4]; y = R[:, 0x1B].astype(int) + 16
     alive = int(y[-1]) < 170

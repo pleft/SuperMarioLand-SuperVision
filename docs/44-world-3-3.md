@@ -166,3 +166,22 @@ Gates on the shipped build: battery31 10/10, svgold identical.
   24px sprite (rows>=4 set both bits); now 4 ($A3). Ganchan poses $31/$47
   get a 4x3 box ($C4) instead of the 40x24 default. Arena logic-frame drop
   was 13% (213/246) before these.
+
+## User playtest round 3: "boss barely visible" (2026-08-27)
+
+Measured on the same per-scanline core commit as the user's RetroArch build
+(c7e9419), via a WARP (svshot/svauto pokes: cam 2300 + a death -> the 1920
+checkpoint, then a short svauto search to the platform, tools/svarena.py):
+in the arena the frame overruns (logic 579/650 frames run) and the boss --
+erased in pass 3a as slot 0, then waiting behind two Ganchan erases and
+Mario's before pass 4 drew it -- showed as WIPED (BG restored through it) in
+22 of 103 frames; every wiped frame was "dirty, erase done, draw not yet".
+Fix: Mario's erase moved BEFORE the slot loop and the slots are erased
+9..0 while pass 4 draws 0..9, so the lowest slot (the boss) has no foreign
+work between its erase and its draw. Wiped frames 22 -> 5 of 103; the three
+diagonal lifts all move in 2px steps now. (A pass-1 budget exemption for the
+boss changed nothing -- the deferral was not the budget -- and was removed;
+the Down/B momentum rules it had displaced are back.)
+
+Respawn "in the gap next to the block" at the 640 checkpoint: the GB does
+exactly the same (screenshot-matched), not a port bug.

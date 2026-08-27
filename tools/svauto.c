@@ -138,7 +138,19 @@ int main(int argc, char **argv)
                       : c == 'Q' ? (PAD_R | PAD_A | PAD_B) : c == 'F' ? (PAD_R | PAD_B)
                       : c == 'L' ? PAD_L : c == 'K' ? (PAD_L | PAD_A) : c == 'G' ? (PAD_L | PAD_B)
                       : c == 'H' ? (PAD_L | PAD_A | PAD_B) : 0;
-            for (int i = 0; i < k && n < frames; i++) { step1(pad); rec[n++] = pad; }
+            for (int i = 0; i < k && n < frames; i++) {
+                { const char *q = getenv("SVPOKES"); /* "addr:val@frame,...": svshot's */
+                  while (q && *q) {                  /* warp pokes, applied in the prefix */
+                      int ad = (int)strtol(q, (char **)&q, 0);
+                      if (*q == ':') q++;
+                      int vl = (int)strtol(q, (char **)&q, 0);
+                      int fr = 0;
+                      if (*q == '@') { q++; fr = (int)strtol(q, (char **)&q, 0); }
+                      if (fr == n + 1) ram()[ad & 0x1FFF] = (uint8)vl;
+                      if (*q == ',') q++; else break;
+                  } }
+                step1(pad); rec[n++] = pad;
+            }
             fscanf(pf, ",");
         }
         fclose(pf);

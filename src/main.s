@@ -8850,8 +8850,9 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     ldx oi
     stz o_nfl,x
     lda o_type,x
-    beq @p1vis0                  ; dead slot: not visible (erase leftovers via dirty)
-    sec                          ; screen x = o_x - cam + scroll_s
+    bne :+                       ; dead slot: not visible (erase leftovers via dirty)
+    jmp @p1vis0
+:   sec                          ; screen x = o_x - cam + scroll_s
     lda o_xl,x
     sbc cam_x
     sta tmpL
@@ -8969,27 +8970,8 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     ; sprites are moving". Erasing the whole group and then drawing the whole
     ; group costs nothing extra and still keeps each sprite blank only for the
     ; GROUP's erases instead of the whole render (docs/36).
-    stz oi
-@p3a:                            ; 3a: erase every ENTANGLED dirty sprite
-    ldx oi
-    lda o_nfl,x
-    and #1
-    beq @p3an
-    lda o_pdr,x
-    beq @p3an
-    jsr erase_slot               ; NOTE: the fusing experiment is REVERTED here --
-                                 ; it cost 2-3 four times its dropped frames (2.8%
-                                 ; -> 11%) to halve a flicker, and the user could
-                                 ; not play the level. docs/36 keeps the analysis;
-                                 ; the flicker needs a CHEAPER pipeline, not a
-                                 ; more expensive pass order.
-@p3an:
-    inc oi
-    lda oi
-    cmp #OBJ_MAX
-    bne @p3a
-    lda m_dirty                  ; Mario's erase (prev_vx pre-folded by pass 0)
-    beq @p4s
+    lda m_dirty                  ; Mario's erase FIRST (prev_vx pre-folded by pass 0)
+    beq @p3s
     lda prev_vx
     sta rb_vx
     lda prev_y
@@ -9004,6 +8986,25 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
 :   sty rb_rows
     jsr restore_bg               ; Mario belongs to the group: his draw is LAST,
                                  ; so his erase must precede every group draw
+@p3s:
+    lda #OBJ_MAX-1               ; slots erased 9..0 and drawn 0..9: the LOWEST slot
+    sta oi                       ; is erased last and drawn first, so its blank
+@p3a:                            ; window is just its own erase+draw. 3-3's boss
+    ldx oi                       ; (slot 0) sat blank behind two Ganchan erases and
+    lda o_nfl,x                  ; Mario's when the arena overran (docs/44).
+    and #1                       ; 3a: erase every ENTANGLED dirty sprite
+    beq @p3an
+    lda o_pdr,x
+    beq @p3an
+    jsr erase_slot               ; NOTE: the fusing experiment is REVERTED here --
+                                 ; it cost 2-3 four times its dropped frames (2.8%
+                                 ; -> 11%) to halve a flicker, and the user could
+                                 ; not play the level. docs/36 keeps the analysis;
+                                 ; the flicker needs a CHEAPER pipeline, not a
+                                 ; more expensive pass order.
+@p3an:
+    dec oi
+    bpl @p3a
     ; ---------- pass 4: draw all dirty visible; Mario last ----------
 @p4s:
     stz oi
