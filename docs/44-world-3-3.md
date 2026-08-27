@@ -197,3 +197,6 @@ boss is not being deferred -- the whole render lands late against the beam
 and the boss, the largest sprite, pays most. The arena is simply over the
 software-sprite budget; the structural fix is the composed draw (CX_BUILD,
 one protected object = the boss), parked after the 3-1 trial.
+The refresh was then REVERTED (no gain, and it invalidated the just-recorded
+route); the shipped 3-3 build is the round-3 one (Down/B rules present),
+route docs/routes/level_08.txt completes on it (goal at frame 3597).
