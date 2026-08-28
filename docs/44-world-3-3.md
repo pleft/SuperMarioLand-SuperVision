@@ -406,3 +406,13 @@ pixels with one write instead of two.
 One boulder at a time (user decision) stands: boss image intact in 580/580
 arena frames by the strict metric, logic 566/579. The remaining flicker there is
 the frame deficit above, not the pass order.
+
+### route
+
+`docs/routes/level_08.txt` re-recorded on the shipped build (md5 26b12496):
+**goal at frame 3413** (the sphere ledge, world x 2371). Like every svauto
+route it is a GOD-build instrument (contact deaths would derail the search) --
+it dies at f1001 on the normal ROM, which is expected and not a level bug.
+Re-record it after ANY change that moves engine timing (E23); the repair loop
+that produced it is: replay, cut back 130 frames from the death or stall,
+re-search from that prefix with svauto, splice, repeat.
