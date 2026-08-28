@@ -291,3 +291,61 @@ the scan came from moving w3_read's column fill into the bank-6 pin (w6_col) --
 that shifts W3 timing very slightly, so level 6's gold capture drifts by a few
 pixels of Mario travel (verified frame by frame: same scene, no artefacts);
 docs/gold_ref.txt is the refreshed reference.
+
+## The lifts sank 2px per tick (regression, found + fixed 2026-08-28)
+
+User, on the ROM shipped with the boulder cap (md5 61c4b1fc): *"you fucked up
+something in timing and at start mario cant jump from the pre-last moving
+platform to the last one!"* -- with a screenshot of Mario on the diagonal lift
+and the horizontal one far above him.
+
+They were right, and the cause was the line the previous section calls a
+"very slight" timing shift. `w6_col` (the bank-6 column fill) was handed its
+destination in **tmpL3/tmpH3**, and `w3_read` staged it there on every cache
+MISS. But `w3_move` keeps *this tick's dy* in tmpH3 across its floor/ceiling
+probe:
+
+    @ystep: lda o_vx,x / lsr x4 / sta tmpH3      ; dy = velocity hi nibble
+    @fall:  jsr w3_floor                         ; <-- probes the map: on a MISS
+                                                 ;     w3_read overwrote tmpH3
+    @fmove: lda o_y,x / clc / adc tmpH3          ;     with >W3CDATA = 2
+
+So **every W3 object moved 2px per tick in Y instead of its own velocity
+whenever its floor probe touched an uncached column** -- which is exactly when
+it is moving into new terrain. Measured on the same replay (frame:x,y):
+
+    prev build   349:408,56  351:407,57  354:406,58  357:405,59   (45 deg, GB)
+    61c4b1fc     346:408,56  349:407,58  351:406,60  354:405,62   (2px per 1px)
+
+The GB is unambiguous (gbtrace, same lift): `156:297,64 158:296,65 161:295,66`
+-- 1:1. The 3-3 lifts therefore sank up to 14px below their GB line during the
+approach (first cycle 56..107 instead of 56..93) and the whole diagonal chain
+was mis-shaped.
+
+Fix: `w6_col` fills through **tmpL2/tmpH2** -- the slot pointer `@slotptr` has
+already set -- and `w3_read` no longer stages anything in tmpL3/tmpH3.
+
+Gates: battery31 10/10; `svgold` on the fixed build is **byte-identical on all
+nine levels to the pre-regression build** (/tmp/prev_ref.sv, md5 e4792ef2), so
+the clobber is fully undone and the boulder cap itself changes nothing there.
+docs/gold_ref.txt is back to those hashes.
+
+### and the jump itself is GB-faithful
+
+Everything the jump depends on was then re-verified against the GB:
+
+| | GB | port |
+|---|---|---|
+| $38 / $39 diagonal step | 1px x, 1px y per tick | same |
+| tick divider ($F4 $02 / $01) | 3 / 2 frames per tick | same |
+| velocity byte costs a tick | yes ($26EB sets ffc8=1) | same |
+| $38 patrol / $3B patrol | 37 ticks / 52 ticks per leg | same |
+| standable width ($38/$3B) | 3 / 2 tiles ($3375 table) | same |
+| spawn triggers, whole cluster | 199,191,191,199,191 px ahead of cam | identical |
+| walking jump (R+A, 30f hold) | rise 33px, dx 47, airtime 47 | rise 33, dx 48, 48 |
+
+The crossing is genuinely tight: it is made **mid-climb**, not from the top --
+jump while the diagonal lift is still rising and the horizontal one is at the
+LEFT end of its patrol, holding A long. A sweep of 360 timings from a fixed
+ride state lands cleanly at delay ~90 (hold 26); jumping at the lift's apex is
+always short, because by then the target has moved 26-44px right.

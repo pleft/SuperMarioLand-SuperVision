@@ -158,13 +158,19 @@ W3FLAGS = $0B                    ; NMI | TIMER_IRQ | LCD
     lda feet_col+1
     sta W3CTAG+1,x
     jsr @slotptr
-    lda tmpL2                    ; ONE bank switch per COLUMN, not per read:
-    sta tmpL3                    ; every SYS_CTRL write restarts the LCD scan.
-    lda tmpH2                    ; (the fill itself is BANK-6 resident -- the
-    sta tmpH3                    ;  window has no room left for it)
-    lda #6
-    jsr w3_bank
-    jsr w6_col
+    lda #6                       ; ONE bank switch per COLUMN, not per read:
+    jsr w3_bank                  ; every SYS_CTRL write restarts the LCD scan.
+    jsr w6_col                   ; (the fill is BANK-6 resident -- no window room
+                                 ;  left for it. It fills through tmpL2/tmpH2, the
+                                 ;  slot pointer @slotptr just set: staging it in
+                                 ;  tmpL3 instead CLOBBERED THE CALLER'S tmpH3 --
+                                 ;  w3_move holds this tick's dy there across its
+                                 ;  floor/ceiling probe, so every W3 object moved
+                                 ;  >W3CDATA = 2px per tick on a cache MISS. The
+                                 ;  3-3 lifts sank 2px per 1px across and dropped
+                                 ;  13px below their GB line -- user: "at start
+                                 ;  mario cant jump from the pre-last moving
+                                 ;  platform to the last one!")
     lda #1
     jsr w3_bank
     bra @read

@@ -832,9 +832,9 @@ CXS_BOXOK  = $0153               ; 1 = CXA_* box computed this walk
     lda (map_ptr),y
     sta map_ptr+1
     stx map_ptr
-    ldy #15
-:   lda (map_ptr),y
-    sta (tmpL3),y
+    ldy #15                      ; destination = tmpL2/tmpH2 (w3_read's slot
+:   lda (map_ptr),y              ; pointer). NOT tmpL3: callers of the map probe
+    sta (tmpL2),y                ; keep live values there (see w2code.s w3_read)
     dey
     bpl :-
     rts
@@ -1545,9 +1545,9 @@ CXS_BOXOK  = $0153               ; 1 = CXA_* box computed this walk
     lda (map_ptr),y
     sta map_ptr+1
     stx map_ptr
-    ldy #15
-:   lda (map_ptr),y
-    sta (tmpL3),y
+    ldy #15                      ; destination = tmpL2/tmpH2 (w3_read's slot
+:   lda (map_ptr),y              ; pointer). NOT tmpL3: callers of the map probe
+    sta (tmpL2),y                ; keep live values there (see w2code.s w3_read)
     dey
     bpl :-
 @hit:
