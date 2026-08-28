@@ -64,3 +64,48 @@ After the chain the ISR: `inc $FFAC`; if state==$3A enable window (`set 5,rLCDC`
 - [ ] Confirm $C800 meta-array purpose by xref from collision code.
 - [ ] Confirm $DA00/$DA15 identities (coins / timer / lives) via the gameplay code.
 - [ ] Document where game logic builds the $C000 OAM buffer (sprite assembly).
+
+## ATOMIC erase+draw for sprites that overlap nothing (2026-08-28)
+
+The port's sprite pipeline is: erase every dirty sprite, then draw them all
+(pass 3a / pass 4), because one sprite's erase must never land on another's
+fresh pixels. That leaves every sprite BLANK from its own erase until its draw
+-- and on the real machine the display is not synced to the render (61Hz NMI vs
+~50.8Hz LCD), so the beam samples that gap. User, on 3-3's boss: *"it still
+flickers a lot even with 1 boulder ... we only have mario, boss and one boulder
+on the scene"*.
+
+The whole split is only needed for sprites that actually OVERLAP:
+
+* `@spread` already box-tests every pair (and Mario vs every slot). It now marks
+  **bit3 of `o_nfl`** on any pair where BOTH are dirty -- "entangled" -- and
+  `m_dirty` bit1 for Mario. Only j is marked in the slot loop: the loop visits
+  (j,i) too and marks i there on the same terms.
+* pass 3a: a dirty sprite that is **visible and not entangled** is drawn RIGHT
+  AFTER its own erase (`jsr p4_one`, then bits 0+2 cleared so pass 4 skips it).
+  Its blank window is one blit instead of the whole render.
+* Mario, isolated, has his erase moved down beside his own draw; entangled, it
+  moves to the END of the erase phase (it only has to precede the DRAWS).
+
+Measured (instrumented build, counters removed before shipping): **30% of the
+boss arena's sprite draws and 44% of the 3-3 lift ride's are now atomic**;
+Mario takes the tight path in 13% of lift-ride frames (in the arena he is
+usually within the coarse 32x28 box of the boss, and that box IS the right test
+-- his erase rect is 24px wide).
+
+Space: FIXED had 3 bytes. `draw_obj_sprite`'s 21-entry `cmp/bne/jmp` chain was
+replaced by an RTS jump table (`@dtab`), which freed 76 -- gold-identical on all
+nine levels by itself.
+
+Two traps this hit, both caught by svgold:
+1. **A dead slot is dirty too** (its leftover image still needs the erase) and
+   is NOT visible. Drawing it ran the type-0 dispatch -- into address $0001.
+   The guard is `and #$0A / cmp #2` (visible AND not entangled), and table
+   entry 0 now points at an `rts`.
+2. **A dirty slot with no old image** (a fresh spawn) has no box to test, so
+   Mario was left "isolated" and his late erase clipped 2-2's score popup. Such
+   a slot now holds him in the group.
+
+Note: `o_pdr` (drawn-flag) feeds the kits' slot-reuse guard, so drawing earlier
+can change which slot a spawn takes. Scenes stay correct but REPLAYS diverge --
+re-record routes on this build (E23).

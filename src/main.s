@@ -8975,8 +8975,49 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     ; sprites are moving". Erasing the whole group and then drawing the whole
     ; group costs nothing extra and still keeps each sprite blank only for the
     ; GROUP's erases instead of the whole render (docs/36).
-    lda m_dirty                  ; Mario's erase FIRST (prev_vx pre-folded by pass 0)
-    beq @p3s
+@p3s:
+    lda #OBJ_MAX-1               ; slots erased 9..0 and drawn 0..9: the LOWEST slot
+    sta oi                       ; is erased last and drawn first, so its blank
+@p3a:                            ; window is just its own erase+draw. 3-3's boss
+    ldx oi                       ; (slot 0) sat blank behind two Ganchan erases and
+    lda o_nfl,x                  ; Mario's when the arena overran (docs/44).
+    and #1                       ; 3a: erase every ENTANGLED dirty sprite
+    beq @p3an
+    lda o_pdr,x
+    beq @p3an
+    jsr erase_slot               ; ATOMIC: a sprite that overlaps nothing dirty is
+    ldx oi                       ; drawn RIGHT HERE, so the framebuffer holds its
+    lda o_nfl,x                  ; hole no longer than its own blit. The display is
+    and #$0A                     ; not synced to this render (61Hz vs ~50.8Hz), so
+    cmp #2                       ; every erase..draw gap is a window the beam can
+    bne @p3an                    ; sample -- that IS the flicker. VISIBLE and not
+    jsr p4_one                   ; entangled (bit1 set, bit3 clear): a dead slot is
+                                 ; dirty too (its leftover image needs the erase)
+                                 ; and drawing THAT ran the type-0 dispatch.
+    ldx oi
+    lda o_nfl,x
+    and #$FA                     ; drawn: clear dirty+refresh so pass 4 skips it
+    sta o_nfl,x
+                                 ; NOTE: the fusing experiment is REVERTED here --
+                                 ; it cost 2-3 four times its dropped frames (2.8%
+                                 ; -> 11%) to halve a flicker, and the user could
+                                 ; not play the level. docs/36 keeps the analysis;
+                                 ; the flicker needs a CHEAPER pipeline, not a
+                                 ; more expensive pass order.
+@p3an:
+    dec oi
+    bpl @p3a
+    lda m_dirty                  ; Mario's erase (prev_vx pre-folded by pass 0) goes
+    and #2                       ; LAST in the erase phase while he is ENTANGLED --
+    beq @p4s                     ; it only has to precede the DRAWS, so every sprite
+    jsr @m_erase                 ; erase before it is time he is not blank for. (An
+                                 ; atomic draw inside the loop is safe: had it
+                                 ; overlapped him, the pair would be entangled and
+                                 ; it would not be atomic.) Isolated, his erase
+                                 ; moves all the way down beside his own draw.
+    ; ---------- pass 4: draw all dirty visible; Mario last ----------
+    bra @p4s                     ; (@m_erase sits between the phases, called from
+@m_erase:                        ;  both: the end of pass 3 and pass 4's Mario tail)                        ; Mario's box: 3 cols, +1 row when he straddles
     lda prev_vx
     sta rb_vx
     lda prev_y
@@ -8989,28 +9030,7 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     beq :+
     iny
 :   sty rb_rows
-    jsr restore_bg               ; Mario belongs to the group: his draw is LAST,
-                                 ; so his erase must precede every group draw
-@p3s:
-    lda #OBJ_MAX-1               ; slots erased 9..0 and drawn 0..9: the LOWEST slot
-    sta oi                       ; is erased last and drawn first, so its blank
-@p3a:                            ; window is just its own erase+draw. 3-3's boss
-    ldx oi                       ; (slot 0) sat blank behind two Ganchan erases and
-    lda o_nfl,x                  ; Mario's when the arena overran (docs/44).
-    and #1                       ; 3a: erase every ENTANGLED dirty sprite
-    beq @p3an
-    lda o_pdr,x
-    beq @p3an
-    jsr erase_slot               ; NOTE: the fusing experiment is REVERTED here --
-                                 ; it cost 2-3 four times its dropped frames (2.8%
-                                 ; -> 11%) to halve a flicker, and the user could
-                                 ; not play the level. docs/36 keeps the analysis;
-                                 ; the flicker needs a CHEAPER pipeline, not a
-                                 ; more expensive pass order.
-@p3an:
-    dec oi
-    bpl @p3a
-    ; ---------- pass 4: draw all dirty visible; Mario last ----------
+    jmp restore_bg
 @p4s:
     stz oi
 @p4:
@@ -9033,7 +9053,10 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     jmp @p4
 :   lda m_dirty
     beq @out
-    lda mario_vx                 ; PAST the 48-byte framebuffer row (24 tile cols)?
+    and #2                       ; ISOLATED (bit1 clear): erase him HERE, one blit
+    bne :+                       ; before his own draw, instead of at the top of
+    jsr @m_erase                 ; pass 3 with the whole draw phase in between
+:   lda mario_vx                 ; PAST the 48-byte framebuffer row (24 tile cols)?
     cmp #192                     ; Then skip the draw. restore_bg clips at that same
     bcs :+                       ; limit, so no erase can ever follow such a draw --
     jsr draw_player              ; while the draw itself folds mod 48 bytes and lands
@@ -9070,11 +9093,8 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     ldy tmpL3
     cpy oi2
     beq @sp_jn
-    lda o_nfl,y
-    and #1
-    bne @sp_jn                   ; j already dirty -- nothing to mark, and the box
-    lda o_pdr,y                  ; test below is pure cost (it was only needed by
-    beq @sp_jn                   ; the reverted fusing experiment)
+    lda o_pdr,y                  ; j has no old image -> nothing of its can be
+    beq @sp_jn                   ; wiped, and its old box is not known here
     lda o_pw,x                   ; box width by the pair's real widths: two narrow
     and #$7F                     ; (8px) sprites need only a 20px box — the wide 32px
     cmp #3                       ; box was chaining arrows to everything nearby
@@ -9110,6 +9130,15 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     ina
 :   cmp #28
     bcs @sp_jn
+    lda o_nfl,y                  ; OVERLAP. j clean -> it must redraw (as before).
+    and #1                       ; j ALREADY dirty -> the pair is ENTANGLED and
+    beq @sp_mk                   ; NEITHER may take pass 3's atomic erase+draw:
+    lda o_nfl,y                  ; one's erase would land on the other's fresh
+    ora #8                       ; pixels. (bit3 = entangled; bit0 dirty, bit1
+    sta o_nfl,y                  ; visible and bit2 refresh-only are taken.) Only
+    bra @sp_jn                   ; j is marked: the loop visits (j,i) as well and
+                                 ; marks i there, on exactly the same terms.
+@sp_mk:
     jsr mark_slot_y              ; overlap: j must redraw (erase too if it moved)
 @sp_jn:
     inc tmpL3
@@ -9128,7 +9157,14 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
 @sp_m:
     ldy tmpL3
     lda o_pdr,y
-    beq @sp_mn
+    bne @sp_mbox                 ; no old image -> no box to test, but a DIRTY one
+    lda o_nfl,y                  ; still gets drawn this frame, and Mario's erase
+    and #1                       ; must not land after that draw: hold him in the
+    beq @sp_mn                   ; group. (2-2's score popup, caught by svgold.)
+    lda #2
+    tsb m_dirty
+    bra @sp_mn
+@sp_mbox:
     lda prev_vx
     sec
     sbc o_pvx,y
@@ -9152,9 +9188,16 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     beq @sp_mn
     lda #1
     sta m_dirty
-    bra @sp_mn
+    bra @sp_mmark
 @sp_mset:
     jsr mark_slot_y
+@sp_mmark:                       ; ENTANGLED with Mario: the slot keeps the group
+    lda o_nfl,y                  ; path, and Mario's erase stays at the FRONT of
+    ora #8                       ; pass 3 (m_dirty bit1) instead of moving down
+    sta o_nfl,y                  ; beside his draw -- it must precede every draw
+    lda m_dirty                  ; that overlaps him.
+    ora #2
+    sta m_dirty
 @sp_mn:
     inc tmpL3
     lda tmpL3
@@ -9294,64 +9337,39 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     cmp #OBJ_GIFT
     bcc :+
     jmp (ovl_vec+8)              ; the resident kit draws (RAM overlay)
-:   cmp #OBJ_COIN
-    bne :+
-    jmp @coin
-:   cmp #OBJ_FLOWER
-    bne :+
-    jmp @flower
-:   cmp #OBJ_BALL
-    bne :+
-    jmp @ball
-:   cmp #OBJ_POPUP
-    bne :+
-    jmp @popup
-:   cmp #OBJ_BOUNCE
-    bne :+
-    jmp @bounce
-:   cmp #OBJ_PLATV
-    bcc :+
-    cmp #OBJ_PLATH+1
-    bcs :+
-    jmp @plat
-:   cmp #OBJ_CORPSE
-    bne :+
-    jmp @corpse
-:   cmp #OBJ_HEART
-    beq @heart
-    cmp #OBJ_CHIB
-    beq @chib
-    cmp #OBJ_NOKO
-    bne :+
-    jmp @noko
-:   cmp #OBJ_BOMB
-    bne :+
-    jmp @bomb
-:   cmp #OBJ_BOOM
-    bne :+
-    jmp @boom
-:   cmp #OBJ_FLY
-    bne :+
-    jmp @fly
-:   cmp #OBJ_SQUASH
-    bne :+
-    jmp @squash
-:   cmp #OBJ_BUNBUN
-    bne :+
-    jmp draw_bunbun
-:   cmp #OBJ_ARROW
-    bne :+
-    jmp draw_arrow
-:   cmp #OBJ_STONE
-    bne :+
-    jmp draw_stone
-:   cmp #OBJ_STAR
-    bne :+
-    jmp @stard
-:   cmp #OBJ_DEBRIS
-    bne :+
-    jmp @shard
-:
+:   asl                          ; TYPE-INDEXED DISPATCH. The cmp/bne/jmp chain this
+    tax                          ; replaces (types 1..21, ~140 bytes) paid for the
+    lda @dtab+1,x                ; ATOMIC erase+draw in render_all -- FIXED was full
+    pha                          ; to 3 bytes. Every target reloads X = oi itself and
+    lda @dtab,x                  ; none reads Y, so clobbering X here is safe (the
+    pha                          ; same RTS-dispatch w2_draw uses).
+    rts
+@dnull:
+    rts
+@dtab:
+    .word @dnull-1               ;  0  (never drawn: both draw sites check bit1)
+    .word @mush-1                ;  1  OBJ_MUSH
+    .word @coin-1                ;  2  OBJ_COIN
+    .word @flower-1              ;  3  OBJ_FLOWER
+    .word @ball-1                ;  4  OBJ_BALL
+    .word @heart-1               ;  5  OBJ_HEART
+    .word @stard-1               ;  6  OBJ_STAR
+    .word @shard-1               ;  7  OBJ_DEBRIS
+    .word @popup-1               ;  8  OBJ_POPUP
+    .word @bounce-1              ;  9  OBJ_BOUNCE
+    .word @plat-1                ; 10  OBJ_PLATV
+    .word @plat-1                ; 11  OBJ_PLATH
+    .word @chib-1                ; 12  OBJ_CHIB
+    .word @squash-1              ; 13  OBJ_SQUASH
+    .word @noko-1                ; 14  OBJ_NOKO
+    .word @bomb-1                ; 15  OBJ_BOMB
+    .word @boom-1                ; 16  OBJ_BOOM
+    .word @fly-1                 ; 17  OBJ_FLY
+    .word @corpse-1              ; 18  OBJ_CORPSE
+    .word draw_bunbun-1          ; 19  OBJ_BUNBUN
+    .word draw_arrow-1           ; 20  OBJ_ARROW
+    .word draw_stone-1           ; 21  OBJ_STONE
+@mush:
     ; --- mushroom: one 8x8 OBJ tile, drawn at the feet line (o_y + 8) ---
     lda spr_col
     sta dcol
