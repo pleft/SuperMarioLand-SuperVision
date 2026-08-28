@@ -361,3 +361,48 @@ always short, because by then the target has moved 26-44px right.
 * docs/routes/level_07,08 are REPLAYS and both died on the new physics (E23);
   they are being re-recorded (tools + the repair loop: cut back 130 frames from
   the death, re-search from that prefix with svauto, splice, repeat).
+
+## Where 3-3 stands (end of 2026-08-28)
+
+The level is **finished and beatable** (user: *"I managed ... to finish the
+level"*). Three things landed today, each gated on battery31 10/10 + svgold 9/9
+and shipped as `~/sml33.sv` md5 `26b12496`:
+
+1. **The lift regression** (the one the user caught): `w6_col` was handed its
+   destination in tmpL3/tmpH3, which `w3_move` uses for this tick's dy across
+   its floor probe -- every W3 object moved 2px per tick in Y on a map-cache
+   miss. The 3-3 diagonals sank 14px below their GB line. Fixed; svgold then
+   came back byte-identical to the pre-regression build on all nine levels.
+2. **The GB's RUN jump** (docs/08): `@startjump` always seeded the ascent at
+   arc index 2, so the port only ever had the 33px walk jump. A jump taken while
+   running starts at index 0 = 41px. Now walk 33/33 and run 41/41 vs the GB.
+3. **Atomic erase+draw** for sprites that overlap nothing (docs/06). Correct and
+   shipped, but MEASURED NEUTRAL on the emulator (blank sprite-frames 4.3% ->
+   4.3%): the core composes the display at frame END, so intra-frame order is
+   invisible to it. It is kept for real hardware, where the beam is live.
+
+### the flicker's actual cost centre (probe, 2026-08-28)
+
+With the erase pass NOP'd out (visually wrong -- a cost probe only), counting
+frames whose logic completed:
+
+| scene | with erases | erases disabled |
+|---|---|---|
+| 3-3 lift ride | 900 / 959 | **953 / 959** |
+| boss arena | 371 / 381 | **381 / 381** |
+
+**The erase pass is the entire frame deficit** -- 53 of 59 dropped frames on the
+ride, 10 of 10 in the arena. Nothing else in the render is over budget. That is
+why every pass-ORDER experiment (docs/40 rounds, and today's atomic one) moved
+the blank rate by nothing: the fix has to remove WORK.
+
+Next: the composite blit -- one merged write per cell (background under the
+sprite's own pixels) instead of restore-then-draw, plus restoring only the strip
+the sprite vacated. No save-under buffers, no groups, no contexts: the same
+pixels with one write instead of two.
+
+### boss fight
+
+One boulder at a time (user decision) stands: boss image intact in 580/580
+arena frames by the strict metric, logic 566/579. The remaining flicker there is
+the frame deficit above, not the pass order.
