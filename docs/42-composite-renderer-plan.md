@@ -286,3 +286,16 @@ unit tests, tearing metric -- stays in the tree for a future attempt whose
 FIRST task is a player-realistic harness (a scripted stomp-through of the
 first 40 seconds with mixed objects) and whose second is the cost.
 Measured potential when it works: torn sprites 60 -> 5 on the route.
+
+## v3 VERDICT (2026-08-28): PARKED on branch composer-v3-wip
+
+The user played it: garbage in the arena, "unplayable". My gate (one sprite's
+image box over ~100 arena frames of one recorded route) said 100/104 intact
+and MISSED it completely -- the same mistake as v1 (a parked-Mario measurement)
+and v2 (route replays). Law E31, third time: measure the WHOLE SCREEN over real
+play before a renderer change reaches the user.
+
+Kept on the branch (3ea2f63): the three genuine bug fixes -- single-entry
+ownership, the ABI block out of the stack page, and the flags the loader stub
+leaves uninitialised -- plus the Mario-erase suppression design. main is back
+at 477b605 and byte-identical to the shipped build.
