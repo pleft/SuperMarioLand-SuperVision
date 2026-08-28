@@ -261,3 +261,17 @@ subtracts 8 (erase_slot), so w3_excy must be -miny-8 PIXELS -- the generator had
 been emitting ROWS through a `*8` in the writer, which happened to agree for the
 old shapes; it now emits pixels directly and the boss's 24px-tall metasprite is
 covered exactly. Gates: battery31 10/10, svgold identical, route completes.
+
+## Boulders restored (2026-08-28, after the drift + trail fixes)
+
+The boulders were never the real cost: the boss's DRIFT was. With the F0 flip
+fix (it now stands still) and the erase-box fix, measured over 1971 arena
+frames with the boulders thrown every cycle (GB-faithful):
+
+    boss   intact 1879 (95%)   partly 31   wiped 61 (3%)
+    boulder  visible 2629 / 2629 frames
+    logic 1700/1971 frames (14% overrun, was ~30%)
+
+So w3_child's level-8 gate is gone and 3-3's fight is the GB's again. (Smaller
+boulder art would cut per-sprite cost roughly with area -- erase+draw are both
+box-sized -- but the measurement says it is not needed.)
