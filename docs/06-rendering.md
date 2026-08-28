@@ -109,3 +109,35 @@ Two traps this hit, both caught by svgold:
 Note: `o_pdr` (drawn-flag) feeds the kits' slot-reuse guard, so drawing earlier
 can change which slot a spawn takes. Scenes stay correct but REPLAYS diverge --
 re-record routes on this build (E23).
+
+### what the erase pass will NOT give back (tried and reverted, 2026-08-28)
+
+The probe above says the erase pass is the whole frame deficit, so two ways to
+shrink it were tried against it:
+
+* **Exact per-param erase boxes.** The W3 default box is 5 cols x 3 rows = 15
+  cells for every metasprite; most are 16x16 (4x3) or 8x8 (3x3). Emitting an
+  exact box for all 35 params (packed 2 bytes/entry -- the y-adjust rides in the
+  width byte's free bits 3-4 -- because three arrays do not fit the $1500
+  window) came out **slower AND wrong**: 842 frames of the lift ride differed in
+  pixels (trails) and the logic rate fell 900 -> 750 of 959. The trails are the
+  straddle row: `o_pvy` is not 8-aligned while an object moves vertically, so a
+  metasprite covers one more tile row than its height implies; adding that row
+  back removes most of the saving, and the remaining divergence (o_pvy is itself
+  edited by `w3_width` to lift the erase origin, and `@spread` box-tests o_pvy)
+  perturbs which slots get redrawn. The 40x24 default's slack is load-bearing.
+  REVERTED.
+* **The composite blit** (background+sprite merged, one write per cell) is
+  already implemented in the aux page (`ax_cell`/`ax_bg`, docs/42) and was
+  measured there at **~3x a plain draw** (-12% logic): rebuilding a cell's
+  background from the map costs more than the erase it replaces. A leaner
+  version that took the background straight from the tile ROM would save the
+  16 background stores per covered cell -- roughly 20-25% of sprite work, not
+  the 50% the two-pass structure suggests, because the merge still reads two
+  sources and writes one.
+
+So the flicker left in dense scenes is not a pass-order or box-size problem: at
+~530 cycles per erased cell and a 65,574-cycle frame, a boss (15 cells) plus two
+Ganchans plus Mario is simply the machine's limit. The lever that remains is
+scene cost -- fewer sprite cells on screen -- which is a game-design decision,
+not a renderer one.
