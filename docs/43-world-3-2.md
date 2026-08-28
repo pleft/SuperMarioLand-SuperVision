@@ -307,3 +307,12 @@ the ball passes) and the score is byte2's class. Port:
 A mushroom (or heart) that fell into a pit kept falling: `o_y` is a byte, it
 wrapped past 255 and re-entered from the top for ever. `upd_mush`'s drop
 now culls at o_y >= 168 like the corpses. battery31 ALL PASS, svgold identical.
+
+## route re-recorded (2026-08-29)
+
+The 2026-08-28 fixes (the tmpH3 lift regression, the GB run jump, the atomic
+renderer) all move engine timing, so the old replay died at x664 (E23).
+`docs/routes/level_07.txt` re-recorded by the cut-and-re-search repair loop on
+the shipped build (md5 26b12496): **goal reached at frame 3617, x 2544,
+goal_phase 1** -- the same goal the 5480-frame route reached, 1863 frames
+quicker. God build, like every svauto route.
