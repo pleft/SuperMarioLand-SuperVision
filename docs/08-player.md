@@ -218,3 +218,31 @@ frame-by-frame vs PyBoy: walk release +3px/6f, tap +1px/3f, B 2→4 at momentum 
 air ramp + bump at 6, air-release drift, 8-frame skid at dpad-roll gaps 0–6, none
 at 7+. Capture pitfalls hit: the first pipe wall pins x at 81; the first goomba
 kills a >100-frame rightward run — fresh boot per trial.
+
+## ✅ The RUN jump is 41px, the walk jump 33 (ported 2026-08-28)
+
+The line above -- "indices 0-1 = vel 4 are reachable for a higher/running jump
+start" -- was never ported: `@startjump` seeded `arc_idx = 2` unconditionally,
+so **every** port jump was the walk jump. GB-measured (PyBoy, 1-1, A held 34f):
+
+    walk (R+A)   $c20e=2  $c208 seeded 2   y 134 -> 101   rise 33px
+    run  (R+B+A) $c20e=4  $c208 stays 0    y 134 ->  93   rise 41px
+
+The mechanism is in `Bank3_JumpControl_498B` ($49BF..): at the jump start
+
+    ld a,[$c20e] / cp $04 / jr z,$49ED      ; RUNNING: skip BOTH writes
+    ld a,$02 / ld [$c20e],a / ld [$c208],a  ; walking: speed AND arc index = 2
+
+`$c208` is the JumpArcTable index and it is 0 while grounded, so a run jump
+starts on the table's two `04` entries -- exactly the 8px difference
+(`jumparc` sums: from 0 = 41, from 2 = 33).
+
+Port: `@startjump` now does `lda h_idx / cmp #4 / beq :+ / lda #2 / sta h_idx
+/ : / and #$02 / sta arc_idx` -- `h_idx AND 2` is 0 for the run and 2 for the
+walk, so the rule costs the same bytes as the old one (FIXED had none spare).
+
+Verified after the change: walk rise 33 (GB 33), run rise 41 (GB 41), arcs
+frame-matched. Gates: battery31 10/10 (its room prefix had to be re-recorded --
+E23 -- and now lives in `docs/routes/roomscript_31.txt` so a fresh scratch dir
+cannot silently skip those two tests), svgold 9/9 unchanged (its `R900` run
+never jumps).

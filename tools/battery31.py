@@ -55,7 +55,11 @@ tr=sum(1 for i in range(207,400) if R[i][0x32]!=R[i-1][0x32])
 chk("ledge landing stable",tr==0,f"js flips {tr}")
 
 # 6. spikes hurt  [GB $181E: small dies, big shrinks, still lands]
-pre=open(T+'/roomscript.txt').read() if os.path.exists(T+'/roomscript.txt') else None
+# the room-2 prefix is a REPLAY (E23: it dies at every engine-speed change) --
+# kept in the repo so a fresh scratch dir does not silently SKIP these two tests
+rs=T+'/roomscript.txt'
+if not os.path.exists(rs): rs='docs/routes/roomscript_31.txt'
+pre=open(rs).read().strip() if os.path.exists(rs) else None
 if pre:
     n=sum(int(seg[1:]) for seg in pre.split(','))
     d=n+8

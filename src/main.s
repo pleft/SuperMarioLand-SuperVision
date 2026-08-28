@@ -1834,8 +1834,6 @@ no:
     lda #SFX_DFE0_01             ; the original's jump sound ($dfe0=$01, live-verified)
     jsr sfx_play
     stz ride                      ; jumping leaves the platform
-    lda #2                        ; seed the arc index at 2 (matches the game)
-    sta arc_idx
     lda #1
     sta jump_state
     stz fall_v
@@ -1843,10 +1841,17 @@ no:
     sta move_t                    ; counter ($c20c) with $30 -- after the d-pad is
     lda h_idx                     ; released mid-air Mario GLIDES on at the slow
     cmp #4                        ; speed until it runs out or he lands (landing
-    beq :+                        ; clamps it back to 6, $0b7f). Also: a walk (not a
-    lda #2                        ; run) restarts at speed index 2 ($c20e).
-    sta h_idx
-:   jmp @done
+    beq :+                        ; clamps it back to 6, $0b7f).
+    lda #2                        ; A WALK jump ($c20e != 4) restarts the speed
+    sta h_idx                     ; index at 2 and seeds the ASCENT index $c208
+:   and #$02                      ; at 2 as well; a RUN jump ($c20e == 4) takes
+    sta arc_idx                   ; neither write ($49e2 branches past both), so
+    jmp @done                     ; $c208 keeps its grounded 0. jumparc from 2
+                                  ; sums to 33px, from 0 to 41 -- GB-measured
+                                  ; walk 134->101, run 134->93. (h_idx AND 2 is
+                                  ; 0 for the run and 2 for the walk: the whole
+                                  ; rule costs the same bytes as the old one,
+                                  ; and FIXED has none to spare.)
 @ascend:
     lda pad_held                  ; VARIABLE JUMP (harness-measured vs the original: releasing
     and #GB_A                     ; A leaves only the deceleration tail of the ascent -- each
