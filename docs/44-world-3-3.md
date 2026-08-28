@@ -246,3 +246,18 @@ Logic frames 588/650 (was 556-580): the scene no longer overruns the way it did.
 Gates: battery31 10/10, svgold identical, docs/routes/level_08.txt completes.
 The fight is now the lunge + the Superball kill (HP 9); the GB's thrown Ganchan
 is documented in this file and can be restored by deleting the level-8 gate.
+
+## The boss left trails (user playtest, 2026-08-28) -- FIXED
+
+"boss's animation sucks it leaves trails". Its erase box was ONE CELL too
+narrow: gen_w3data sizes the exception box from the metasprite's display-list
+extent (x 0..16 for $54/$55), but the drawn image reaches a cell further right
+than the list predicts (the flipped form's quads), so a 12px lunge left one
+column of the old image behind, permanently. The general exception now adds a
+second column (cols = (maxx-minx)/8 + 2). Rendered lunges are clean.
+
+Also corrected on the way: the y origin. The engine's tall-erase path already
+subtracts 8 (erase_slot), so w3_excy must be -miny-8 PIXELS -- the generator had
+been emitting ROWS through a `*8` in the writer, which happened to agree for the
+old shapes; it now emits pixels directly and the boss's 24px-tall metasprite is
+covered exactly. Gates: battery31 10/10, svgold identical, route completes.

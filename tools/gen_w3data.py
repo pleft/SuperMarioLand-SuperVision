@@ -236,15 +236,22 @@ def main():
                 continue
             if miny >= -8 and maxy <= 16 and minx >= -8 and maxx <= 32:
                 continue                      # inside the default box
-            yadj = (-miny - 8) // 8
-            rows = (maxy - miny) // 8 + 1
-            cols = (maxx - minx) // 8 + 1
+            # the engine erases from (o_pvx-8, o_pvy-excy) for `rows` rows of 8px,
+            # so the origin must be lifted to the metasprite's own TOP: excy =
+            # -miny PIXELS (it used to be (-miny-8)//8 ROWS -- 8px short, which is
+            # exactly the band Hiyoihoi left behind as a trail, user-caught).
+            yadj = -miny - 8 if miny < -8 else 0   # the engine subtracts a further 8
+            rows = (maxy - miny) // 8 + 1         # (erase_slot's tall path)
+            cols = (maxx - minx) // 8 + 2   # +1 for the 8px left shift, +1 because a
+                                            # flipped metasprite can reach one cell
+                                            # further right than its RIGHT list does
+                                            # (Hiyoihoi left a column behind)
             # width byte rows: base 1 + bit7 (+1) + bit6 (+1) + bit5 (+2)
             wb = cols | {1: 0x00, 2: 0x80, 3: 0xC0, 4: 0xA0}.get(rows, 0xE0)
             exc.append((p, yadj, wb))
         f.write(f"W3_NEXC = {len(exc)}\n")
         f.write("w3_excp:\n    .byte " + ",".join(f"${p:02X}" for p, _, _ in exc) + "\n")
-        f.write("w3_excy:\n    .byte " + ",".join(f"{y*8}" for _, y, _ in exc) + "\n")
+        f.write("w3_excy:\n    .byte " + ",".join(f"{y}" for _, y, _ in exc) + "\n")   # PIXELS
         f.write("w3_excw:\n    .byte " + ",".join(f"${w:02X}" for _, _, w in exc) + "\n")
 
     print(f"gen_w3data: {len(types)} scripts ({len(blob)}B), {len(params)} params "
