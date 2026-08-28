@@ -298,6 +298,21 @@ CXS_BOXOK  = $0153               ; 1 = CXA_* box computed this walk
                                  ; boulders cost nothing visible: measured over 1971
                                  ; arena frames, boss intact 95%, boulders 100%.
                                  ; GB-faithful again: every cycle throws one.)
+    lda tmpL3                    ; 3-3: ONE boulder at a time (user decision) --
+    cmp #$33                     ; the boss waits for the last one to leave before
+    bne @spawn                   ; throwing again. (Only Hiyoihoi's child is $33,
+    ldx #9                       ;  and it morphs to $47 the moment it spawns.)
+@scan:
+    lda o_type,x
+    cmp #OBJ_W3
+    bne @next
+    lda w3_ti,x
+    cmp #21                      ; a boulder ($47) is still out
+    beq @none
+@next:
+    dex
+    bpl @scan
+@spawn:
     jsr w3_spawn_at              ; engine: a slot at the parent's exact position
     bcs @none
     jsr w3_morph                 ; kit: the type lookup + a fresh VM context
@@ -795,6 +810,36 @@ CXS_BOXOK  = $0153               ; 1 = CXA_* box computed this walk
     jmp w3_bank                  ; tail: back to the resident bank
 .endproc
 .segment "W3X"
+; w6_col: BANK 6 IS MAPPED -- fill the column cache slot at tmpL2 for feet_col.
+; (w3_read's miss path lived in the window; the window is full.)
+.proc w6_col
+    lda feet_col                 ; map_ptr = map_base + col*2 (the pointer table)
+    asl
+    sta map_ptr
+    lda feet_col+1
+    rol
+    sta map_ptr+1
+    lda map_ptr
+    clc
+    adc map_base
+    sta map_ptr
+    lda map_ptr+1
+    adc map_base+1
+    sta map_ptr+1
+    lda (map_ptr)
+    tax
+    ldy #1
+    lda (map_ptr),y
+    sta map_ptr+1
+    stx map_ptr
+    ldy #15
+:   lda (map_ptr),y
+    sta (tmpL3),y
+    dey
+    bpl :-
+    rts
+.endproc
+
 .proc w6_draw                    ; BANK-6 half: param search + the list walk
     ldx oi
     lda o_st,x                   ; param -> display-list index

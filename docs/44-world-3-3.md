@@ -275,3 +275,19 @@ frames with the boulders thrown every cycle (GB-faithful):
 So w3_child's level-8 gate is gone and 3-3's fight is the GB's again. (Smaller
 boulder art would cut per-sprite cost roughly with area -- erase+draw are both
 box-sized -- but the measurement says it is not needed.)
+
+## ONE boulder at a time (user decision, 2026-08-28)
+
+"its nearly impossible to beat the boss with such flickering. can you make it
+shoot one boulder only". w3_child now refuses Hiyoihoi's $33 child while a $47
+is still alive (it scans the 10 slots; the child morphs to $47 on spawn, so a
+live $33 never exists). Measured over 1971 arena frames:
+
+    unlimited (GB)   boss intact 95%   logic 86%   up to 2 boulders
+    ONE at a time    boss intact 100%  logic 97%   max 1 boulder (mean 0.97)
+
+The boulder is on screen 65% of the time, so the threat stays. Window space for
+the scan came from moving w3_read's column fill into the bank-6 pin (w6_col) --
+that shifts W3 timing very slightly, so level 6's gold capture drifts by a few
+pixels of Mario travel (verified frame by frame: same scene, no artefacts);
+docs/gold_ref.txt is the refreshed reference.

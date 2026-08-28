@@ -158,40 +158,15 @@ W3FLAGS = $0B                    ; NMI | TIMER_IRQ | LCD
     lda feet_col+1
     sta W3CTAG+1,x
     jsr @slotptr
-    lda feet_col                 ; map_ptr = map_base + col*2 (the pointer table)
-    asl
-    sta map_ptr
-    lda feet_col+1
-    rol
-    sta map_ptr+1
-    lda map_ptr
-    clc
-    adc map_base
-    sta map_ptr
-    lda map_ptr+1
-    adc map_base+1
-    sta map_ptr+1
-    stz W3LINKV      ; ONE bank switch per COLUMN, not per read:
-    lda #6                    ; every SYS_CTRL write restarts the LCD scan
-    sta W3LINK
-    lda #$0F
-    sta W3LINKV
-    lda (map_ptr)
-    tax
-    ldy #1
-    lda (map_ptr),y
-    sta map_ptr+1
-    stx map_ptr
-    ldy #15
-:   lda (map_ptr),y
-    sta (tmpL2),y
-    dey
-    bpl :-
-    stz W3LINKV
+    lda tmpL2                    ; ONE bank switch per COLUMN, not per read:
+    sta tmpL3                    ; every SYS_CTRL write restarts the LCD scan.
+    lda tmpH2                    ; (the fill itself is BANK-6 resident -- the
+    sta tmpH3                    ;  window has no room left for it)
+    lda #6
+    jsr w3_bank
+    jsr w6_col
     lda #1
-    sta W3LINK
-    lda #$0F
-    sta W3LINKV
+    jsr w3_bank
     bra @read
 .endproc
 
