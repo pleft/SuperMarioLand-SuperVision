@@ -231,3 +231,18 @@ Restored to the GB mapping. Measured after: the boss oscillates x 2336<->2348
 battery31 10/10 (the stomp/corpse tests the swap was protecting still pass),
 svgold identical, docs/routes/level_08.txt still completes. Affected kit types
 are $0D, $1F and $32 only. 3-2's route needs re-recording (E23).
+
+## Boss fight: NO boulders (user decision, 2026-08-28)
+
+"lets try removing completely the boulders and have only the boss and mario as
+sprites". w3_child now refuses the F1 spawn on level 8 outright. Measured on the
+arena route (tools/svarena.py, the boss's own 24x24 image box):
+
+    GB-faithful throws   intact 73 / 105   partly 21   gone 11
+    every other cycle    intact 77 / 105   partly 17   gone 11
+    NO boulders          intact 92 /  92   partly  0   gone  0
+
+Logic frames 588/650 (was 556-580): the scene no longer overruns the way it did.
+Gates: battery31 10/10, svgold identical, docs/routes/level_08.txt completes.
+The fight is now the lunge + the Superball kill (HP 9); the GB's thrown Ganchan
+is documented in this file and can be restored by deleting the level-8 gate.

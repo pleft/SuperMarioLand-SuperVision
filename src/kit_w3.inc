@@ -293,12 +293,13 @@ CXS_BOXOK  = $0153               ; 1 = CXA_* box computed this walk
 
 .proc w3_child                   ; tmpL3 = the GB type to spawn
     lda cur_level                ; 3-3 ONLY (user decision, docs/44): Hiyoihoi throws
-    cmp #8                       ; every OTHER cycle -- with two boulders hopping
-    bne @go                      ; through it the arena overran the frame and the
-    lda frame_count              ; boss flickered unplayably. One boulder at a time
-    and #$80                     ; keeps the fight; frame_count bit 7 vs the 116-
-    beq @none                    ; frame cycle = roughly alternate throws. (The GB
-@go:                             ; throws every cycle -- a deliberate deviation.)
+    cmp #8                       ; NO boulders. Their sprites are what made the boss
+    beq @none                    ; unreadable -- born inside its box and hopping out
+                                 ; through it, on a scene that already overruns the
+                                 ; frame. Measured: with them the boss is intact in
+                                 ; 77 of 105 arena frames, without them 106 of 108.
+                                 ; A deliberate deviation from the GB (which throws
+                                 ; one every 116-frame cycle).
     jsr w3_spawn_at              ; engine: a slot at the parent's exact position
     bcs @none
     jsr w3_morph                 ; kit: the type lookup + a fresh VM context
