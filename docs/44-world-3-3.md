@@ -213,3 +213,21 @@ propagation window (dy<40), a boss redraw priority and a wiped-image refresh
 all measured zero effect. The boss tiles are not in the behind-BG range.
 This is a deliberate deviation from the GB for playability; the structural
 fix stays the composer (docs/42).
+
+## The boss walked into the pit (user playtest, 2026-08-28) -- FIXED
+
+"the boss committed suicide by falling into the void". Reproduced by parking
+Mario in the arena: Hiyoihoi drifted LEFT ~48px and kept going (x 2324 -> 2276
+and further), because its script's two 12px steps per cycle both ran toward
+Mario. The GB's own opcode handler ($2754) XORs the F0 argument's bits 3:2 into
+ffc5 as `and $0C / rra / rra`: bit2 -> bit0 = X, bit3 -> bit1 = Y. The port had
+them SWAPPED (bit2 -> Y, bit3 -> X) -- a workaround for a stomp corpse that
+"flew upward", whose real cause was elsewhere. With the swap, the boss's
+`F0 $04` (flip X) did nothing to its direction, so `F0 $40` (face Mario) won
+every cycle and it marched off its platform.
+
+Restored to the GB mapping. Measured after: the boss oscillates x 2336<->2348
+(12px, the GB's own 2351<->2363) over 3000 frames with no drift. Gates:
+battery31 10/10 (the stomp/corpse tests the swap was protecting still pass),
+svgold identical, docs/routes/level_08.txt still completes. Affected kit types
+are $0D, $1F and $32 only. 3-2's route needs re-recording (E23).

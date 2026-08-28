@@ -463,17 +463,15 @@ CXS_BOXOK  = $0153               ; 1 = CXA_* box computed this walk
     and #$FD
 :   eor #$02
     sta o_vy,x
-@flip:                           ; bits3-2 XOR-flip the direction bits, but bit2
-    lda tmpL3                    ; flips Y and bit3 flips X -- not the other way.
-    and #$04                     ; GB-measured: $0D (the stomp corpse, F0 $64)
-    lsr                          ; FALLS, while $49 (F0 $20, bit2 clear) rises.
-    sta tmpH2                    ; With them swapped the corpse flew UPWARD off
-    lda tmpL3                    ; the screen and never despawned, so stomped
-    and #$08                     ; enemies piled up until the pool was full.
-    lsr
-    lsr
-    lsr
-    ora tmpH2
+@flip:                           ; bits3-2 XOR-flip the direction bits, exactly as
+    lda tmpL3                    ; the GB does it ($2754: `and $0C / rra / rra /
+    and #$0C                     ; xor ffc5`): bit2 -> bit0 = X, bit3 -> bit1 = Y.
+    lsr                          ; (They were SWAPPED here to stop a stomp corpse
+    lsr                          ; flying upward -- the real cause was elsewhere;
+                                 ; swapped, HIYOIHOI never flipped its X direction,
+                                 ; so it walked at Mario every cycle and eventually
+                                 ; off its platform into the pit -- user: "the boss
+                                 ; committed suicide by falling into the void")
     beq @forcey
     eor o_vy,x
     sta o_vy,x
