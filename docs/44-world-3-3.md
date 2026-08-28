@@ -349,3 +349,15 @@ jump while the diagonal lift is still rising and the horizontal one is at the
 LEFT end of its patrol, holding A long. A sweep of 360 timings from a fixed
 ride state lands cleanly at delay ~90 (hold 26); jumping at the lift's apex is
 always short, because by then the target has moved 26-44px right.
+
+### state after both fixes (2026-08-28)
+
+* shipped ~/sml33.sv md5 cdf9df2e (god: sml33-god.sv) -- tmpH3 fix + the GB run
+  jump (docs/08) + the one-boulder cap.
+* arena re-measured on the warp route after both fixes: boss frames 89,
+  **mostly-wiped 0**, not-drawn 13/89, ganchan not-drawn 47/121, logic 484/560.
+  The fight is where the one-boulder measurement left it.
+* battery31 10/10, svgold 9/9 unchanged.
+* docs/routes/level_07,08 are REPLAYS and both died on the new physics (E23);
+  they are being re-recorded (tools + the repair loop: cut back 130 frames from
+  the death, re-search from that prefix with svauto, splice, repeat).
