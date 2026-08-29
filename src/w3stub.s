@@ -28,8 +28,12 @@ W3SPT    = $A7C0                 ; bank 6: 3x .addr spawn lists (pack_banks pin)
     jmp __STUB2_RUN__
 
 .segment "STUB2"                 ; runs at $1F80 (outside the copy target)
-    stz LINK_DAT            ; map BANK 6
+    stz LINK_DAT            ; map the world's COLD bank
+.if .defined(W4KIT)
+    lda #10                      ; World 4 = pages (9 resident, 10 cold)
+.else
     lda #6
+.endif
     sta LINK_DDR
     lda #$0F
     sta LINK_DAT
@@ -52,9 +56,13 @@ W3SPT    = $A7C0                 ; bank 6: 3x .addr spawn lists (pack_banks pin)
     inc tmpH
     dex
     bne @pg
-    lda cur_level                ; this level's spawn list (bank 6): the
-    sec                          ; header's +16 is a bank-1 $FFFF sentinel
+    lda cur_level                ; this level's spawn list (cold bank): the
+    sec                          ; header's +16 is a resident $FFFF sentinel
+.if .defined(W4KIT)
+    sbc #9                       ; World 4's cold bank starts at level 9
+.else
     sbc #6
+.endif
     asl
     tax
     lda W3SPT,x
@@ -66,8 +74,20 @@ W3SPT    = $A7C0                 ; bank 6: 3x .addr spawn lists (pack_banks pin)
     sta spawn_tab,y
     iny
     bne :-                       ; 256 bytes covers every W3 list + sentinel
-    stz LINK_DAT            ; back to BANK 1 (the W3 resident)
+.if .defined(W4KIT)              ; 4-1 has 82 spawn entries = 410 bytes of list;
+    inc tmpH2                    ; spawn_tab is 384, so copy the second part too
+:   lda (tmpL2),y                ; (y wrapped to 0)
+    sta spawn_tab+256,y
+    iny
+    cpy #128
+    bne :-
+.endif
+    stz LINK_DAT            ; back to THIS world's resident bank
+.if .defined(W4KIT)
+    lda #9
+.else
     lda #1
+.endif
     sta LINK_DDR
     lda #$0F
     sta LINK_DAT

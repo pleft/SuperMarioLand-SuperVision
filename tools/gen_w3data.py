@@ -13,8 +13,13 @@ RULE 5: reads the ROM only as a build input; every output is gitignored.
 import os, sys, os
 
 ROM = open(sys.argv[1] if len(sys.argv) > 1 else "super-mario-land-gb.gb", "rb").read()
-OUT_BIN = "build/w3scripts.bin"
-OUT_INC = "build/w3data.inc"
+# WORLD 3 or 4: each world gets its own data set (scripts, display lists, tile
+# slice, tables) because they live in that world's COLD BANK and its sprite
+# overlay differs -- and because one shared slice cannot hold both rosters
+# (68 tile slots; World 4 alone needs 9 more than World 3 leaves free).
+WORLD = int(sys.argv[2]) if len(sys.argv) > 2 else 3
+OUT_BIN = f"build/w{WORLD}scripts.bin"
+OUT_INC = f"build/w{WORLD}data.inc"
 SCRIPT_TBL = 0x349E                       # AIScriptPtrTable, 99 entries
 DL_RIGHT, DL_LEFT = 0x2FE2, 0x30B4        # metasprite display lists
 PHYS_TBL = 0x3375                         # 3 bytes per type
@@ -27,8 +32,20 @@ CONTACT_TBL = 0x3186                      # 5 bytes per type; +0 = the STOMP res
 # exactly the VM types W3's spawn lists name (measured from the packed
 # spawn binaries -- $05 and $56 are NOT among them; seeding them dragged in
 # whole chains of scripts, params and tiles that can never appear)
-SEED = [0x03, 0x25, 0x31, 0x32, 0x35, 0x38, 0x39,
-        0x3A, 0x3B, 0x3C, 0x47, 0x49]
+SEEDS = {
+    # World 3 (levels 6-8), unchanged
+    3: [0x03, 0x25, 0x31, 0x32, 0x35, 0x38, 0x39,
+        0x3A, 0x3B, 0x3C, 0x47, 0x49],
+    # World 4 (levels 9-11), from the spawn lists (docs/45): the lifts and the
+    # Piranha it shares with W3, plus $55 upside-down Piranha, $56 Pionpi
+    # (stomp -> $57, which morphs BACK to $56: it gets up again), and 4-2/4-3's
+    # $4B $4D $52 $53 $54 $59 and the boss $61.
+    # 4-1 only for now: the full World-4 roster (38 types after the closure)
+    # overflows the $1500 window's table space by 35 bytes. 4-2/4-3's types get
+    # added when their levels are built, together with the table relocation
+    # docs/45 describes (the resident bank has ~3.7KB free below the header pin).
+    4: [0x38, 0x39, 0x49, 0x55, 0x56],
+}
 
 
 def flat(addr):
@@ -78,7 +95,7 @@ def ents(p, base=DL_RIGHT):
 
 def main():
     # transitive closure over morph ($F3) / spawn-child ($F1) targets
-    types, todo = [], list(SEED)
+    types, todo = [], list(SEEDS[WORLD])
     params = set()
     while todo:
         t = todo.pop(0)
@@ -193,7 +210,7 @@ def main():
             starts.append(len(body))
             body += conv(dlist(p, DL_RIGHT))
             body += conv(dlist(p, DL_LEFT))
-        open("build/w3tiles.txt", "w").write(" ".join(f"{t:02X}" for t in order))
+        open(f"build/w{WORLD}tiles.txt", "w").write(" ".join(f"{t:02X}" for t in order))
         assert len(order) == 0x44, "W3 tile slice must be the full $A0-$E3 table (draw_quad)"
         f.write("; display lists live in BANK 6 at W3DLB (pack_banks pin)\n")
         f.write("w3_dlo:\n    .byte " + ",".join(f"<(W3DLB+{s})" for s in starts) + "\n")
@@ -203,7 +220,7 @@ def main():
         # RAM window needs its space for the hot code (they are read before
         # any bank switch, so residency is safe)
 
-        open("build/w3dlists.bin", "wb").write(bytes(body))
+        open(f"build/w{WORLD}dlists.bin", "wb").write(bytes(body))
         # --- erase exceptions -------------------------------------------
         # The kit erases W3 objects with a default box (8px left of the
         # anchor, 24px tall). A few metasprites are bigger; list ONLY those,
@@ -254,7 +271,7 @@ def main():
         f.write("w3_excy:\n    .byte " + ",".join(f"{y}" for _, y, _ in exc) + "\n")   # PIXELS
         f.write("w3_excw:\n    .byte " + ",".join(f"${w:02X}" for _, _, w in exc) + "\n")
 
-    print(f"gen_w3data: {len(types)} scripts ({len(blob)}B), {len(params)} params "
+    print(f"gen_w3data W{WORLD}: {len(types)} scripts ({len(blob)}B), {len(params)} params "
           f"({len(body)}B lists), {len(order)} tiles -> {OUT_INC}")
 
 

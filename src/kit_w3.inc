@@ -16,7 +16,11 @@
 ;   o_vy  = direction flags       (ffc5): bit0 = moving RIGHT, bit1 = FALLING
 ;   w3_pc[slot] = script PC, w3_ti[slot] = VM type index
 ; ===========================================================================
-.include "w3data.inc"
+.if .defined(W4KIT)               ; each world's kit carries ITS OWN data set --
+.include "w4data.inc"            ; scripts, display lists, tile slice, tables --
+.else                            ; because they live in that world's COLD BANK and
+.include "w3data.inc"            ; its sprite overlay differs (docs/45).
+.endif
 .include "w3auxabi.inc"        ; aux_compose/aux_uncompose (page 8, docs/42)            ; every table here is read BEFORE the reader or
                                  ; the draw maps bank 6, so some may live in the
                                  ; bank-RESIDENT far segment (see w3data.inc)
@@ -722,11 +726,12 @@ CXS_BOXOK  = $0153               ; 1 = CXA_* box computed this walk
 ; overlay base (the W3 sheet in bank 6), everything else through chardata --
 ; draw_quad already does exactly that, so GB tile ids ship verbatim.
 w3_cold:                         ; the MAGNUM page holding THIS world's cold data
+.if .defined(W4KIT)
+    .byte 10                     ; World 4 = pages (9 resident, 10 cold)
+.else
     .byte 6                      ; (maps, scripts, display lists, tile slice, the
-                                 ; bank-resident walk). World 3 = 6; pack_banks
-                                 ; PATCHES this byte in each world's own copy of
-                                 ; the window image, so one kit image serves them
-                                 ; all -- see docs/45.
+.endif                           ; bank-resident walk). Each world's kit image
+                                 ; carries its own: W3 = 6, W4 = 10 (docs/45).
 .export w3_cold
 .proc w3_bank                    ; A = MAGNUM page (the W3LINK dance)
     stz W3LINKV
