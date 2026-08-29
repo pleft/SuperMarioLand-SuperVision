@@ -171,7 +171,7 @@ W3FLAGS = $0B                    ; NMI | TIMER_IRQ | LCD
                                  ;  13px below their GB line -- user: "at start
                                  ;  mario cant jump from the pre-last moving
                                  ;  platform to the last one!")
-    lda #1
+    lda cur_bank                 ; back to THIS LEVEL's bank, not a hardcoded 1
     jsr w3_bank
     bra @read
 .endproc

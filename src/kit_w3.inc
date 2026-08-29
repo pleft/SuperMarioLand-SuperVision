@@ -806,8 +806,9 @@ CXS_BOXOK  = $0153               ; 1 = CXA_* box computed this walk
 @done:
     stz do_yflip                 ; never leak the flips into engine draws
     stz do_flip
-    lda #1
-    jmp w3_bank                  ; tail: back to the resident bank
+    lda cur_bank
+    jmp w3_bank                  ; tail: back to THIS LEVEL's bank (was hardcoded 1,
+                                 ; which pinned every W3 level to bank 1)
 .endproc
 .segment "W3X"
 ; w6_col: BANK 6 IS MAPPED -- fill the column cache slot at tmpL2 for feet_col.

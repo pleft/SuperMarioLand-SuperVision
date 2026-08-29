@@ -257,6 +257,10 @@ w3_pc:       .res 10         ; W3 AI-VM: per-slot script PC (docs/34)
 w3_ti:       .res 10         ; W3 AI-VM: per-slot GB-type index
 bgc:         .res 2          ; bg charset base (header +22/23; W3 = bank-1 copy)
 mapread_vec: .res 2          ; hi!=0: the kit window serves read_map_tile (W3)
+cur_bank:    .res 1          ; MAGNUM page the CURRENT level lives in. The W3
+                             ; kit switches to bank 6 for cold data and must come
+                             ; back HERE, not to a hardcoded 1 -- World 4's levels
+                             ; get their own pages (docs/45).
 bud_base:    .res 1          ; p1 mover budget (3; vehicle levels raise it --
                              ; Mario doesn't draw there, the frame has slack)
 revpix:      .res 256        ; reverse the 4 2bpp pixels in a byte (built at boot)
@@ -9773,6 +9777,7 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     stz e_own
     ldx cur_level                ; map the level's ROM bank at $8000 (bank 0 hosts 1-2
     lda lvl_bank_tab,x           ; beside the title -- the smallest W1 level; 1-1 = bank
+    sta cur_bank                 ; (the kit's bank-6 detours restore THIS)
                                  ; 1). Safe mid-proc: load_level sits in the common
                                  ; prefix, byte-identical at this address in every bank.
     jsr set_bank                 ; MAGNUM: $2021 only -- SYS_CTRL (and the LCD

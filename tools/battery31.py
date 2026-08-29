@@ -3,7 +3,7 @@
 on the REAL core via svshot RAM pokes. Run after ANY W3 change:
     python3 tools/battery31.py
 Each test prints PASS/FAIL; exit code 1 if any fail. GB reference values inline."""
-import subprocess, os, sys, struct
+import subprocess, os, sys, struct, re
 import numpy as np
 T=os.environ.get('CLAUDE_JOB_DIR','/tmp')+'/tmp'
 os.makedirs(T,exist_ok=True)
@@ -11,6 +11,11 @@ TT=[0x03,0x0D,0x19,0x1C,0x1F,0x23,0x25,0x31,0x32,0x33,0x35,0x38,0x39,0x3A,0x3B,0
 def run(rom,frames,script,pokes=""):
     subprocess.run(["/tmp/svshot",rom,"6",str(frames),"1",T+"/bt.bin",T+"/bt.ram",script,pokes],capture_output=True)
     return np.fromfile(T+"/bt.ram",dtype=np.uint8).astype(int).reshape(-1,0x2000)
+# RAM offsets come from build/rom.lbl, never hardcoded: adding ONE BSS byte
+# shifts every object array and silently turns these assertions into failures
+# (it did -- five of them, on the day cur_bank was added).
+_lbl={m.group(2):int(m.group(1),16) for m in re.finditer(r'al 00([0-9A-F]{4}) \.(\w+)',open('build/rom.lbl').read())}
+O_TYPE,O_XL,O_XH,O_Y,O_ST,W3_TI=(_lbl[k] for k in ('o_type','o_xl','o_xh','o_y','o_st','w3_ti'))
 NORM="build/super-mario-land.sv"; GOD="build/super-mario-land-god.sv"
 fails=0
 def chk(name,ok,detail=""):
@@ -22,24 +27,24 @@ def chk(name,ok,detail=""):
 allok=True
 for h0 in (54,62,70):
     R=run(NORM,520,".520",f"0xB4:0xF4@200,0xB5:0x01@200,0xA4:78@200,0x1B:72@200,0xA4:44@330,0x1B:{h0}@330")
-    st=any(R[i][0xFDA+k]==36 and R[i][0xBEB+k]==1 for i in range(331,520) for k in range(10))
+    st=any(R[i][O_TYPE+k]==36 and R[i][W3_TI+k]==1 for i in range(331,520) for k in range(10))
     hurt=any(R[i][0x8A] or R[i][0x7B] for i in range(331,520))
     allok &= (st and not hurt)
 chk("missile falling-stomp (3 phases)",allok)
 
 # 2. missile passes under STANDING Mario  [GB: nothing at dy=-6]
 R=run(GOD,700,".700","0xB4:0xF4@200,0xB5:0x01@200,0xA4:78@200,0x1B:72@200")
-morph=any(R[i][0xFDA+k]==36 and R[i][0xBEB+k]==1 for i in range(200,700) for k in range(10))
+morph=any(R[i][O_TYPE+k]==36 and R[i][W3_TI+k]==1 for i in range(200,700) for k in range(10))
 chk("missile standing pass-through",not morph)
 
 # 3. missile faces Mario  [GB: F0 $40 before the morph]
 R=run(GOD,620,".620","0xB4:0xF4@200,0xB5:0x01@200,0xA4:60@200,0x1B:96@200")
-xs=[r[0xFE4+k]|(r[0xFEE+k]<<8) for i in range(210,620) for k in range(10)
-    if (r:=R[i])[0xFDA+k]==36 and r[0xBEB+k]==24]
+xs=[r[O_XL+k]|(r[O_XH+k]<<8) for i in range(210,620) for k in range(10)
+    if (r:=R[i])[O_TYPE+k]==36 and r[W3_TI+k]==24]
 lok=bool(xs) and xs[-1]<xs[0]
 R=run(GOD,620,".620","0xB4:0xF4@200,0xB5:0x01@200,0xA4:130@200,0x1B:96@200")
-xs=[r[0xFE4+k]|(r[0xFEE+k]<<8) for i in range(210,620) for k in range(10)
-    if (r:=R[i])[0xFDA+k]==36 and r[0xBEB+k]==24]
+xs=[r[O_XL+k]|(r[O_XH+k]<<8) for i in range(210,620) for k in range(10)
+    if (r:=R[i])[O_TYPE+k]==36 and r[W3_TI+k]==24]
 rok=bool(xs) and xs[-1]>xs[0]
 chk("missile faces Mario (both sides)",lok and rok)
 
@@ -83,8 +88,8 @@ else:
 
 # 8. boulder: rolls + gravity + ping-pong  [GB: 1.5px/f, y grounded, reverses]
 R=run(NORM,900,".900","0xB4:0xD0@200,0xB5:0x07@200,0xA4:20@200,0x1B:96@200")
-xs=[(i,r[0xFE4+k]|(r[0xFEE+k]<<8),r[0xFF8+k]) for i in range(205,900) for k in range(10)
-    if (r:=R[i])[0xFDA+k]==36 and r[0xBEB+k]==7]
+xs=[(i,r[O_XL+k]|(r[O_XH+k]<<8),r[O_Y+k]) for i in range(205,900) for k in range(10)
+    if (r:=R[i])[O_TYPE+k]==36 and r[W3_TI+k]==7]
 moved=xs and (max(x for _,x,_ in xs)-min(x for _,x,_ in xs))>60
 grounded=xs and all(y==112 for _,_,y in xs[10:])
 revs=0;d=0
@@ -104,9 +109,9 @@ Rs=run(NORM,920,".920","0xB4:0xD0@200,0xB5:0x07@200,0xA4:20@200,0x1B:96@200")
 tj={}
 for i in range(300,880):
     for k in range(10):
-        if Rs[i][0xFDA+k]==36 and Rs[i][0xBEB+k]==7:
+        if Rs[i][O_TYPE+k]==36 and Rs[i][W3_TI+k]==7:
             cam=Rs[i][0xB4]|(Rs[i][0xB5]<<8)
-            sx=(Rs[i][0xFE4+k]|(Rs[i][0xFEE+k]<<8))-cam
+            sx=(Rs[i][O_XL+k]|(Rs[i][O_XH+k]<<8))-cam
             if 20<=sx<=130: tj[i]=sx        # only ON-SCREEN roller positions
 ok=False; det=""
 for f0 in sorted(tj)[::10][:12]:
@@ -117,8 +122,8 @@ for f0 in sorted(tj)[::10][:12]:
     for i in range(f0,920):
         r=R[i]
         for k in range(10):
-            if r[0xFDA+k]==36 and TT[r[0xBEB+k]] in (0x31,0x40,0x41,0x0D):
-                t=TT[r[0xBEB+k]]
+            if r[O_TYPE+k]==36 and TT[r[W3_TI+k]] in (0x31,0x40,0x41,0x0D):
+                t=TT[r[W3_TI+k]]
                 if prev!=(k,t): chain.append((i,t,r[0x49]|(r[0x4A]<<8))); prev=(k,t)
     types=[t for _,t,_ in chain]
     sc = next((s for _,t,s in chain if t==0x40),0) - (chain[0][2] if chain else 0)
@@ -141,9 +146,9 @@ recs=[]
 for i in range(320,620):
     r=Rr[i]
     for k in range(10):
-        if r[0xFDA+k]==36 and r[0xBEB+k]==21:
+        if r[O_TYPE+k]==36 and r[W3_TI+k]==21:
             cam=r[0xB4]|(r[0xB5]<<8)
-            recs.append((i,r[0x103E+k],(r[0xFE4+k]|(r[0xFEE+k]<<8))-cam,r[0xFF8+k]))
+            recs.append((i,r[O_ST+k],(r[O_XL+k]|(r[O_XH+k]<<8))-cam,r[O_Y+k]))
 Aa=[t for t in recs if t[1]==0x31 and 20<t[2]<130]
 Bb=[t for t in recs if t[1]==0x47 and 20<t[2]<130]
 flip_ok=False
@@ -167,10 +172,10 @@ Rs=run(GOD,700,".700","0xB4:0x80@200,0xB5:0x09@200,0xA4:8@200,0x1B:64@200")
 cand=[]
 for i in range(360,660):
     for k in range(10):
-        if Rs[i][0xFDA+k]==36 and Rs[i][0xBEB+k]==21:
+        if Rs[i][O_TYPE+k]==36 and Rs[i][W3_TI+k]==21:
             cam=Rs[i][0xB4]|(Rs[i][0xB5]<<8)
-            sx=(Rs[i][0xFE4+k]|(Rs[i][0xFEE+k]<<8))-cam
-            if 12<sx<120: cand.append((i,sx,Rs[i][0xFF8+k]))
+            sx=(Rs[i][O_XL+k]|(Rs[i][O_XH+k]<<8))-cam
+            if 12<sx<120: cand.append((i,sx,Rs[i][O_Y+k]))
 cand2=[]
 byf={c[0]:c for c in cand}
 for i,sx,yy in cand:
@@ -190,11 +195,11 @@ for f0,sx,yb in cand[:8]:
     if len(cur)>len(best): best=cur
     if len(best)<60: continue
     slot=R[best[0]][0x5D]-1
-    if R[best[0]][0xBEB+slot]!=21: continue
+    if R[best[0]][W3_TI+slot]!=21: continue
     win=[i for i in best if 16<=R[i][0xA4]<=140]   # spr_x wraps at the screen
     if len(win)<60: continue                       # edge; measure only inside
     i0,i1=win[0],win[-1]
-    bdx=(R[i1][0xFE4+slot]|(R[i1][0xFEE+slot]<<8))-(R[i0][0xFE4+slot]|(R[i0][0xFEE+slot]<<8))
+    bdx=(R[i1][O_XL+slot]|(R[i1][O_XH+slot]<<8))-(R[i0][O_XL+slot]|(R[i0][O_XH+slot]<<8))
     mdx=((R[i1][0xB4]|(R[i1][0xB5]<<8))+R[i1][0xA4])-((R[i0][0xB4]|(R[i0][0xB5]<<8))+R[i0][0xA4])
     if abs(bdx)>=20 and bdx==mdx:
         carry_ok=True; det10=f"ride {i1-i0+1}f dx {bdx}=={mdx}"; break
