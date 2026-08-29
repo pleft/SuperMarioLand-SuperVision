@@ -1199,10 +1199,14 @@ main_loop:
     bcs @snap
 @fall:
     inc o_y,x                    ; unsupported: fall 1px this frame
-    lda o_y,x
-    sta w3_fcy,x                 ; keep the cache keyed to the NEW y (falling
-    dea                          ; re-probes next frame; verdict stays 'open')
-    ina
+    lda o_y,x                    ; do NOT re-key w3_fcy here: @probe already
+                                 ; keyed it to the y we just tested, so the
+                                 ; changed o_y is what forces next frame's
+                                 ; re-probe.  Re-keying made the check hit with
+                                 ; the stale 'open' verdict instead, and an
+                                 ; airborne object then fell through solid
+                                 ; ground until the 168 cull freed it (a
+                                 ; Pionpi stomped mid-hop "died").
     cmp #168                     ; off the bottom -> free the slot
     bcc @wall
     cmp #232
@@ -10420,8 +10424,16 @@ wcyc: .byte 2, 5, 1              ; port pose ids for GB metasprites 1, 2, 3
 ; the score is the phys byte2 class. X = slot. C=0 pass; C=1 ball gone, A =
 ; score code (0 = absorbed). The morph runs in the kit through the gift vector
 ; (A=$FE, tmpL3 = type): FIXED cannot name kit code.
-w3_hp = $0128                    ; per-slot hits taken (stack-page scratch, next
-                                 ; to w3_fcc/w3_fcy; cleared by find_free_obj)
+w3_hp = $0132                    ; per-slot hits taken (stack-page scratch; cleared
+                                 ; by find_free_obj). It sat at $0128 -- ON TOP OF
+                                 ; w3_fcv, the gravity floor-probe verdict, which
+                                 ; w3_ffc7 rewrites EVERY FRAME for any object with
+                                 ; the gravity bit. So a knocked-down Pionpi ($57,
+                                 ; phys0 $02) bumped its own Superball hit count
+                                 ; once per knockdown and died after a few stomps
+                                 ; instead of always getting up (user-reported on
+                                 ; 4-1). $0132-$013B is clear: the next user of the
+                                 ; page is the composer's scratch at $0160.
 .proc w3_ball
     ldy #0
 :   lda w3_ballt,y               ; (index, morph type, phys byte2), $FF-terminated

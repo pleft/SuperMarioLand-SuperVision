@@ -430,3 +430,24 @@ value is "the user will see it": measure with Mario played into the scene by
 input, near the action, on the NORMAL build -- and A/B against the previous
 build with forced-clean rebuilds (make silently reuses stale objects across
 git checkouts; the first A/B compared a ROM against itself).
+
+**E32. A probe cache must be keyed to the state the probe was MADE in --
+never re-key it from the code path that moves the object.** `w3_ffc7`'s
+floor-probe cache is (feet_col, o_y) -> verdict. The `@fall` path, meaning to
+help, re-keyed `w3_fcy` to the NEW y after moving 1px down; next frame `o_y ==
+w3_fcy` matched, the cache hit with the stale "open" verdict, and the probe
+never ran again. Every W3 object that left the ground therefore fell through
+solid floor until the y>=168 cull freed its slot -- 4-1's Pionpi, stomped
+mid-hop, "died after some stomps" (user report). A grounded object never
+showed it: its first probe says solid and it never enters `@fall`. The cache
+is correct with the re-key REMOVED: `@probe` already stores the y it tested,
+so the changed `o_y` is exactly what forces the next re-probe.
+Symptom to recognise: same column, same y, different verdict on different
+frames -- the object's own history, not the map data, decided it.
+
+**E33. Two arrays at one address is not a coincidence you can outrun.**
+`w3_hp` (Superball hit counter) and `w3_fcv` (floor verdict) were both
+declared at `$0128`, 10 bytes each. The gravity probe rewrote the hit counter
+every frame for any knocked-down object; a Pionpi bumped its own kill count
+once per knockdown. Grep every new `= $` RAM declaration against `rom.map`
+before adding it (see the ram-layout-traps memory).

@@ -97,3 +97,23 @@ battery31 10/10):
 * the kit assembled per world (its tables live in the window image).
 * `pack_banks.pack_w3` generalised to (levels, resident page, cold page).
 * `NUM_LEVELS` 9 -> 10 and `lvl_bank_tab` += page 9.
+
+## Pionpi ($56/$57) -- stomp behaviour (user report, fixed 2026-08-29)
+
+GB rule: a stomp knocks a Pionpi FLAT ($57) for ~3 s, then it gets up ($56).
+Stomps never kill it; only a Superball (or a star) does.
+
+The port killed it after a few stomps. Two independent bugs, both fixed:
+
+1. `w3_hp` and `w3_fcv` shared `$0128` (law E33). The gravity floor-probe
+   verdict overwrote the Superball hit counter, so a knocked-down Pionpi
+   incremented its own kill count once per knockdown. `w3_hp` moved to `$0132`.
+2. `w3_ffc7`'s `@fall` re-keyed the probe cache to the new y (law E32), so an
+   airborne object never re-probed and fell through the floor until the y>=168
+   cull freed the slot. A Pionpi stomped MID-HOP therefore vanished ("died")
+   on the second stomp; one stomped while grounded survived. This was a
+   cross-world bug: any W3 object that left the ground was affected.
+
+Verified after the fix (god build, Mario dropped on the first Pionpi at
+x448 y112 every 110 frames): 6 knockdowns over 12 stomps, ~184 frames flat
+each, still alive at f1399. Gates: battery31 10/10, svgold 9/9 identical.
