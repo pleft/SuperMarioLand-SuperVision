@@ -56,3 +56,44 @@ playable.
 
 Before writing a line of it, walk docs/35 (the port laws) -- A2/A3 (erase boxes
 and the straddle row) and B1/B2 (contact rules) are the ones W3 paid for twice.
+
+## The bank design (settled 2026-08-29, first two steps landed)
+
+Measured facts that decide it:
+
+* bank 1 (W3 resident) has **25 bytes** free; its tail runs to the far kit.
+* bank 6's cold region ($8400-$A7C0, 9152B) holds W3's three maps + rooms +
+  spawns in 8860B -- **292 bytes** free. Level 9 alone needs ~3.7KB more.
+* MAGNUM pages 9-15 are entirely free in the 512K image.
+
+So each WORLD gets a bank PAIR, exactly as World 3 has (1, 6):
+
+| world | resident bank | cold bank |
+|---|---|---|
+| 3 (levels 6-8) | 1 | 6 |
+| 4 (levels 9-11) | **9** | **10** |
+
+*Resident* = the LEVELS prefix + the level headers (pinned at `W3HDR + (lvl-6)*24`,
+so the engine's existing lookup works unchanged), pipes/blocks, the loader stub,
+the world's BG charset, and the far kit at $BE50.
+*Cold* = maps/rooms/spawns + the kit's pinned data (scripts $B200, display lists
+$B540, tile slice $B740, the bank-resident walk $BC00) + the window image.
+
+Two engine changes were needed and are **done and gated** (svgold 9/9,
+battery31 10/10):
+
+1. `cur_bank` -- load_level records the level's page; the kit's cold-bank
+   detours (`w3_read`'s column fill, `w3_draw`'s tail) return to it instead of a
+   hardcoded bank 1. Without this every W3-kit level was pinned to bank 1.
+2. `w3_cold` -- a byte in the kit's window image holding the world's COLD page
+   (6 for W3). pack_banks patches it in each world's copy, so one kit image can
+   serve several worlds.
+
+### what is left for 4-1
+
+* `gen_w3data.py` per world (SEED, tile order, overlay source) -- World 4's
+  sprite overlay is `w4_ovl_8A00.svt`, not W3's, so the slice must be built from
+  it; this is also what gives 4-3 its own 68 slots later.
+* the kit assembled per world (its tables live in the window image).
+* `pack_banks.pack_w3` generalised to (levels, resident page, cold page).
+* `NUM_LEVELS` 9 -> 10 and `lvl_bank_tab` += page 9.

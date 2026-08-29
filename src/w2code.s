@@ -158,7 +158,7 @@ W3FLAGS = $0B                    ; NMI | TIMER_IRQ | LCD
     lda feet_col+1
     sta W3CTAG+1,x
     jsr @slotptr
-    lda #6                       ; ONE bank switch per COLUMN, not per read:
+    lda w3_cold                  ; ONE bank switch per COLUMN, not per read:
     jsr w3_bank                  ; every SYS_CTRL write restarts the LCD scan.
     jsr w6_col                   ; (the fill is BANK-6 resident -- no window room
                                  ;  left for it. It fills through tmpL2/tmpH2, the

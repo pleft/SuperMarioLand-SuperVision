@@ -430,7 +430,7 @@ CXS_BOXOK  = $0153               ; 1 = CXA_* box computed this walk
     inc tmpH
 :   inc w3_pc,x
     stz W3LINKV
-    lda #6
+    lda w3_cold
     sta W3LINK
     lda #$0F
     sta W3LINKV
@@ -721,6 +721,13 @@ CXS_BOXOK  = $0153               ; 1 = CXA_* box computed this walk
 ; tile bytes have bit7 set. Tiles $A0-$DC resolve through the level header's
 ; overlay base (the W3 sheet in bank 6), everything else through chardata --
 ; draw_quad already does exactly that, so GB tile ids ship verbatim.
+w3_cold:                         ; the MAGNUM page holding THIS world's cold data
+    .byte 6                      ; (maps, scripts, display lists, tile slice, the
+                                 ; bank-resident walk). World 3 = 6; pack_banks
+                                 ; PATCHES this byte in each world's own copy of
+                                 ; the window image, so one kit image serves them
+                                 ; all -- see docs/45.
+.export w3_cold
 .proc w3_bank                    ; A = MAGNUM page (the W3LINK dance)
     stz W3LINKV
     sta W3LINK
@@ -774,7 +781,7 @@ CXS_BOXOK  = $0153               ; 1 = CXA_* box computed this walk
 .endif
 
 .proc w3_draw                    ; WINDOW half: bank juggling + the composed
-    lda #6                       ; dispatch (docs/42 v2). Walk/stash are BANK-6
+    lda w3_cold                  ; dispatch (docs/42 v2). Walk/stash are COLD-BANK
     jsr w3_bank                  ; resident (W3X); the composer is page-8
 .if CX_BUILD
     lda CX_EN                    ; resident (w3aux).
