@@ -141,3 +141,35 @@ So the flicker left in dense scenes is not a pass-order or box-size problem: at
 Ganchans plus Mario is simply the machine's limit. The lever that remains is
 scene cost -- fewer sprite cells on screen -- which is a game-design decision,
 not a renderer one.
+
+### CORRECTION (2026-08-29): the atomic path was measured on the wrong scene
+
+The "measured neutral, 4.3% -> 4.3%" note above came from the 3-3 LIFT RIDE,
+where almost nothing is entangled. In the BOSS ARENA -- the scene the user was
+actually complaining about -- the same metric read **boss blank 274/581 = 47%**,
+which is exactly "it still flickers a lot even with 1 boulder". Two lessons, both
+Law E31 again: measure the scene the user plays, and `o_pdr` per frame is the
+metric (the strict box-ink metric read 0 wiped frames there because a partial
+erase still leaves ink).
+
+Instrumented counters (a throwaway build with the 1-3 bang stubbed for space)
+settled the mechanism: in 148 of those frames the erase AND the draw both ran --
+the frame boundary simply fell between them. Not an overrun, not the budget: the
+gap itself.
+
+**The fix.** The boss could not go atomic because `@spread` marked it entangled
+with Mario, and they genuinely overlap (median |dx| 6, |dy| 0 while fighting).
+But Mario is not like another sprite: his erase can be hoisted to the FRONT of
+the erase phase and his draw is last and lands on top, so a sprite under him
+needs no group at all. `@sp_mmark` now sets only `m_dirty` bit1 (Mario back in
+the group) and leaves the SLOT's bit3 clear, so it keeps its atomic eligibility:
+
+    boss blank      47% -> 16%
+    lift-ride blank 4.3% -> 2.5%
+
+with svgold 9/9 byte-identical and battery31 10/10. The 16% that remains is the
+frames where the boss is entangled with its own thrown BOULDER, which holds slot
+0 -- the one slot whose erase and draw are adjacent (erases run 9..0, draws
+0..9). Giving that spot to the boss (children allocated from the top of the slot
+array) is the next lever; it costs ~16 bytes of FIXED, i.e. one more dispatch
+chain turned into a table.
