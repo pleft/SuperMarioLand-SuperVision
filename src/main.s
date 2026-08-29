@@ -8975,6 +8975,10 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     ; sprites are moving". Erasing the whole group and then drawing the whole
     ; group costs nothing extra and still keeps each sprite blank only for the
     ; GROUP's erases instead of the whole render (docs/36).
+    lda m_dirty                  ; ENTANGLED: his erase runs FIRST, so it precedes
+    and #2                       ; every draw -- the atomic ones inside the loop
+    beq @p3s                     ; included. Isolated, it moves down beside his own
+    jsr @m_erase                 ; draw (pass 4) and he is never blank.
 @p3s:
     lda #OBJ_MAX-1               ; slots erased 9..0 and drawn 0..9: the LOWEST slot
     sta oi                       ; is erased last and drawn first, so its blank
@@ -9007,14 +9011,6 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
 @p3an:
     dec oi
     bpl @p3a
-    lda m_dirty                  ; Mario's erase (prev_vx pre-folded by pass 0) goes
-    and #2                       ; LAST in the erase phase while he is ENTANGLED --
-    beq @p4s                     ; it only has to precede the DRAWS, so every sprite
-    jsr @m_erase                 ; erase before it is time he is not blank for. (An
-                                 ; atomic draw inside the loop is safe: had it
-                                 ; overlapped him, the pair would be entangled and
-                                 ; it would not be atomic.) Isolated, his erase
-                                 ; moves all the way down beside his own draw.
     ; ---------- pass 4: draw all dirty visible; Mario last ----------
     bra @p4s                     ; (@m_erase sits between the phases, called from
 @m_erase:                        ;  both: the end of pass 3 and pass 4's Mario tail)                        ; Mario's box: 3 cols, +1 row when he straddles
@@ -9191,13 +9187,15 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     bra @sp_mmark
 @sp_mset:
     jsr mark_slot_y
-@sp_mmark:                       ; ENTANGLED with Mario: the slot keeps the group
-    lda o_nfl,y                  ; path, and Mario's erase stays at the FRONT of
-    ora #8                       ; pass 3 (m_dirty bit1) instead of moving down
-    sta o_nfl,y                  ; beside his draw -- it must precede every draw
-    lda m_dirty                  ; that overlaps him.
-    ora #2
-    sta m_dirty
+@sp_mmark:                       ; ENTANGLED with Mario: HE goes back in the group
+    lda #2                       ; (his erase first, m_dirty bit1) -- but the SLOT
+    tsb m_dirty                  ; keeps its atomic eligibility. Mario's erase
+                                 ; precedes every draw, including the atomic ones
+                                 ; inside the erase loop, and his own draw is last
+                                 ; and lands on top, so an atomic sprite under him
+                                 ; is safe. This is what lets 3-3's BOSS -- which
+                                 ; overlaps Mario almost every arena frame -- take
+                                 ; the tight path at all.
 @sp_mn:
     inc tmpL3
     lda tmpL3
