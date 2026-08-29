@@ -149,3 +149,25 @@ kit types `$38/$39/$49/$55/$56` are all in the World-4 table.
 
 Known deviation (all levels, not just 4-1): the port starts Mario at spr_x 40,
 the GB at 50.
+
+## 4-1 route: how to resume (partial, x1568 / 3680)
+
+`docs/routes/level_09_partial.txt` replays to world x 1568 (43% of the level,
+past the FIRST lift pit) and leaves Mario safe at frame 3064. It is a partial
+route, not a gate -- level 9 has no completing route yet.
+
+The method (3-3's, docs/44): a plain svauto run dies in the first pit because
+one 150-backtrack budget is not enough for a multi-lift crossing. Chain instead:
+
+    python3 tools/svchain.py <route.txt> <prefix.txt>     # cut at the furthest
+                                                          # SAFE frame (grounded
+                                                          # or riding, pre-death)
+    /tmp/svauto build/super-mario-land.sv 9 12000 <out.txt> <prefix.txt>
+
+Each iteration starts a fresh backtrack budget at the far side of the last
+crossing, so progress accumulates: 459 -> 651 -> 910 -> 1242 -> 1568 so far.
+Repeat until the log prints GOAL, then move the result to
+`docs/routes/level_09.txt`. Remember E23: any engine-speed change invalidates
+the whole chain and it must be re-searched from the start.
+
+Remaining pits to cross: cols 200-219, 280-321, 360-383, 399-401, 420-423.
