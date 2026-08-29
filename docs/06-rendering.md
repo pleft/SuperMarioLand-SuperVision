@@ -173,3 +173,26 @@ frames where the boss is entangled with its own thrown BOULDER, which holds slot
 0..9). Giving that spot to the boss (children allocated from the top of the slot
 array) is the next lever; it costs ~16 bytes of FIXED, i.e. one more dispatch
 chain turned into a table.
+
+### the boulder held the one tight slot (2026-08-29)
+
+With Mario hoisted, the boss's remaining 16% of blank frames were the ones where
+it was entangled with its own thrown BOULDER -- and the boulder held **slot 0**,
+the only slot whose erase and draw are adjacent (erases run 9..0, draws 0..9).
+`w3_spawn_at` (the kit's only caller is `w3_child`) now allocates a child from
+the TOP of the slot array, so the thrower keeps the low slot:
+
+    boss blank   16% -> 13%   (atomic in 533 of 581 arena frames, was 380)
+    ride blank   2.5% (unchanged)
+
+Paid for with `update_objects`' 21-entry cmp/beq chain -> an RTS jump table, the
+same trick `draw_obj_sprite` got; svgold 9/9 identical, battery31 10/10.
+
+What is left is not a scheduling problem: the boss is ATOMIC in 92% of frames
+and still blank in 13%, because its own erase+draw pair (a 24px-tall metasprite,
+a 4x4-cell box ~ 8500 cycles, plus the draw) is itself ~13% of a 65,574-cycle
+frame, so the frame boundary lands inside the pair that often. Its box is
+already straddle-exact -- 4 rows is the minimum that covers a 24px sprite at an
+unaligned y. Only a composite blit (one write per cell instead of restore-then-
+draw) shortens the pair further, and the aux-page implementation of that
+measures ~3x a plain draw. 47% -> 13% is where this line of attack ends.

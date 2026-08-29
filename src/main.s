@@ -8448,44 +8448,39 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     bcc :+
     jsr ovl_update               ; the resident kit overlay (types 22+)
     jmp @next
-:   cmp #OBJ_COIN
-    beq @coin
-    cmp #OBJ_FLOWER
-    beq @flower
-    cmp #OBJ_BALL
-    beq @ball
-    cmp #OBJ_STAR
-    beq @star
-    cmp #OBJ_DEBRIS
-    beq @debris
-    cmp #OBJ_POPUP
-    beq @popup
-    cmp #OBJ_BOUNCE
-    beq @bounce
-    cmp #OBJ_PLATV
-    beq @platv
-    cmp #OBJ_PLATH
-    beq @plath
-    cmp #OBJ_CHIB
-    beq @chib
-    cmp #OBJ_NOKO
-    beq @chib                    ; same walker engine (combat branches by type inside)
-    cmp #OBJ_SQUASH
-    beq @squash
-    cmp #OBJ_CORPSE
-    beq @corpse
-    cmp #OBJ_BOMB
-    beq @bomb
-    cmp #OBJ_BOOM
-    beq @boom
-    cmp #OBJ_FLY
-    beq @fly
-    cmp #OBJ_BUNBUN
-    beq @bunbun
-    cmp #OBJ_ARROW
-    beq @arrow
-    cmp #OBJ_STONE
-    beq @stone
+:   asl                          ; TYPE-INDEXED dispatch, like draw_obj_sprite's:
+    tay                          ; the cmp/beq chain it replaces cost ~80 bytes and
+    lda @utab+1,y                ; FIXED had none left for w3_spawn_at's top-down
+    pha                          ; slot search. Y is the index (X stays = oi, which
+    lda @utab,y                  ; every upd_* wants); no handler reads Y.
+    pha
+    rts
+@unull:
+    rts
+@utab:
+    .word @unull-1               ;  0  (never dispatched: type 0 returns above)
+    .word @mush-1                ;  1  OBJ_MUSH
+    .word @coin-1                ;  2  OBJ_COIN
+    .word @flower-1              ;  3  OBJ_FLOWER
+    .word @ball-1                ;  4  OBJ_BALL
+    .word @mush-1                ;  5  OBJ_HEART  (same walker engine)
+    .word @star-1                ;  6  OBJ_STAR
+    .word @debris-1              ;  7  OBJ_DEBRIS
+    .word @popup-1               ;  8  OBJ_POPUP
+    .word @bounce-1              ;  9  OBJ_BOUNCE
+    .word @platv-1               ; 10  OBJ_PLATV
+    .word @plath-1               ; 11  OBJ_PLATH
+    .word @chib-1                ; 12  OBJ_CHIB
+    .word @squash-1              ; 13  OBJ_SQUASH
+    .word @chib-1                ; 14  OBJ_NOKO   (combat branches by type inside)
+    .word @bomb-1                ; 15  OBJ_BOMB
+    .word @boom-1                ; 16  OBJ_BOOM
+    .word @fly-1                 ; 17  OBJ_FLY
+    .word @corpse-1              ; 18  OBJ_CORPSE
+    .word @bunbun-1              ; 19  OBJ_BUNBUN
+    .word @arrow-1               ; 20  OBJ_ARROW
+    .word @stone-1               ; 21  OBJ_STONE
+@mush:
     jsr upd_mush                 ; OBJ_MUSH and OBJ_HEART (identical walker engine)
     bra @next
 @chib:
@@ -9752,7 +9747,7 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     adc #8
     sta dy
     ldx #PLAT_TILE
-    bra draw_quad
+    jmp draw_quad                ; (bra: out of range since w3_spawn_at grew)
 ; (tail call)
 .endproc
 
@@ -10166,9 +10161,18 @@ wcyc: .byte 2, 5, 1              ; port pose ids for GB metasprites 1, 2, 3
 ; both full to the byte; the kit keeps only the type lookup, which needs its own
 ; tables. In CODE, which every bank sees.
 .proc w3_spawn_at
+    ldx #OBJ_MAX-1               ; a CHILD takes the HIGHEST free slot, not the
+@f: lda o_type,x                 ; lowest: pass 3a erases 9..0 and pass 4 draws
+    beq @got                     ; 0..9, so the lowest live slot is the one whose
+    dex                          ; erase and draw are ADJACENT. That spot belongs
+    bpl @f                       ; to the parent (3-3's boss, blank in 16% of
+    sec                          ; arena frames while its thrown boulder held it),
+    rts                          ; not to the boulder it throws.
+@got:
+    stz o_hp,x                   ; (find_free_obj's fresh-slot bookkeeping)
+    stz w3_hp,x
     lda #36
-    jsr obj_alloc_typed
-    bcs @rts
+    sta o_type,x
     ldy oi
     lda o_xl,y
     sta o_xl,x
