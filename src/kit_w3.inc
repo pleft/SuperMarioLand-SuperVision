@@ -441,9 +441,11 @@ CXS_BOXOK  = $0153               ; 1 = CXA_* box computed this walk
     ldy #0
     lda (tmpL),y
     tay
-    stz W3LINKV        ; back to the W3 resident bank
-    lda #1
-    sta W3LINK
+    stz W3LINKV        ; back to THIS LEVEL's resident bank -- hardcoding 1 here
+    lda cur_bank       ; left World 4 running in World 3's bank after every single
+    sta W3LINK         ; script fetch: its VM then read W3's blob at W4's offsets,
+                       ; so waits and velocities came out of the bg charset (4-1's
+                       ; upside-down Piranha travelled 36px instead of 16, docs/45)
     lda #$0F
     sta W3LINKV
     tya

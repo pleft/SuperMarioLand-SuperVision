@@ -120,6 +120,12 @@ def main():
     lblmap = {m.group(2): int(m.group(1), 16) for m in
               re.finditer(r'al 00([0-9A-F]{4}) \.(\w+)', open("build/rom.lbl").read())}
     bg_off = lblmap["bg_chardata"] - BASE
+    # base = the SHARED sheet the prefix ships (== w1_bg_9000), with World 4's
+    # $31-$6F overlay on top -- exactly what pack_w3 does. Verified against the
+    # GB's live VRAM during 4-1: it matches world 1's $5032 sheet in 67 of 128
+    # tiles, the other 61 being the $9310 overlay. (Using w4_bg_9000.svt as the
+    # base instead is wrong -- the extractor sources it from bank 1, which is
+    # World 2's sheet, and 4-1 then renders almost blank.)
     bg = bytearray(res[bg_off:bg_off + 0x800])
     ovl2 = open("build/gfx/w4_ovl_9310.svt", "rb").read()
     assert len(ovl2) == 63 * 16, "w4_ovl_9310.svt: expected 63 tiles"

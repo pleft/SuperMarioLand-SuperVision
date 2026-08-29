@@ -5,12 +5,20 @@
 #   python3 tools/svtrace.py LEVEL script.txt out.json   (SML_SV / SHOT env)
 import sys, json, os, subprocess
 import numpy as np
-W3TAB = [0x03,0x0D,0x19,0x1C,0x1F,0x23,0x25,0x31,0x32,0x33,0x35,0x38,0x39,0x3A,0x3B,
-         0x3C,0x3D,0x3E,0x40,0x41,0x45,0x47,0x49,0x4A,0x4B,0x4F,0x58,0x5A]
+# the kit's type table is read from RAM ($152A, the loaded window image), not
+# hardcoded: World 4's kit has its own roster and a W3 table silently decodes
+# every kit object as the wrong enemy (cost: an hour chasing a phantom 4-1 bug)
+W3TAB_ADDR = 0x152A
 OBJ_W3 = 36
-# zero-page / RAM offsets (build/w2abi.inc)
-O_TYPE, O_XL, O_XH, O_Y, O_VX, O_VY, O_ST, W3_PC, W3_TI = 0xFDA, 0xFE4, 0xFEE, 0xFF8, 0x1002, 0x100C, 0x103E, 0xBE1, 0xBEB
-CAM, SPRX, SPRY = 0xB4, 0xA4, 0x1B
+# EVERY RAM offset comes from build/rom.lbl. Hardcoding them means one added BSS
+# byte silently shifts the whole object array and the trace reports phantom bugs
+# -- it cost an hour on 3-3's flicker and another on 4-1's spawns, same day.
+import re as _re
+_LBL = {m.group(2): int(m.group(1), 16) for m in
+        _re.finditer(r'al 00([0-9A-F]{4}) \.(\w+)', open('build/rom.lbl').read())}
+O_TYPE, O_XL, O_XH, O_Y, O_VX, O_VY, O_ST, W3_PC, W3_TI = (
+    _LBL[k] for k in ('o_type','o_xl','o_xh','o_y','o_vx','o_vy','o_st','w3_pc','w3_ti'))
+CAM, SPRX, SPRY = _LBL['cam_x'], _LBL['spr_x'], _LBL['spr_y']
 level, script, out = int(sys.argv[1]), sys.argv[2], sys.argv[3]
 rom = os.environ.get("SML_SV", "build/super-mario-land-god.sv")
 shot = os.environ.get("SHOT", "/tmp/svshot")
@@ -28,7 +36,7 @@ for f in range(len(R)):
         t = int(r[O_TYPE + i])
         if not t: continue
         wx = int(r[O_XL + i]) | (int(r[O_XH + i]) << 8)
-        gt = W3TAB[int(r[W3_TI + i])] if t == OBJ_W3 else 0x100 | t
+        gt = int(r[W3TAB_ADDR + int(r[W3_TI + i])]) if t == OBJ_W3 else 0x100 | t
         objs.append([gt, (wx - cam) & 0xFF, int(r[O_Y + i]), int(r[W3_PC + i]), int(r[O_ST + i]),
                      int(r[O_VX + i]), int(r[O_VY + i])])
     rows.append({"f": f, "cam": cam, "mx": int(r[SPRX]), "my": int(r[SPRY]), "objs": objs})
