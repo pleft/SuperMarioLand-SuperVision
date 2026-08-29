@@ -117,3 +117,35 @@ The port killed it after a few stomps. Two independent bugs, both fixed:
 Verified after the fix (god build, Mario dropped on the first Pionpi at
 x448 y112 every 110 frames): 6 knockdowns over 12 stomps, ~184 frames flat
 each, still alive at f1399. Gates: battery31 10/10, svgold 9/9 identical.
+
+## 4-1 level data verified against the GB's live VRAM (2026-08-29)
+
+The extracted map is not just plausible, it is the GB's: walking the GB (PyBoy,
+run-jump pattern) and reading the BG tilemap at $9800 row by row gives columns
+identical to `build/levels/level_09.json` for every column checked (56-87,
+byte-for-byte). So the four big gaps are real level design, not a decode bug:
+
+    pits (cols with no solid tile at ANY row):
+      60-81 (176px), 200-219, 280-321, 360-363, 365-383, 399-401, 420-423
+
+**The pits are crossed on lifts, and the lifts come from spawners.** The level's
+`$0A`/`$0B` spawn entries sit just before each pit (cols 31/36 -> pit 60-81;
+142/157/180 -> pit 200-219; 255 -> pit 280-321). On the GB those entries appear
+as live `$38`/`$3A`/`$3B` lifts over the gap; the port keeps them as native
+`$0A`/`$0B` platform objects. Input-matched check at the same camera position:
+GB `$0A` anchored x512, y 90..120 (vertical); port x504, y 83..114 -- the same
+lift within 8px. Riding sets `ride` (main.s:6292), so svauto's stall exemption
+applies to them.
+
+Consequence for routing: 4-1 needs hand chunks for the lift crossings exactly
+like 3-3 (docs/44) -- a plain svauto search dies in the first pit (world x 605,
+backtrack budget spent). Do NOT read that as a broken level.
+
+Also verified: both pipes (entry cols 2 and 387) enter room 2 (the 44-coin
+room) AND exit it through the `$74` mouth on the top-right ledge, resuming at
+the saved surface camera; all 17 distinct spawn types in the level are covered
+(bit 7 is the hard-mode/spawn flag: `$D6`=`$56`, `$C9`=`$49`, `$84`=`$04`, ...);
+kit types `$38/$39/$49/$55/$56` are all in the World-4 table.
+
+Known deviation (all levels, not just 4-1): the port starts Mario at spr_x 40,
+the GB at 50.
