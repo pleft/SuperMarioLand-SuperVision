@@ -100,7 +100,13 @@ def main():
     # ---- RESIDENT page: prefix + headers/pipes/blocks + stub + charset + far
     res = bytearray(img[1 * STRIDE:1 * STRIDE + BANK])      # bank 1 = prefix + W3 tail
     res[W3HDR - BASE:] = b"\xFF" * (BANK - (W3HDR - BASE))  # drop W3's tail, keep the prefix
-    tail = bytearray(b"\x00" * (3 * HDR_SIZE))              # headers 6,7,8 slots stay blank
+    # the engine finds a header at W3HDR + (level-6)*24, so slot 3 is level 9's:
+    # reserve every slot UP TO the highest level here, or the pipes/blocks that
+    # follow land inside the header region and the header write then clobbers
+    # them (4-1's first pipe pointed at the header's own bytes -- user: "mario
+    # cannot enter" the first bonus room).
+    nslots = max(LEVELS) - 6 + 1
+    tail = bytearray(b"\x00" * (nslots * HDR_SIZE))
     t_at = lambda: W3HDR + len(tail)
     pieces = {}
     for i, lv in enumerate(LEVELS):
@@ -146,8 +152,7 @@ def main():
             hdr += bytes((v & 0xFF, v >> 8))
         assert len(hdr) == HDR_SIZE, f"header is {len(hdr)}B, expected {HDR_SIZE}"
         slot = lv - 6                                        # the engine's pin: W3HDR + (lvl-6)*24
-        need = (slot + 1) * HDR_SIZE
-        if len(tail) < need: tail += b"\x00" * (need - len(tail))
+        assert (slot + 1) * HDR_SIZE <= nslots * HDR_SIZE, "header slot outside the reserved area"
         tail[slot * HDR_SIZE:(slot + 1) * HDR_SIZE] = hdr
     assert W3HDR + len(tail) <= 0xBE50, \
         f"W4 resident tail runs into the far kit by {W3HDR + len(tail) - 0xBE50} bytes"
