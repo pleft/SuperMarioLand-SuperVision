@@ -451,3 +451,34 @@ declared at `$0128`, 10 bytes each. The gravity probe rewrote the hit counter
 every frame for any knocked-down object; a Pionpi bumped its own kill count
 once per knockdown. Grep every new `= $` RAM declaration against `rom.map`
 before adding it (see the ram-layout-traps memory).
+
+## E34: any FIXED code-size change is an E23 engine-speed change for World 4
+
+The w3_ballt relocation removed 16 bytes from FIXED. svgold stayed 9/9
+byte-identical (levels 0-8 have frame-budget slack), battery31 passed -- and
+4-1's completing route died at x807. Cause: page-cross cycle penalties moved,
+and 4-1's render walk runs close enough to the frame budget that the NMI race
+resolves differently: at f1622 the pipe piranha's o_tmr is one tick apart
+between builds and every W4 object phase drifts from there.
+
+Rules this adds:
+- E23's "engine-speed change" includes PURE CODE MOTION: adding, removing, or
+  moving bytes anywhere in FIXED (or the W4 kit) invalidates W4 routes, even
+  when no instruction semantics changed.
+- Consequence: record a level's route only on the FINAL build of its kit.
+  4-2/4-3's roster extension will re-phase 4-1 -- expect to re-run the chain.
+- Diff discipline: to compare two builds' runs, diff BEHAVIORAL state
+  (o_type/o_xl/o_xh/o_y, Mario, cam), never the raw 8K -- the kit window copy
+  and the zp render temps legitimately hold shifted code addresses.
+
+## E35: one generated file, two producers = build-order roulette
+
+build/w3ball.inc was written by BOTH gen_w3data.py runs (world 3, then world
+4) and assembled once into FIXED, indexed by w3_ti -- a PER-WORLD index. The
+shipping ROM held World 4's rows, so World-3 Superballs passed through their
+real targets (indices 6/7/8/15) and hit wrong ones. No gate caught it: svgold's
+R900 never fires a ball, battery31 had no Superball test. Fix: per-world
+tables at one pin ($B520) in each world's own resident bank; the mapped bank
+selects the table, w3_ball itself is unchanged, and the packers byte-assert
+the paste. When a generator runs once per world, EVERY file it writes must be
+world-suffixed -- grep for unsuffixed open() calls in any new generator.

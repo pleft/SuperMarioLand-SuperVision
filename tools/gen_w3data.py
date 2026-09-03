@@ -147,15 +147,22 @@ def main():
         f.write("; contact table $3186 column +0: the type to MORPH INTO when\n")
         f.write("; stomped ($00 = not stompable -- Mario passes through the head)\n")
         # Superball column (contact row byte 3, GB $2A68/$2A89) as sparse
-        # (type index, morph type) pairs, $FF-terminated: FIXED has no room for
-        # a full table (main.s w3_ball).
-        with open("build/w3ball.inc", "w") as fb:
-            fb.write("w3_ballt:\n")
-            for i, t in enumerate(types):
-                b3 = ROM[CONTACT_TBL + 5 * t + 3]
-                if b3:                       # + phys byte2: HP (& $3F) and score class (>> 6)
-                    fb.write(f"    .byte {i}, ${b3:02X}, ${ROM[PHYS_TBL+3*t+2]:02X}\n")
-            fb.write("    .byte $FF\n")
+        # (type index, morph type, phys byte2) rows, $FF-terminated. The rows are
+        # indexed by w3_ti, a PER-WORLD index, so the table is per-world: each
+        # world's rows are pasted at the SAME pin ($B520, main.s w3_ballt) in its
+        # own resident bank (pack_banks bank 1 / pack_w4 page 9) and the mapped
+        # bank selects the right one.  (It used to be one .inc in FIXED, written
+        # unconditionally by both gen runs: whichever world ran last won, and the
+        # other world's Superball kills were mis-indexed.)
+        ball = bytearray()
+        for i, t in enumerate(types):
+            b3 = ROM[CONTACT_TBL + 5 * t + 3]
+            if b3:                           # + phys byte2: HP (& $3F) and score class (>> 6)
+                ball += bytes((i, b3, ROM[PHYS_TBL + 3 * t + 2]))
+        ball.append(0xFF)
+        assert len(ball) <= 0x20, \
+            f"w{WORLD} ball table {len(ball)}B > 32B pin gap ($B520..$B53F)"
+        open(f"build/w{WORLD}ball.bin", "wb").write(bytes(ball))
         f.write("w3_stomp:\n    .byte " + ",".join(f"${ROM[CONTACT_TBL+5*t]:02X}" for t in types) + "\n")
         f.write("; contact table column +2: the SIDE-contact result -- $FF hurts,\n")
         f.write("; $00 does NOTHING, anything else morphs the slot into that type.\n")

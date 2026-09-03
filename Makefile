@@ -69,10 +69,11 @@ $(ROM): $(OBJS) $(CFG) tools/pack_banks.py tools/gen_w2abi.py src/w2code.s src/k
 	@cp build/rel.dbg build/dbg.txt   # the sim harness reads symbols from here:
 	@echo "built $@ ($$(wc -c < $@) bytes)"   # no separate debug build anymore
 
-build/w3ball.inc: tools/gen_w3data.py $(ROM_IN)
-	python3 tools/gen_w3data.py
+# w3_ballt is no longer assembled into main.o: each world's rows are a .bin
+# (build/w{3,4}ball.bin, emitted by the gen runs inside the ROM recipe) pasted
+# at the $B520 pin of its own resident bank by pack_banks/pack_w4.
 
-$(OBJDIR)/main.o: src/main.s src/supervision.inc build/levels/title_map.bin build/gfx/title_tiles.svt build/audio/sfx.bin build/audio/sfx.inc build/audio/music.bin build/audio/music.inc build/w3ball.inc
+$(OBJDIR)/main.o: src/main.s src/supervision.inc build/levels/title_map.bin build/gfx/title_tiles.svt build/audio/sfx.bin build/audio/sfx.inc build/audio/music.bin build/audio/music.inc
 	@mkdir -p $(OBJDIR)
 	$(AS) $(ASFLAGS) src/main.s -o $@
 

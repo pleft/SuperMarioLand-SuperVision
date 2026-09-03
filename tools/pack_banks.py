@@ -388,6 +388,7 @@ def main():
     open(img_path, "wb").write(bytes(img))
 
 W3HDR = 0xB540                                  # main.s W3HDR (load_level pin)
+W3BALL = 0xB520                                 # main.s w3_ballt (per-world pin)
 W3WIN = 0xA800                                  # bank 6: kit window image (w3stub pin)
 W3SPT = 0xA7C0                                  # bank 6: 3x .addr spawn lists (w3stub pin)
 
@@ -545,6 +546,12 @@ def pack_w3(img, sym, prefix, l11):
     assert all(b == 0xFF for b in img[toff:toff + len(tail)]), \
         "bank 1 tail not free for W3 (1-1 region grew past W3HDR?)"
     img[toff:toff + len(tail)] = tail
+    ball = open("build/w3ball.bin", "rb").read()      # main.s w3_ballt pin: W3's
+    assert len(ball) <= W3HDR - W3BALL                # Superball rows, per-world
+    boff = 1 * STRIDE + (W3BALL - BASE)               # (page 9 gets W4's, pack_w4)
+    assert all(b == 0xFF for b in img[boff:boff + len(ball)]), \
+        "bank 1 $B520 not free for the W3 ball table"
+    img[boff:boff + len(ball)] = ball
     if far3:
         assert far3_at == 0xBE50, "W3FAR moved -- update pack_banks"
         assert far3_at + len(far3) <= 0xC000, \

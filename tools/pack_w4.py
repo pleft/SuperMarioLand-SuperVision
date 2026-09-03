@@ -77,9 +77,13 @@ def main():
     spt = b"".join(bytes((a & 0xFF, a >> 8)) for a in spawn_at)
     cold[W3SPT - BASE:W3SPT - BASE + len(spt)] = spt
     cold[W3WIN - BASE:W3WIN - BASE + len(win)] = win
-    for pin, path_ in ((0xB200, "build/w4scripts.bin"), (0xB540, "build/w4dlists.bin")):
+    pins = ((0xB200, "build/w4scripts.bin"), (0xB540, "build/w4dlists.bin"),
+            (0xB740, None))                   # tile slice below caps each blob's gap
+    for (pin, path_), (nxt, _) in zip(pins, pins[1:]):
         d = open(path_, "rb").read()
         assert pin - BASE + len(d) <= BANK, f"W4 ${pin:04X} blob overruns the bank"
+        assert pin + len(d) <= nxt, \
+            f"W4 ${pin:04X} blob ({len(d)}B) runs into the ${nxt:04X} pin by {pin + len(d) - nxt}B"
         cold[pin - BASE:pin - BASE + len(d)] = d
     # tile slice: World 4's own overlay, same id-preserving order as W3's
     order = [int(t, 16) for t in open("build/w4tiles.txt").read().split()]
@@ -100,6 +104,9 @@ def main():
     # ---- RESIDENT page: prefix + headers/pipes/blocks + stub + charset + far
     res = bytearray(img[1 * STRIDE:1 * STRIDE + BANK])      # bank 1 = prefix + W3 tail
     res[W3HDR - BASE:] = b"\xFF" * (BANK - (W3HDR - BASE))  # drop W3's tail, keep the prefix
+    ball = open("build/w4ball.bin", "rb").read()            # w3_ballt pin ($B520): the copy
+    res[pb.W3BALL - BASE:W3HDR - BASE] = b"\xFF" * (W3HDR - pb.W3BALL)  # above inherited W3's
+    res[pb.W3BALL - BASE:pb.W3BALL - BASE + len(ball)] = ball           # rows; paste W4's
     # the engine finds a header at W3HDR + (level-6)*24, so slot 3 is level 9's:
     # reserve every slot UP TO the highest level here, or the pipes/blocks that
     # follow land inside the header region and the header write then clobbers

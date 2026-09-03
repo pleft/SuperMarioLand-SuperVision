@@ -10419,7 +10419,7 @@ wcyc: .byte 2, 5, 1              ; port pose ids for GB metasprites 1, 2, 3
 
 ; --- Superball vs a W3 kit object (GB $2A68): HP = phys byte2 & $3F; while hits
 ; taken < HP the ball is absorbed (vanishes, no score); then the contact
-; table's ball column (row byte 3, build/w3ball.inc: sparse (type index, new
+; table's ball column (row byte 3, build/w{3,4}ball.bin, pinned $B520: (index, new
 ; type, phys byte2) triples) morphs the object -- 00 = no effect, the ball passes -- and
 ; the score is the phys byte2 class. X = slot. C=0 pass; C=1 ball gone, A =
 ; score code (0 = absorbed). The morph runs in the kit through the gift vector
@@ -10476,7 +10476,14 @@ w3_hp = $0132                    ; per-slot hits taken (stack-page scratch; clea
     rts
 @val: .byte $01, $04, $08, $10
 .endproc
-.include "../build/w3ball.inc"
+w3_ballt = $B520                 ; per-world (indexed by w3_ti, a per-world VM
+                                 ; index): each world's rows sit at this pin in
+                                 ; its OWN resident bank -- bank 1 (W3, pasted by
+                                 ; pack_banks) / page 9 (W4, pack_w4) -- and the
+                                 ; bank mapped during the engine's object pass
+                                 ; selects the right table.  One shared FIXED
+                                 ; copy mis-indexed whichever world's gen ran
+                                 ; first (W3 Superballs used W4's rows).
 
 
 ; W3 kit: VM opcode F6 (wait for Mario). The $1500 window is full; FIXED
