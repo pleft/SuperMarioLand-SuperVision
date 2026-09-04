@@ -320,3 +320,74 @@ floor -- its "ground" tiles $53/$55/$57 are below the solid threshold; the
 render is sky and clouds and Mario falls from the spawn). It needs the vehicle
 player path (veh_vec, as kit_mar23's veh_init installs for 2-3) in the World-4
 kit plus its VM enemies ($4D $52 $53 $59, boss $61) -- the next phase.
+
+## 4-3 Sky Pop kit: first light (2026-09-04)
+
+Built as `w43code` (EAS3 + W4KIT + SKY43, `cfg/w43code.cfg`: the W4 layout plus
+`SKYFARM` $A680 size $0980, segment `SKYFAR`) with its own page pair (11
+resident, 12 cold; `pack_w4.py PAIRS`, the SKYFAR slice pasted at $A680 of
+page 11). `src/kit_sky43.inc` = the 2-3 vehicle player copied verbatim
+(veh_init..draw_one, sub_off, sub_step, torp_qblock, veh_clear) plus VM-side
+`torp_scan`/`torp_hit` (missile vs OBJ_W3: HP in w3_hp, morph from w3_torpt,
+clink for $61). Level 11 now loads, the plane holds y 112 at spr_x 42, the
+autoscroll runs 0.5 px/frame, and $53s spawn.
+
+Four bugs between "links" and "flies", each a RULE-0 lesson about copying a
+kit that lived in RAM into one that lives in ROM:
+
+1. **The stub mapped page 9 before jumping to the kit init** (`lda #9` under
+   W4KIT). 4-1/4-2's init is RAM code so it never mattered; 4-3's init ends in
+   `jmp veh_init` = SKYFAR in page 11, and with page 9 mapped that address is
+   $FF fill. Blank screen, frame counter ticking, CPU spinning. `w3stub.s` now
+   maps 11 under SKY43.
+2. **The vehicle's blob-local state was `.byte` in SKYFAR** -- ROM. `vacc`
+   never accumulated, so the autoscroll never started. In 2-3 the same lines
+   sat in the $1500 window (RAM). They are kit-RAM equates now ($1FE7-$1FEB,
+   law E38).
+3. **`w3_cold` was 10** (the W4KIT default): 4-3 read 4-1's columns through
+   the cache, every sky tile came back >= $60 = solid, and the scroll crushed
+   the plane against a wall that was not there. 12 under SKY43.
+4. **The stub's spawn-list index subtracted 9**: 4-3's pair holds one level,
+   so its list is entry 0. Nothing spawned for 900 frames. 11 under SKY43.
+
+Still to do, in order: spawn timing/positions against the GB trace (port
+frame 0 is ~66 frames after the GB's; the first $53 differs), the plane's
+own drawing (draw_subv still has the sub's blade), missiles (torp_fire x
+offset), the six foes + Tatanga + the col+4 morphs, the ending (veh_clear no
+longer arms 2-3's rope rescue; 4-3's clear is the game ending), then the gate
+and the three World-4 routes re-recorded (E34).
+
+## 4-1 playtest, round 2 (2026-09-04): the Superball vs Pionpi
+
+User: "here I am shooting the enemy continuously and it doesnt get killed".
+Two defects, one of them the whole story:
+
+* **w3_hp was aliased AGAIN.** The per-slot Superball hit counter moved from
+  $0128 (on top of w3_fcv, docs/45 above) to $0132 -- which is `do_yflip`
+  (draw_quad clears it on every quad) and `mus_seen` at $0133 (the audio's
+  frame stamp). Slot 0's count was wiped every frame, so an HP-1 Pionpi
+  absorbed every ball forever. Measured with a poked ball on the real core:
+  hit -> hp 1 -> hp 0 on the next frame. w3_hp now lives at $1FF4-$1FFD
+  (kit RAM); the same test shows hp 1 held, and the second ball morphs the
+  Pionpi to $15 (the corpse flies off, 800). The stack page is FULL -- the
+  equate list is in law E39; it was never "clear at $0132".
+* **The ball box was the engine's generic |dx|<10, |dy|<10** around the
+  slot's top-left. The GB (docs/12, docs/38 s12) tests the ball's 4x3 box
+  against the foe's size-byte box: in port coordinates dx in [4-8W, 0], dy in
+  [-3, 8N-1]. A ball at a 16x16 foe's feet (dy 10..15) hit on the GB and
+  passed here; a ball to its right (dx 1..9) hit here and passed on the GB.
+  `w3_ballbox` (kit_w3.inc) is the GB test, FIRST in the W3TAB paste so FIXED
+  can `jsr $B000` (W3BOX) from ball_hits for type 36 in worlds >= 3; 2-2's
+  Mekabon (id 36 too) keeps the generic box. Unit-tested in py65 on the page-9
+  image (9 dx/dy cases at the box edges).
+
+Not reproduced (need the spot): the plant losing its left half as Mario
+approaches, and the "barely playable" flicker/slowdown scene with several
+Pionpi/hazards. Presence sweeps on the col-17 plant (Mario adjacent, jumping,
+scrolling it off the left edge) showed both halves drawn; a warp to the
+1920 checkpoint with 3-4 objects on screen ran 60 logic frames per 60.
+
+Also found while re-homing w3_hp: **himod (the cols>=360 overlay) sat on the
+composer's stash CS_B ($1FA0-$1FDB, object slots 7-9)**. Moved to $1C00-$1C3F
+above the EAS3 kits' window code; the three kit cfgs now cap W2WIN at $1BFF so
+the linker refuses a kit that grows into it.

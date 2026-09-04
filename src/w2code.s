@@ -91,11 +91,16 @@ init:                            ; $1500: bind our vector table
                                  ; The composer is OFF by default anyway: v2
                                  ; trailed on the FIRST Batadon (user-caught,
                                  ; docs/42) -- poke $1FE0=1 to enable
-    ldx #63                      ; clear himod ($1FA0, main.s mod_ptr): the windowed
-:   stz $1FA0,x                  ; broken/used overlay for surface cols >= 360. World-4
+    ldx #63                      ; clear himod (main.s mod_ptr, $1C00): the windowed
+:   stz himod,x                  ; broken/used overlay for surface cols >= 360. World-4
     dex                          ; levels run past tile_mod's 360 cols; a fresh level
     bpl :-                       ; starts with nothing broken there.
+.ifdef SKY43
+    jsr w3_cinval
+    jmp veh_init                 ; 4-3: install the vehicle player (veh_vec)
+.else
     jmp w3_cinval
+.endif
 .else
     rts
 .endif
@@ -362,6 +367,9 @@ w2_updtab:
     .word upd_gift-1, upd_suu-1, w2_nop-1     ; W3 spawns no rock/honen/leaper:
     .word w2_nop-1, w2_nop-1, w2_nop-1, w2_nop-1, w2_nop-1
     .word w3_step-1              ; OBJ_W3: the AI-VM
+.ifdef SKY43
+    .word upd_torp-1, sub_step-1 ; 37 the missile, 38 the plane hull (kit_sky43)
+.endif
 .else
     .word w2_rts-1, upd_suu-1, upd_rock-1
     .word upd_honen-1, upd_leap-1, w2_nop-1, w2_nop-1, upd_wball-1
@@ -398,6 +406,9 @@ w2_drwtab:
     .word draw_gift-1, draw_suu-1, w2_rts-1
     .word w2_nop-1, w2_nop-1, w2_nop-1, w2_nop-1, w2_nop-1
     .word w3_draw-1              ; OBJ_W3
+.ifdef SKY43
+    .word draw_torp-1, draw_subv-1
+.endif
 .else
     .word w2_rts-1, draw_suu-1, draw_rock-1
     .word draw_honen-1, draw_leap-1, w2_nop-1, w2_nop-1, draw_wball-1
@@ -1315,6 +1326,9 @@ draw_msq:
 .include "kit_mar23.inc"         ; the 2-3 Marine Pop kit (vehicle + foes)
 .endif
 .include "kit_sh1.inc"           ; l3_cull, l3_box, upd_suu, upd_rock
+.ifdef SKY43
+.include "kit_sky43.inc"         ; 4-3: the Sky Pop vehicle player (docs/45)
+.endif
 .include "kit_sh2.inc"           ; l3_hurt
 .include "kit_sh3.inc"           ; l3_xoff
 ; (kit_sh4 rising-lift: DEAD in W2 -- $F0 materializes, no object spawns)

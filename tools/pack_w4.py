@@ -24,8 +24,12 @@ W3HDR, W3WIN, W3SPT = 0xB540, 0x8000, 0xB11E   # page-10 layout (docs/45), edge 
                                                 # (76 slots -> $BE00), walk $BE00 (cfg/w4code.cfg)
 W4SCR, W4DL, W4SLICE, W4X, W4DATA = 0xB124, 0xB71B, 0xB93C, 0xBE00, 0x8ABF
 W4X2 = 0x86F8                                   # the stash head follows the window (cfg/w4code.cfg)
-RES, COLD = 9, 10                       # World 4's page pair
-LEVELS = (9, 10, 11)                    # 4-1, 4-2, 4-3
+# World 4 = two page PAIRS with the same layout: (9,10) for 4-1/4-2 with the W4
+# kit, (11,12) for 4-3 with the Sky Pop kit (w43code: the W4 kit + the vehicle
+# player in SKYFAR, resident at $A680 in page 11). docs/45.
+PAIRS = ((9, 10, (9, 10), "w4code", "w4stub"),
+         (11, 12, (11,), "w43code", "w43stub"))
+SKYFAR_AT = 0xA680
 
 def seg(mapfile, name):
     m = re.search(rf"^{name}\s+([0-9A-F]+)\s+\S+\s+([0-9A-F]+)", open(mapfile).read(), re.M)
@@ -35,14 +39,19 @@ def main():
     path = sys.argv[1]
     img = bytearray(open(path, "rb").read())
     assert len(img) == 0x80000, f"{path}: expected the 512K image (run after make_512k)"
-    sym = pb.symbols(open("build/rom.map").read()) if hasattr(pb, "symbols") else {}
+    for RES, COLD, LEVELS, KIT, STUB in PAIRS:
+        pack_pair(img, RES, COLD, LEVELS, KIT, STUB)
+    open(path, "wb").write(bytes(img))
+
+def pack_pair(img, RES, COLD, LEVELS, KIT, STUB):
 
     # ---- the kit image, split at its linked segment boundaries ----------
-    full = open("build/w4code.bin", "rb").read()
-    w2c_sz = seg("build/w4code.map", "W2C")[1]
-    far_at, far_sz = seg("build/w4code.map", "W2FAR")
-    x_at, x_sz = seg("build/w4code.map", "W3X")
-    x2_at, x2_sz = seg("build/w4code.map", "W3X2")
+    full = open(f"build/{KIT}.bin", "rb").read()
+    KITMAP = f"build/{KIT}.map"
+    w2c_sz = seg(KITMAP, "W2C")[1]
+    far_at, far_sz = seg(KITMAP, "W2FAR")
+    x_at, x_sz = seg(KITMAP, "W3X")
+    x2_at, x2_sz = seg(KITMAP, "W3X2")
     win = full[:w2c_sz]
     far = full[w2c_sz:w2c_sz + far_sz]
     xcode = full[w2c_sz + far_sz:w2c_sz + far_sz + x_sz]
@@ -118,13 +127,23 @@ def main():
     ball = open("build/w4ball.bin", "rb").read()            # w3_ballt pin ($B520): the copy
     res[pb.W3BALL - BASE:W3HDR - BASE] = b"\xFF" * (W3HDR - pb.W3BALL)  # above inherited W3's
     res[pb.W3BALL - BASE:pb.W3BALL - BASE + len(ball)] = ball           # rows; paste W4's
-    w3t_at, w3t_sz = seg("build/w4code.map", "W3TAB")      # the per-type tables (docs/45):
+    w3t_at, w3t_sz = seg(KITMAP, "W3TAB")      # the per-type tables (docs/45):
     if w3t_sz:                                              # LAST in the kit .bin, resident
         assert w3t_at == 0xB000, "W3TABM moved -- update pack_w4"   # at $B000 (W3's copy from
-        w3t = full[len(full) - w3t_sz:]                     # bank 1 sits there: replace it)
+        _sf = seg(KITMAP, "SKYFAR")[1]                  # (SKYFAR, if any, ends the .bin)
+        w3t = full[len(full) - _sf - w3t_sz:len(full) - _sf]  # bank 1 sits there: replace it)
         assert w3t_at + w3t_sz <= pb.W3BALL, f"W4 tables run into the ball pin by {w3t_at + w3t_sz - pb.W3BALL}"
         res[w3t_at - BASE:pb.W3BALL - BASE] = b"\xFF" * (pb.W3BALL - w3t_at)
         res[w3t_at - BASE:w3t_at - BASE + w3t_sz] = w3t
+    sf_at, sf_sz = seg(KITMAP, "SKYFAR")             # 4-3: the vehicle player, resident
+    if sf_sz:                                            # (page 11 keeps no L11CODE/L13E)
+        assert sf_at == SKYFAR_AT, "SKYFARM moved -- update pack_w4"
+        w3t_end = 0xB000 + (w3t_sz if w3t_sz else 0)
+        assert sf_at + sf_sz <= 0xB000, f"SKYFAR ({sf_sz}B) runs into the tables at $B000"
+        # SKYFAR precedes W3TAB in the .bin only if listed first; it is listed LAST
+        # after W3TAB in cfg/w43code.cfg, so slice it from the very end
+        sky = full[len(full) - sf_sz:]
+        res[sf_at - BASE:sf_at - BASE + sf_sz] = sky
     # the engine finds a header at W3HDR + (level-6)*24, so slot 3 is level 9's:
     # reserve every slot UP TO the highest level here, or the pipes/blocks that
     # follow land inside the header region and the header write then clobbers
@@ -159,7 +178,7 @@ def main():
             d = open(p + suf, "rb").read()
             pieces[(i, key)] = (place(d), len(d) // per)
     sent_at = place(b"\xFF\xFF")
-    stub = open("build/w4stub.bin", "rb").read()
+    stub = open(f"build/{STUB}.bin", "rb").read()
     stub_at = place(stub)
     bgc_at = W3HDR + len(tail)
     # the SHARED charset (font + common scenery) already sitting in the prefix we
@@ -203,7 +222,6 @@ def main():
     res[0xBE58 - BASE:0xBE58 - BASE + len(far)] = far
     img[RES * STRIDE:RES * STRIDE + BANK] = res
 
-    open(path, "wb").write(bytes(img))
     print(f"pack_w4: levels {list(LEVELS)} -> page {RES} (resident, tail {len(tail)}B) "
           f"+ page {COLD} (cold, data {len(blob)}B, window {len(win)}B, slice {len(slice_)}B)")
 

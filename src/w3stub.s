@@ -35,7 +35,11 @@ W3SPT    = $A7C0                 ; bank 6: 3x .addr spawn lists (pack_banks pin)
 .segment "STUB2"                 ; runs at $1F80 (outside the copy target)
     stz LINK_DAT            ; map the world's COLD bank
 .if .defined(W4KIT)
+.ifdef SKY43
+    lda #12                      ; 4-3 = pages (11 resident, 12 cold), docs/45
+.else
     lda #10                      ; World 4 = pages (9 resident, 10 cold)
+.endif
 .else
     lda #6
 .endif
@@ -63,7 +67,9 @@ W3SPT    = $A7C0                 ; bank 6: 3x .addr spawn lists (pack_banks pin)
     bne @pg
     lda cur_level                ; this level's spawn list (cold bank): the
     sec                          ; header's +16 is a resident $FFFF sentinel
-.if .defined(W4KIT)
+.if .defined(SKY43)
+    sbc #11                      ; 4-3's pair holds ONE level (pack_w4 PAIRS)
+.elseif .defined(W4KIT)
     sbc #9                       ; World 4's cold bank starts at level 9
 .else
     sbc #6
@@ -90,10 +96,14 @@ W3SPT    = $A7C0                 ; bank 6: 3x .addr spawn lists (pack_banks pin)
     bne :-
 .endif
     stz LINK_DAT            ; back to THIS world's resident bank
-.if .defined(W4KIT)
+.if .defined(SKY43)
+    lda #11                 ; 4-3's own pair (pack_w4 PAIRS): the kit init jumps
+.else                       ; into SKYFAR at $A680 of THIS page -- with page 9 mapped
+.if .defined(W4KIT)         ; it landed in $FF fill and hung (blank 4-3, 2026-09-04)
     lda #9
 .else
     lda #1
+.endif
 .endif
     sta LINK_DDR
     lda #$0F

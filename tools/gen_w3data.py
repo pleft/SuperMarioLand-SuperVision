@@ -177,6 +177,11 @@ def main():
         f.write("; $36 are all harmless on every side, and treating them as hurtful\n")
         f.write("; killed Mario when he bounced on a corpse (user-reported).\n")
         f.write("w3_side:\n    .byte " + ",".join(f"${ROM[CONTACT_TBL+5*t+2]:02X}" for t in types) + "\n")
+        if WORLD == 4:
+            # contact column +4 = the TORPEDO/missile result (GB $2aad, State_0D):
+            # 4-3's Sky Pop missiles kill VM types through it (kit_sky43 torp_hit)
+            f.write("; contact table column +4: what a MISSILE turns the type into\n")
+            f.write("w3_torpt:\n    .byte " + ",".join(f"${ROM[CONTACT_TBL+5*t+4]:02X}" for t in types) + "\n")
         # display lists: index by param through a compact table
         f.write(f"W3_NPARAM = {len(params)}\n")
         f.write('.segment "W3X"\n')   # the draw walk executes under BANK 6 (docs/42)

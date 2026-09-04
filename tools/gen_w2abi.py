@@ -21,6 +21,8 @@ NEED = [
     "blit_behind",
     "w3_spawn_at",
     "award_stomp",
+    "w3_hp",                     # kit_sky43: missile hits share the Superball HP counter
+    "himod",                     # w2code kit init clears it (the cols>=360 overlay)
     # the vector block + the level binding
     "ovl_vec", "hdr_buf", "cur_level",
     # object slots (SoA)

@@ -16,7 +16,85 @@
 ;   o_vy  = direction flags       (ffc5): bit0 = moving RIGHT, bit1 = FALLING
 ;   w3_pc[slot] = script PC, w3_ti[slot] = VM type index
 ; ===========================================================================
+; --- the GB's ball-vs-object box (Call_000_200a -> $0aaf; docs/12 + docs/38 s12)
+; The engine's ball_hits used |dx|<10, |dy|<10 around the slot's top-left for
+; every type; the GB tests the ball's tiny box [obj_x, obj_x+4] x [obj_y,
+; obj_y+3] against the foe's size-byte box (phys1: N = &$0F height, W = >>4&7
+; width, bit7 = ball-immune): x [obj_x-8(W-1), obj_x], y [obj_y-8(N-1),
+; obj_y+8). obj = o_x+8 / o_y+24 on BOTH sides (the ball draws at o_y+8 like
+; the 8px kit sprites; a 16px foe's o_y is its top), so in port coordinates:
+;   dx = ball - foe in [4-8W, 0]      dy = ball - foe in [-3, 8N-1]
+; A ball at a 16x16 foe's feet (dy 10..15) hits on the GB and passed here
+; (user: 4-1's Pionpi "doesn't get killed" shooting continuously); a ball at
+; its right side (dx > 0) passed on the GB and hit here.
+; X = the foe slot (ball_hits' oi2), oi = the ball. C=1 overlap. Keeps X.
+.segment "W3TAB"               ; FIRST in the resident tables area = the $B000 pin
+.proc w3_ballbox                 ; FIXED calls (main.s W3BOX): W2C/X2 have no room
+                                 ; for a vector case, and the resident page is
+                                 ; mapped whenever ball_hits runs
+    ldy w3_ti,x
+    lda w3_phys1,y
+    bmi @miss                    ; +$0A bit7: ball-immune
+    sta tmpH2                    ; the size byte
+    ldy oi
+    lda o_xl,y
+    sec
+    sbc o_xl,x
+    sta tmpL3
+    lda o_xh,y
+    sbc o_xh,x
+    beq @pos                     ; dx >= 0: only dx == 0 still overlaps
+    cmp #$FF
+    bne @miss
+    lda tmpL3                    ; dx < 0: need -dx <= 8W-4
+    eor #$FF
+    ina
+    sta tmpL3
+    lda tmpH2
+    lsr
+    lsr
+    lsr
+    lsr
+    and #7                       ; W
+    asl
+    asl
+    asl                          ; 8W
+    sec
+    sbc #4
+    cmp tmpL3
+    bcc @miss                    ; 8W-4 < -dx
+    bra @ychk
+@pos:
+    lda tmpL3
+    bne @miss                    ; dx > 0
+@ychk:
+    ldy oi
+    lda o_y,y
+    sec
+    sbc o_y,x                    ; dy
+    clc
+    adc #3                       ; dy+3: 0..8N+2 overlaps (a far-negative dy wraps high)
+    sta tmpL3
+    lda tmpH2
+    and #$0F
+    asl
+    asl
+    asl                          ; 8N
+    clc
+    adc #2
+    cmp tmpL3
+    bcc @miss                    ; 8N+2 < dy+3
+    sec
+    rts
+@miss:
+    clc
+    rts
+.endproc
+.assert w3_ballbox = $B000, error, "w3_ballbox must sit at the W3BOX pin ($B000)"
+.segment "W2C"
+
 .if .defined(W4KIT)               ; each world's kit carries ITS OWN data set --
+
 .include "w4data.inc"            ; scripts, display lists, tile slice, tables --
 .else                            ; because they live in that world's COLD BANK and
 .include "w3data.inc"            ; its sprite overlay differs (docs/45).
@@ -741,9 +819,11 @@ CXS_BOXOK  = $0153               ; 1 = CXA_* box computed this walk
 ; overlay base (the W3 sheet in bank 6), everything else through chardata --
 ; draw_quad already does exactly that, so GB tile ids ship verbatim.
 w3_cold:                         ; the MAGNUM page holding THIS world's cold data
-.if .defined(W4KIT)
-    .byte 10                     ; World 4 = pages (9 resident, 10 cold)
-.else
+.if .defined(SKY43)
+    .byte 12                     ; 4-3 = pages (11 resident, 12 cold): pack_w4 PAIRS.
+.elseif .defined(W4KIT)          ; (10 here read 4-1's columns into 4-3 -- every sky
+    .byte 10                     ; World 4 = pages (9 resident, 10 cold) -- tile came
+.else                            ; back solid and the scroll crushed the plane)
     .byte 6                      ; (maps, scripts, display lists, tile slice, the
 .endif                           ; bank-resident walk). Each world's kit image
                                  ; carries its own: W3 = 6, W4 = 10 (docs/45).

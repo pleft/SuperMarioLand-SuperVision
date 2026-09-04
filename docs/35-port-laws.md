@@ -500,3 +500,29 @@ load and must be (re)initialised by the kit init, which runs after the loader.
 Never store INTO that range from the stub itself (self-modifying its own tail).
 A grep of rom.map does not show any of this: the kit's RAM equates live in
 kit_w3.inc / w3aux.s -- grep those too (E33 amendment).
+
+### E38. A kit's blob-local state must live in RAM it can write
+2-3's vehicle kept `vfire/vacc/...` as `.byte` lines in its $1500 window
+(RAM). Copied into 4-3's SKYFAR segment -- ROM in page 11 -- the same lines
+assembled fine and were constants: the autoscroll accumulator never moved.
+Any `.byte`/`.res` state in a far segment is a bug; use kit-RAM equates.
+
+### E39. The RAM map is the equate list, not a comment's opinion
+w3_hp was homed twice on "clear" bytes that were not: $0128 (w3_fcv) and
+$0132 (do_yflip/mus_seen); himod was homed on CS_B. Before homing ANY
+variable, grep every equate (`= *\$01..`, `= *\$1[C-F]..`) in src/*.s and
+src/*.inc and w3aux.s. The map as of 2026-09-04:
+  stack page: $0100 w3_ph0, $010A w3_ph1, $0114 w3_fcc, $011E w3_fcy,
+    $0128 w3_fcv, $0132 do_yflip, $0133 mus_seen, $0136-$0153 CXS_*,
+    $0160-$016D AX_*, ... $01C6-$01CF CXA_*; the stack itself seen to $01DF.
+  window: $1500-$1BFF kit code (W2WIN capped), $1C00-$1C3F himod,
+    $1C70-$1CFB CS_A, $1D00-$1F7F HUDSHADOW, $1F80-$1F9F W3CTAG,
+    $1FA0-$1FDB CS_B, $1FE0-3 CX_*, $1FE7-$1FEB 4-3 vehicle state,
+    $1FF0-2 spawn window, $1FF3 quad_top, $1FF4-$1FFD w3_hp, $1FFF W3CMB.
+  (E37 still holds: $1F80-~$1FE9 is the loader during a level LOAD.)
+
+### E40. Superball vs a VM foe uses the GB's box, at the W3BOX pin
+ball_hits' generic |dx|<10,|dy|<10 is not the GB's ball test (docs/12,
+docs/38 s12). For type 36 in worlds >= 3, FIXED calls `w3_ballbox` at $B000
+(first in every EAS3 kit's W3TAB paste; the kit asserts the address). A kit
+that puts anything before it in W3TAB breaks every Superball kill.

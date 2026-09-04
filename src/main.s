@@ -967,9 +967,14 @@ main_loop:
 quad_top = $1FF3                 ; draw_quad's slice band top per world (load_level):
                                  ; $E4 (W3) / $EC (W4). Free RAM above the spawner's
                                  ; $1FF0-2 (E37: past the stub loader's $1F80-$1FE9).
-himod = $1FA0                    ; windowed broken/used overlay for cols >= 360 (64 B,
-                                 ; 32 slots x 2; above W3CTAG $1F80-$1F9F, below W3CMB
-                                 ; $1FFF). Cleared with the W3/W4 kit init (w2code.s).
+himod = $1C00                    ; windowed broken/used overlay for cols >= 360 (64 B,
+                                 ; 32 slots x 2; 3-1 and every World-4 level). It sat
+                                 ; at $1FA0 -- ON TOP OF the composer's stash CS_B
+                                 ; ($1FA0-$1FDB, object slots 7-9; kit_w3.inc), found
+                                 ; 2026-09-04 while re-homing w3_hp. Now in the EAS3
+                                 ; kits' RAM above their window code: the three kit
+                                 ; cfgs cap W2WIN at $1BFF, CS_A starts at $1C70.
+                                 ; Cleared with the W3/W4 kit init (w2code.s).
 ; mod_ptr: map_ptr = &tile_mod[feet_col*2 + (mrow>>3)] ; tmpL = bit mask (1<<(mrow&7)).
 ; The "modified" bitmap is 1 bit per surface (col,row): set = used ?-block / broken brick.
 ; tile_mod holds 360 columns (720 B). Surface columns >= 360 (World 4's levels run
@@ -8221,15 +8226,17 @@ title_tiles:                     ; the used tiles, SV-packed
     beq :+
     cmp #OBJ_SUU                 ; the pipe flower dies to the ball while POKING
     beq :+                       ; OUT (user-proven + wiki; upward variety = 100)
-    cmp #36                      ; OBJ_W3: HP + the contact table's ball column
-    beq :+
+    cmp #36                      ; OBJ_W3: HP + the contact table's ball column,
+    beq @w3                      ; and the GB's own box (kit w3_ballbox via $FD)
     cmp #OBJ_HONEN               ; the W2 leapers die to the ball too
     bcc @nj
     cmp #OBJ_LEAP+1
     bcc :+
 @nj:
     jmp @next
-:   ldy oi                       ; dx = |ball - enemy| (16-bit)
+:
+@box:
+    ldy oi                       ; dx = |ball - enemy| (16-bit)
     lda o_xl,y
     sec
     sbc o_xl,x
@@ -8263,7 +8270,15 @@ title_tiles:                     ; the used tiles, SV-packed
     bcc :+
 @next2b:
     jmp @next
-:   lda #$01                     ; value code: walkers 100
+@w3:                             ; a W3/W4 VM foe: the GB's own box, kept at the
+    lda cur_level                ; W3BOX pin of the resident page (docs/38 s12);
+    cmp #6                       ; 2-2's Mekabon shares id 36 and keeps the
+    bcc @box                     ; generic box (its page holds level data there)
+    jsr W3BOX                    ; C=1 overlap (keeps X = the foe)
+    bcc @next2b
+:
+@hit:
+    lda #$01                     ; value code: walkers 100
     sta tmpH2
     lda o_type,x
     cmp #36
@@ -10535,16 +10550,22 @@ wcyc: .byte 2, 5, 1              ; port pose ids for GB metasprites 1, 2, 3
 ; the score is the phys byte2 class. X = slot. C=0 pass; C=1 ball gone, A =
 ; score code (0 = absorbed). The morph runs in the kit through the gift vector
 ; (A=$FE, tmpL3 = type): FIXED cannot name kit code.
-w3_hp = $0132                    ; per-slot hits taken (stack-page scratch; cleared
-                                 ; by find_free_obj). It sat at $0128 -- ON TOP OF
-                                 ; w3_fcv, the gravity floor-probe verdict, which
-                                 ; w3_ffc7 rewrites EVERY FRAME for any object with
-                                 ; the gravity bit. So a knocked-down Pionpi ($57,
-                                 ; phys0 $02) bumped its own Superball hit count
-                                 ; once per knockdown and died after a few stomps
-                                 ; instead of always getting up (user-reported on
-                                 ; 4-1). $0132-$013B is clear: the next user of the
-                                 ; page is the composer's scratch at $0160.
+w3_hp = $1FF4                    ; per-slot hits taken, 10 bytes ($1FF4-$1FFD, kit
+                                 ; RAM above the spawn window $1FF0-3; cleared by
+                                 ; find_free_obj / w3_spawn_at). HISTORY, because
+                                 ; this byte has now been mis-homed TWICE: it sat
+                                 ; at $0128 ON TOP OF w3_fcv (the gravity verdict,
+                                 ; rewritten every frame -> a knocked-down Pionpi
+                                 ; died after a few stomps), then at $0132 ON TOP
+                                 ; OF do_yflip/mus_seen (draw_quad clears $0132
+                                 ; every draw, the music tick counts in $0133 ->
+                                 ; slot 0's hit count was wiped every frame and
+                                 ; the Pionpi never died to the Superball: user,
+                                 ; 4-1, "shooting continuously"). The stack page
+                                 ; is FULL: $0100-$0133 engine, $0136-$0153 the
+                                 ; composer's scratch, $0160-$01CF its arena, and
+                                 ; the stack itself has been seen down to $01DF.
+
 .proc w3_ball
     ldy #0
 :   lda w3_ballt,y               ; (index, morph type, phys byte2), $FF-terminated
@@ -10587,6 +10608,8 @@ w3_hp = $0132                    ; per-slot hits taken (stack-page scratch; clea
     rts
 @val: .byte $01, $04, $08, $10
 .endproc
+W3BOX    = $B000                 ; kit w3_ballbox: FIRST in the W3TAB paste of every
+                                 ; EAS3 resident page (bank 1, pages 9/11)
 w3_ballt = $B520                 ; per-world (indexed by w3_ti, a per-world VM
                                  ; index): each world's rows sit at this pin in
                                  ; its OWN resident bank -- bank 1 (W3, pasted by
@@ -11794,7 +11817,8 @@ lvl_bank_tab:   .byte 7, 0, 2, 3, 4, 5
                 .byte 1, 1, 1           ; 1-1 now has bank 7 to itself, so bank 1
                 .byte 9                 ; 4-1: World 4's own pair, pages 9 (resident)
                 .byte 9                 ; 4-2: same W4 pair (resident page 9 + cold 10)
-                .byte 9                 ; 4-3: same W4 pair
+                .byte 11                ; 4-3: its own pair (11 resident + 12 cold): the
+                                        ; Sky Pop vehicle kit needs a big far segment
                                         ; + 10 (cold) -- bank 1 and bank 6 are full
                                         ; to 25 and 292 bytes (docs/45)
                                         ; is W3's alone (cold data still in 6)
