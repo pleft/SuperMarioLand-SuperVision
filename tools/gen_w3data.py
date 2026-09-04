@@ -40,11 +40,12 @@ SEEDS = {
     # Piranha it shares with W3, plus $55 upside-down Piranha, $56 Pionpi
     # (stomp -> $57, which morphs BACK to $56: it gets up again), and 4-2/4-3's
     # $4B $4D $52 $53 $54 $59 and the boss $61.
-    # 4-1 only for now: the full World-4 roster (38 types after the closure)
-    # overflows the $1500 window's table space by 35 bytes. 4-2/4-3's types get
-    # added when their levels are built, together with the table relocation
-    # docs/45 describes (the resident bank has ~3.7KB free below the header pin).
-    4: [0x38, 0x39, 0x49, 0x55, 0x56],
+    # 4-1: $38/$39 lifts, $49 Piranha, $55 upside-down Piranha, $56 Pionpi.
+    # 4-2 adds $3A (a lift it shares with W3), $3F (Gao -- a VM type here: the
+    # EAS3 build compiles out the native $3F handler), $54. The 24-type closure
+    # fits the $1500 window with ~79 B to spare (docs/45); 4-3's types ($4D $52
+    # $53 $59 $61) push it over and force the table relocation, added with 4-3.
+    4: [0x38, 0x39, 0x49, 0x55, 0x56, 0x3A, 0x3F, 0x54],
 }
 
 

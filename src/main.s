@@ -4198,7 +4198,7 @@ music_data:
 ; start it FRESH from column 0. Score, coins, lives and Mario's power-ups
 ; (big/superball) PERSIST; everything level-local resets. Levels shipped so far:
 ; 1-1 and 1-2 — the wrap constant grows as more of World 1 comes online.
-NUM_LEVELS = 10                  ; 1-1..3-3 (W3, docs/33) + 4-1 (W4, docs/45)
+NUM_LEVELS = 11                  ; 1-1..3-3 (W3) + 4-1, 4-2 (W4, docs/45)
 W3HDR = $B540                    ; W3 headers: PINNED bank-1 tail (pack_banks
                                  ; asserts 1-1's region ends below, and lays
                                  ; the W3 far/stub/bg-charset after)
@@ -11706,6 +11706,7 @@ lvl_track_tab:  .byte MUS_LEVEL, MUS_LEVEL, MUS_T13   ; GB per-level table $07CE
 lvl_bank_tab:   .byte 7, 0, 2, 3, 4, 5
                 .byte 1, 1, 1           ; 1-1 now has bank 7 to itself, so bank 1
                 .byte 9                 ; 4-1: World 4's own pair, pages 9 (resident)
+                .byte 9                 ; 4-2: same W4 pair (resident page 9 + cold 10)
                                         ; + 10 (cold) -- bank 1 and bank 6 are full
                                         ; to 25 and 292 bytes (docs/45)
                                         ; is W3's alone (cold data still in 6)

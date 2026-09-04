@@ -20,7 +20,7 @@ pb = importlib.util.module_from_spec(_spec); _spec.loader.exec_module(pb)
 BASE, BANK, STRIDE, HDR_SIZE = pb.BASE, pb.BANK, pb.STRIDE, pb.HDR_SIZE
 W3HDR, W3WIN, W3SPT = 0xB540, 0xA800, 0xA7C0
 RES, COLD = 9, 10                       # World 4's page pair
-LEVELS = (9,)                           # 4-1 for now; 4-2/4-3 join here
+LEVELS = (9, 10)                        # 4-1, 4-2; 4-3 joins here
 
 def seg(mapfile, name):
     m = re.search(rf"^{name}\s+([0-9A-F]+)\s+\S+\s+([0-9A-F]+)", open(mapfile).read(), re.M)
@@ -114,18 +114,33 @@ def main():
     # cannot enter" the first bonus room).
     nslots = max(LEVELS) - 6 + 1
     tail = bytearray(b"\x00" * (nslots * HDR_SIZE))
-    t_at = lambda: W3HDR + len(tail)
+    # World 4's levels are 9-11 -> header slots 3-5 (engine pin W3HDR+(lvl-6)*24);
+    # slots 0-2 (World 3's 6-8) never exist in this bank, so their HDR_SIZE bytes
+    # are a free hole. Pack the small pieces (pipes/blocks/sentinel) into it before
+    # spilling past the header region -- that reclaims (min(LEVELS)-6)*24 bytes and
+    # keeps the resident tail under the far kit at $BE50 with 4-2 (and eases 4-3).
+    gap = [0, (min(LEVELS) - 6) * HDR_SIZE]                 # [cursor, end) inside tail
+    def place(d):
+        if not d:
+            return 0
+        if gap[0] + len(d) <= gap[1]:                      # fits the pre-header hole
+            at = W3HDR + gap[0]
+            tail[gap[0]:gap[0] + len(d)] = d
+            gap[0] += len(d)
+        else:                                              # spill after the header region
+            at = W3HDR + len(tail)
+            tail.extend(d)
+        return at
     pieces = {}
     for i, lv in enumerate(LEVELS):
         p = f"build/levels/level_{lv:02d}"
         for key, suf, per in (("pipes", "_pipes.bin", 5), ("blocks", "_blocks.bin", 4)):
             d = open(p + suf, "rb").read()
-            pieces[(i, key)] = (t_at() if d else 0, len(d) // per)
-            tail += d
-    sent_at = t_at(); tail += b"\xFF\xFF"
+            pieces[(i, key)] = (place(d), len(d) // per)
+    sent_at = place(b"\xFF\xFF")
     stub = open("build/w4stub.bin", "rb").read()
-    stub_at = t_at(); tail += stub
-    bgc_at = t_at()
+    stub_at = W3HDR + len(tail); tail += stub
+    bgc_at = W3HDR + len(tail)
     # the SHARED charset (font + common scenery) already sitting in the prefix we
     # copied, with World 4's overlay over $31-$6F -- exactly what pack_w3 does for
     # World 3. (Building it from w4_bg_9000.svt instead rendered the whole level
