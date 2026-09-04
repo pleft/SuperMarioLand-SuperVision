@@ -413,3 +413,19 @@ shifted path carries no behind case. Like-for-like on the same scripts: 80 -> 0
 and 80 -> 15 byte-half frames, the 15 being the metric splitting a sprite that
 sits 3px into its byte (pixel dumps show it intact). svgold 9/9 identical,
 battery31 all pass.
+
+### "Barely playable, heavy flickering and slowdown" (2026-09-04, the pillar stretch x 1900-2200)
+
+Reproduced by warping to the 1920 checkpoint and fighting through the $55
+pillars with the Superball (up to 9 live objects: hazards, debris, stones, a
+platform, the ball). Two metrics on the real core, on-screen unfrozen frames
+only: logic stalls (timer_sub unchanged across a display frame -- the 8-9%
+baseline is the 61 Hz display against the NMI, it is flat from 0 to 9 objects)
+and mover deferrals (dirty_bud wrapped below zero = a moving sprite kept last
+frame's image). With World 3's budget of 2 movers a frame the scene deferred in
+34% of frames (the judder the user calls flicker); 4 -> 2.7%, 6 -> 0.6%, with no
+stall increase at any of them. The 4-1 route replay agrees (63 -> 54 -> 2
+deferral frames, stalls 2% flat). load_level now gives World 4 (levels 9+) a
+budget of 6; World 3 keeps 2 (its 40x24 lifts overran at 3, docs/44). svgold
+9/9 identical, battery31 all pass. The lever's ceiling is the frame: re-measure
+if a later 4-x scene shows stalls above the baseline.

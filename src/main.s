@@ -9901,10 +9901,16 @@ spawn_base = $1FF0
     cpy #6                       ; rows, Tokotokos, Ganchans) and 3 redraws/frame
     bcc :+                       ; blew the NMI budget in the busy stretches --
     lda #2                       ; 2 movers/frame + the rotated origin = each
-:   sta bud_base                 ; mover at worst 1 frame late (task #30). (3 on
-                                 ; 3-3 was tried for its lift trios: the frame
-                                 ; overran and the lifts went UNDRAWN 28-40% of
-                                 ; frames -- user: "flicker like hell". docs/44)
+    cpy #9                       ; mover at worst 1 frame late (task #30). (3 on
+    bcc :+                       ; 3-3 was tried for its lift trios: the frame
+    lda #6                       ; overran and the lifts went UNDRAWN 28-40% of
+:   sta bud_base                 ; frames -- user: "flicker like hell". docs/44)
+                                 ; World 4 (9+): its movers are 16x16, not 3-3's
+                                 ; 40x24 lifts. Measured on the real core in 4-1's
+                                 ; pillar stretch (user: "barely playable, heavy
+                                 ; flickering"): 2 movers deferred a redraw in 34%
+                                 ; of frames, 6 in 0.6%, logic stalls flat at the
+                                 ; 8-9% display/NMI baseline either way (docs/45).
     stz ending13                 ; a fresh level never inherits ending state
     stz e_phase
     stz e_own
