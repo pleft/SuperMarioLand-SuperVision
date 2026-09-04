@@ -256,3 +256,11 @@ tail (its jmp $1500 operand) and the stub's stores self-modified it: 4-2 froze
 at start. The composer's CX_* ($1FE0-$1FE3) and stash B ($1FA0-$1FDB, = himod,
 harmless only while CX_BUILD=0) sit in the same transient region and are
 re-cleared by the kit init, which runs after the loader.
+
+**$4B (moai missile) never culled off-screen right -- OPEN.** On the 4-2 route
+capture a $4B (the $49 pillar's missile, F3 from $4A) flew right at 1px/frame
+from x3320 to x4712+ (slot 9, ~1400 frames) without ever being freed: the port
+culls kit objects only when they fall below y 168. A horizontally escaping
+object keeps a slot and its per-frame cost for the rest of the level. Check the
+GB's off-screen rule (it frees slots that leave the 176px window) and add the
+same to w3_ffc7/w3_step before 4-3 (which has more shooters).
