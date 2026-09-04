@@ -217,6 +217,9 @@ CXS_BOXOK  = $0153               ; 1 = CXA_* box computed this walk
     sta w3_ph1,x
     lda #$FF                     ; poison the gravity cache: a recycled slot must
     sta w3_fcc,x                 ; not inherit the last occupant's floor verdict
+    stz w3_hp,x                  ; the GB re-inits the slot's HP byte on a morph
+                                 ; (Call_000_2cbb): the $60 after Tatanga starts
+                                 ; at its own 24 hits, not at Tatanga's 19th
     stz w3_pc,x                  ; across F3 exactly like the param ffc6. Zeroing
     stz o_tmr,x                  ; it turned every faced missile LEFT (user:
     stz o_hp,x                   ; "always travelling left no matter where Mario
@@ -714,6 +717,18 @@ CXS_BOXOK  = $0153               ; 1 = CXA_* box computed this walk
     dex
     bpl @scan
 @spawn:
+.ifdef SKY43                     ; the GB flies its 4 projectiles OUTSIDE the 10-slot
+    ldy #9                       ; table ($c218..$c248, State_0D); the port's missiles
+    ldx #0                       ; are object slots. After Tatanga the $60's fireworks
+:   lda o_type,y                 ; (F1 $5C, 4 slots a cycle) filled the pool and no
+    bne :+                       ; missile could spawn -- the $60 (24 hits = the level
+    inx                          ; clear) became unkillable. Keep 3 slots free for the
+:   dey                          ; missiles: a child that would leave fewer is skipped
+    bpl :--                      ; (fewer simultaneous fireworks; docs/45).
+    cpx #4
+    bcc @none
+    ldx oi
+.endif
     jsr w3_spawn_at              ; engine: a slot at the parent's exact position
     bcs @none
     jsr w3_morph                 ; kit: the type lookup + a fresh VM context

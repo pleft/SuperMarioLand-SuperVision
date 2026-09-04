@@ -734,45 +734,18 @@ sq_t:  .byte SUB_T, SUB_T+1, SUB_T+2, SUB_T+3
 ; $1a/$61/$60) and, at 0, the col+4 morph from w3_torpt (resident W3TAB) with
 ; the phys-byte2 score class -- the ball rule of main.s w3_ball, column +4.
 .segment "SKYFAR"
-.proc torp_scan
-    ldy #9
-@loop:
-    lda o_type,y
-    cmp #OBJ_W3
-    bne @next
-    lda o_xl,y                   ; |dx| < 12
-    sec
-    sbc o_xl,x
-    sta tmpH2
-    lda o_xh,y
-    sbc o_xh,x
-    beq :+
-    cmp #$FF
-    bne @next
-:   lda tmpH2
-    clc
-    adc #11
-    cmp #23
-    bcs @next
-    lda o_y,x                    ; the missile's VISUAL y (o_y is top-8)
-    clc
-    adc #8
-    sec
-    sbc o_y,y
-    clc
-    adc #14                      ; foe box: top-14 .. top + height
-    sta tmpH2
-    phx
-    ldx w3_ti,y
-    lda w3_phys1,x               ; phys byte1 low nibble = height in 8px units
-    plx
-    and #$0F
-    asl
-    asl
-    asl
-    clc
-    adc #18
-    cmp tmpH2
+.proc torp_scan                  ; X = the missile slot (= oi). The GB's state-$0D
+    ldy #9                       ; projectile hit ($2052 -> $200a -> $0aaf) uses the
+@loop:                           ; SAME 4x3 box vs the foe's size-byte box as the
+    lda o_type,y                 ; Superball: w3_ballbox (kit_w3, the W3BOX pin), with
+    cmp #OBJ_W3                  ; X = the foe and oi = the projectile. The hand-rolled
+    bne @next                    ; |dx|<12 box here missed the left half of the 24px
+    phy                          ; Tatanga and hit past its right edge: 19 hits took
+    tya                          ; 3200 frames of autofire against the GB's 1550.
+    tax
+    jsr w3_ballbox               ; C=1 overlap (keeps X)
+    ply
+    ldx oi
     bcc @next
     jsr torp_hit                 ; Y = the victim
     ldx oi
@@ -794,13 +767,23 @@ sq_t:  .byte SUB_T, SUB_T+1, SUB_T+2, SUB_T+3
     lda w3_hp,y                  ; absorbed: one more hit taken
     ina
     sta w3_hp,y
-    lda w3_typetab,x
-    cmp #$61                     ; only the boss clinks
-    bne @rts
+    lda w3_typetab,x             ; GB $2aad: an absorbed hit clinks for $1A/$61
+    cmp #$61                     ; ($dff0 = 1) and rings $dff8 = 1 for the $60
+    bne :+
     lda #SFX_DFF0_01
     jmp sfx_play
+:   cmp #$60
+    bne @rts
+    lda #SFX_DFF8_01
+    jmp sfx_play
 @kill:
-    lda w3_torpt,x               ; column +4: the type to become ($00 = none)
+    lda w3_typetab,x             ; GB $2ad9: the $60's death (24 hits after
+    cmp #$60                     ; Tatanga's 19) sets d007 = the LEVEL CLEAR --
+    bne :+                       ; 4-3's ending; the col+4 morph ($4F) follows
+    phx
+    jsr veh_clear
+    plx
+:   lda w3_torpt,x               ; column +4: the type to become ($00 = none)
     beq @rts
     sta tmpL3
     lda w3_phys2,x               ; score class = byte2 >> 6 -> 100/400/800/5000

@@ -576,3 +576,34 @@ svgold hash changes on purpose, and its recorded route must be re-checked
 * Overrun: with three missiles in flight the port skips about every third
   logic frame (profile: sprite blit 22%, margin blank 10%, restore_bg 10%,
   map reads 19%). 4-3 gets the congestion survey once its objects are done.
+
+### 4-3 against the GB, round 3: the boss and the ending (2026-09-05)
+
+* **Missile hits use the GB box** (torp_scan -> w3_ballbox, the Superball's
+  routine: state $0D's projectile hit is the same $200a/$0aaf test). The
+  hand-rolled |dx|<12 missed the left half of the 24px Tatanga.
+* **Tatanga**: 19 hits (phys2 $D3), clink $dff0=1 per absorbed hit, 5000 on
+  the kill, then the GB chain $61 -> $62 (33 f) -> $5B (395 f, the defeat
+  jingle) -> $60, which hovers at the plane's height (F0 $90/$91 tracking)
+  and launches fireworks ($5C -> $5D/$5E/$5F) forever.
+* **The ending trigger** (GB $2ad9): the $60 takes 24 more hits (clink
+  $dff8=1); when its HP reaches 0 the projectile handler writes d007 = the
+  LEVEL-CLEAR flag, then the col+4 morph to $4F. Port: torp_hit calls
+  veh_clear on the $60's kill. Two bugs stood in the way: (1) w3_hp was not
+  reset on a morph -- the GB re-inits the slot's HP byte (Call_000_2cbb) --
+  so the $60 inherited Tatanga's 18-19 hits; (2) the GB flies its 4
+  projectiles OUTSIDE the 10-slot table ($c218..$c248); the port's missiles
+  are object slots, and the fireworks (4 slots a cycle) filled the pool so no
+  missile could spawn. w3_child now skips a child that would leave fewer than
+  3 free slots (SKY43 only; fewer simultaneous fireworks -- a documented
+  compromise). Test (boss HP poked to 18, autofire, plane placed in the
+  arena): $60 dies after 24 hits, goal_phase 1 -> 4, then next_level.
+* **OPEN -- the game ending**: after 4-3's clear the port wraps to 1-1
+  (cur_level 0). The GB's Call_000_1b45 leads into the Daisy ending; it has
+  to be captured and built (a separate piece of work).
+* **Also open**: Tatanga's turning points (GB top y 57 / left x 17 vs the
+  port's 47 / 7) are NOT tile bounces -- the arena's rows 2..12 are sky, its
+  ceiling/floor are level rows 0-1/14-15 -- so another rule sets them (the
+  boss-specific bank-3 code?); and the arena overruns ~1/3 of frames with
+  three missiles up (render-bound), which stretches every VM timing there
+  (the $62's 33 frames took 67).
