@@ -38,6 +38,7 @@ vlastfc = $1FE8                  ; frame_count as of the last scroll decision
 vacc    = $1FE9                  ; elapsed-frame accumulator (2 frames = 1px)
 vhome   = $1FEA                  ; pending "take the plane's own start x"
 subdead = $1FEB                  ; 1 = the hull died with Mario
+vstep   = $1FEC                  ; 1 = the camera stepped THIS frame (missiles ride it)
                                  ; ($1FE7-$1FEB: inside the loader's footprint
                                  ; during a LOAD only (E37) -- veh_init writes
                                  ; them after it; w3_hp owns $1FF4-$1FFD)
@@ -104,8 +105,11 @@ subdead = $1FEB                  ; 1 = the hull died with Mario
     ; (the boss arrived 211 frames late; the first school latched its chase
     ; direction off the wrong Mario position).
     jsr veh_scrolls              ; C=1 -> this frame gets a scroll step (W2FAR)
+    stz vstep
     bcc @move
 @scroll:
+    inc vstep                    ; the missiles are SCREEN-space on the GB (2px/f
+                                 ; on screen while the level scrolls under them)
     inc cam_x
     bne :+
     inc cam_x+1
@@ -500,17 +504,16 @@ subdead = $1FEB                  ; 1 = the hull died with Mario
 .endproc
 
 .segment "SKYFAR"
-.proc draw_subv                  ; the sub quad: small $70-$73 / BIG $75-$78
-    stz do_flip                  ; (a mushroom re-skins the hull -- OAM-captured
-    stz tmpL2                    ; after the c203-bit4 lesson)
-    lda mario_big
+.proc draw_subv                  ; the PLANE quad: $63 $64 / $65 $66|$67 (GB OAM,
+    stz do_flip                  ; 4-3 f5..f64): the BR quad is the propeller and
+    stz tmpL2                    ; alternates $66/$67 every 4 frames (captured
+                                 ; 6667777666677776666...). BIG form: not yet
+                                 ; captured on the GB (needs the level's mushroom);
+                                 ; drawn with the small tiles until it is (docs/45).
+    lda frame_count
+    and #4
     beq :+
-    lda #5                       ; the big hull tile base offset
-    sta tmpL2
-:   lda frame_count              ; the BL quad is the propeller: +2 more tiles
-    and #4                       ; on blade-B frames (holds for BOTH hull sets:
-    beq :+                       ; $72/$74 small, $77/$79 big -- OAM-captured)
-    lda #2
+    lda #1
 :   sta tmpH2
     ldy #0
 @q: phy
@@ -526,7 +529,7 @@ subdead = $1FEB                  ; 1 = the hull died with Mario
     lda sq_t,y
     clc
     adc tmpL2
-    cpy #2
+    cpy #3
     bne :+
     clc
     adc tmpH2                    ; the blade swap (REPLACES the tile)
@@ -561,9 +564,11 @@ sq_t:  .byte SUB_T, SUB_T+1, SUB_T+2, SUB_T+3
     jsr obj_alloc_typed
     bcs @full
     stz o_pdr,x
-    lda spr_x
-    clc
-    adc #2                       ; nose at (spr_x+2, spr_y+4): GB OAM, tile $7A,
+    lda spr_x                    ; the missile shows at (hull left + 9, hull top + 4) on
+    clc                          ; its first frame and moves 2/f from there (GB OAM 4-3:
+                                 ; 44,46,48.. with the hull at 35). The port's upd_torp
+                                 ; runs in the launch frame too, so spawn 2px short of
+                                 ; that: hull left = spr_x - 7 -> spr_x + 0.
     adc cam_x
     sta o_xl,x
     lda cam_x+1
@@ -583,11 +588,12 @@ sq_t:  .byte SUB_T, SUB_T+1, SUB_T+2, SUB_T+3
 .endproc
 
 .proc upd_torp
-    inc o_xl,x                   ; +2px/f, straight right
-    bne :+
-    inc o_xh,x
-:   inc o_xl,x
-    bne :+
+    lda o_xl,x                   ; +2px/f ON SCREEN (GB OAM: 44,46,48,... per frame
+    clc                          ; while the camera advances 0.5/f), so the world
+    adc #2                       ; step is 2 + this frame's camera step (vstep)
+    adc vstep
+    sta o_xl,x
+    bcc :+
     inc o_xh,x
 :   lda o_xl,x                   ; off the right edge (GB kills at OAM $A9)
     sec

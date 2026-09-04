@@ -525,3 +525,25 @@ took it from 12.5% to 1.9%. pack_banks.py now applies tools/thin.json to the
 World 1-3 lists too (tools/thin.py is the shared reader). Consequence: 3-2's
 svgold hash changes on purpose, and its recorded route must be re-checked
 (log: docs/routes/thin_log_w3_2026-09-04.txt).
+
+### 4-3 against the GB, round 1 (2026-09-05)
+
+* **Spawner**: GB slot activations (D100 table) fire at `c0ab*16 = fire_cam +
+  208` for every entry; port frames of the same activations are a constant 111
+  frames apart from the GB trace's (its warp begins ~190 frames into the
+  level), so the spawn timing is right as is.
+* **$53's flight**: the GB flies straight at 1.5 px/f (screen) until it is
+  within 32 px of the plane, then dives and climbs back; the port dived after
+  14 frames. Cause: opcode `FB nn` (restart the script unless objx - c202 < nn)
+  was one of the "unused" ops the VM skipped. Implemented from the interpreter
+  ($2839), with `FC nn` (teleport, $62) -- docs/34 has the table. Re-traced:
+  the dive now starts at the GB's x within 2-4 px.
+* **The plane**: GB OAM quad $63 $64 / $65 $66|$67, the BR tile alternating
+  every 4 frames (6667777666677776666...); drawn so. Its BIG form is not
+  captured yet (needs the level's mushroom): small tiles until then.
+* **The missile**: GB OAM tile $6E appears at (hull left + 9, hull top + 4)
+  and moves 2 px/f ON SCREEN while the level scrolls under it; the port's
+  copy of the sub's torpedo moved 2 px/f in world space (1.5 on screen) from
+  hull + 16. Now screen-space (+2 + this frame's camera step, `vstep`) from
+  hull + 9: 44,46,48.. in the same frames as the GB. (2-3's torpedo has the
+  same world-space motion; left as accepted.)
