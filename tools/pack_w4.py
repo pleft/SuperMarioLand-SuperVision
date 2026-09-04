@@ -43,7 +43,7 @@ def main():
     xcode = full[w2c_sz + far_sz:w2c_sz + far_sz + x_sz]
     x2code = full[w2c_sz + far_sz + x_sz:w2c_sz + far_sz + x_sz + x2_sz]
     assert len(win) <= 0x800, f"W4 window kit is {len(win)}B, the $1500 window is $800"
-    assert far_at == 0xBE50 and x_at == 0xBC00 and (not x2_sz or x2_at == 0x8000), \
+    assert far_at == 0xBE58 and x_at == 0xBC00 and (not x2_sz or x2_at == 0x8000), \
         "W4 kit pins moved -- update pack_w4"
 
     # ---- COLD page: maps/rooms/spawns + the kit's pinned blobs ----------
@@ -176,10 +176,10 @@ def main():
         slot = lv - 6                                        # the engine's pin: W3HDR + (lvl-6)*24
         assert (slot + 1) * HDR_SIZE <= nslots * HDR_SIZE, "header slot outside the reserved area"
         tail[slot * HDR_SIZE:(slot + 1) * HDR_SIZE] = hdr
-    assert W3HDR + len(tail) <= 0xBE50, \
-        f"W4 resident tail runs into the far kit by {W3HDR + len(tail) - 0xBE50} bytes"
+    assert W3HDR + len(tail) <= 0xBE58, \
+        f"W4 resident tail runs into the far kit by {W3HDR + len(tail) - 0xBE58} bytes"
     res[W3HDR - BASE:W3HDR - BASE + len(tail)] = tail
-    res[0xBE50 - BASE:0xBE50 - BASE + len(far)] = far
+    res[0xBE58 - BASE:0xBE58 - BASE + len(far)] = far
     img[RES * STRIDE:RES * STRIDE + BANK] = res
 
     open(path, "wb").write(bytes(img))

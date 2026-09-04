@@ -2141,27 +2141,8 @@ no:
     ror fb_col0
     lsr fb_col0+1
     ror fb_col0
-    stz spawn_idx                ; fast-forward the spawn list to the checkpoint (else all
-@sff:                            ; earlier entries would fire at once on the first frame)
-    lda spawn_idx
-    asl
-    asl
-    clc
-    adc spawn_idx                ; entry offset = idx*5 (list <= 51 entries)
-    tay
-    lda spawn_tab+1,y
-    cmp #$FF
-    beq @sffd
-    cmp cam_x+1
-    bcc @sfn
-    bne @sffd
-    lda spawn_tab,y
-    cmp cam_x
-    bcs @sffd
-@sfn:
-    inc spawn_idx
-    bra @sff
-@sffd:
+    jsr spawn_seek               ; rebuild the spawn window from the header and
+                                 ; fast-forward it to the checkpoint (prefix)
     stz scroll_s
     jsr apply_view               ; ring view at scroll_s=0, regs + latches now
     stz jump_state
@@ -4221,27 +4202,7 @@ W3HDR = $B540                    ; W3 headers: PINNED bank-1 tail (pack_banks
     stz cam_x+1                  ; (checkpoints are a DEATH mechanic — do_respawn's)
     stz fb_col0                  ; fb_col0 = cam/8 = 0 (cam was just zeroed)
     stz fb_col0+1
-    stz spawn_idx                ; fast-forward the spawn list to the checkpoint (else all
-@sff:                            ; earlier entries would fire at once on the first frame)
-    lda spawn_idx
-    asl
-    asl
-    clc
-    adc spawn_idx                ; entry offset = idx*5 (list <= 51 entries)
-    tay
-    lda spawn_tab+1,y
-    cmp #$FF
-    beq @sffd
-    cmp cam_x+1
-    bcc @sfn
-    bne @sffd
-    lda spawn_tab,y
-    cmp cam_x
-    bcs @sffd
-@sfn:
-    inc spawn_idx
-    bra @sff
-@sffd:
+    jsr spawn_seek               ; rebuild the spawn window + fast-forward (prefix)
     stz scroll_s
     jsr apply_view               ; ring view at scroll_s=0, regs + latches now
     stz jump_state
@@ -6431,10 +6392,14 @@ riding_this:                     ; Z=1 if Mario rides slot oi
 ; screen's right edge (world x = cam + 192, the streaming margin), at the entry's o_y.
 .proc spawn_check
     lda spawn_idx
-    asl
+    cmp #51                      ; the 8-bit Y = idx*5 caps the LIVE table at 51
+    bcc :+                       ; entries: slide the window (spawn_shift, prefix)
+    jsr spawn_shift              ; -> idx 0 again, spawn_tab[0] = the next entry
+    lda spawn_idx
+:   asl
     asl
     clc
-    adc spawn_idx                ; entry offset = idx*5 (list <= 51 entries)
+    adc spawn_idx                ; entry offset = idx*5 (idx <= 50 here)
     tay
     lda spawn_tab+1,y          ; fire_cam hi ($FF = end of table)
     cmp #$FF
@@ -6534,6 +6499,34 @@ riding_this:                     ; Z=1 if Mario rides slot oi
     inc spawn_idx                ; frame (spawn x is fire-based so it still lands
     jmp spawn_check              ; right; the GB dodges this with 10 slots). Several
 @done:                           ; entries can share a fire column.
+    rts
+.endproc
+
+; cold_copy: spawn_tab <- 384 bytes at (lvl_ptr) read with page A mapped, then
+; cur_bank back. FIXED on purpose: the W3/W4 lists live in the COLD page, under
+; which the LEVELS prefix (spawn_reload) is not mapped. Scan-safe: set_bank
+; writes $2021 only (MAGNUM law D1).
+.proc cold_copy
+    jsr @map                     ; NOT set_bank: that lives in the LEVELS prefix,
+    ldy #0                       ; which vanishes under the cold page (3-1 froze
+                                 ; at the first respawn: the rts came back into
+                                 ; cold data). Inline, like the kit's w3_bank.
+:   lda (lvl_ptr),y
+    sta spawn_tab,y
+    iny
+    bne :-
+    inc lvl_ptr+1
+:   lda (lvl_ptr),y              ; second page (a short list ends at its own
+    sta spawn_tab+256,y          ; $FFFF sentinel inside the data)
+    iny
+    cpy #128
+    bne :-
+    lda cur_bank                 ; back to the level's bank (falls into @map)
+@map:                            ; A = MAGNUM page (set_bank's dance, FIXED-resident)
+    stz LINK_DATA
+    sta LINK_DDR
+    lda #$0F
+    sta LCD_DRIVE
     rts
 .endproc
 
@@ -9788,6 +9781,96 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
 .endproc
 
 ; ---------------------------------------------------------------------------
+; The spawn list window. spawn_check and its handlers index the RAM copy with
+; an 8-bit Y = entry*5, which caps the LIVE table at 51 entries -- and World
+; 4's lists are 58-68 long: on 4-2 the $3A lift was entry 52, its offset
+; wrapped to 4, the spawner read garbage and JAMMED for the rest of the level
+; (user-visible: no lift, nothing after it). Entries fire in order, so the RAM
+; copy is a WINDOW onto the ROM list: spawn_base = the ROM entry at spawn_tab[0].
+; spawn_shift slides it forward 51 entries once spawn_idx reaches 51 (the
+; consumed entries are never needed again); spawn_seek rebuilds it from the
+; header at every respawn/level start and fast-forwards past the checkpoint.
+; Both live here in the prefix (the level bank is mapped at every caller) --
+; FIXED had one byte left. spawn_base sits in the free RAM above himod.
+.segment "LEVELS"
+spawn_base = $1FF0
+.proc spawn_reload               ; spawn_tab <- ROM entries spawn_base..; idx = 0
+    stz spawn_idx
+    lda cur_level
+    cmp #6
+    bcc @flat
+    lda $1FF2                    ; kit levels (W3/W4): the header's +16 is only a
+    beq @rts                     ; resident $FFFF sentinel; the list is in the COLD
+    sta lvl_ptr+1                ; page and the stub saved its address at $1FF1/6
+    lda $1FF1                    ; (zero until the stub has run: load_level's own
+    sta lvl_ptr                  ; call then does nothing and the stub copies)
+    jsr @base
+    lda #6                       ; cold page: World 3 = 6, World 4 = 10 (docs/45)
+    ldx cur_level
+    cpx #9
+    bcc :+
+    lda #10
+:   jmp cold_copy                ; FIXED: this prefix is NOT mapped under the cold page
+@flat:
+    lda hdr_buf+16               ; W1/W2: the list sits in the level bank itself
+    sta lvl_ptr
+    lda hdr_buf+17
+    sta lvl_ptr+1
+    jsr @base
+    lda cur_bank
+    jmp cold_copy                ; (maps cur_bank, which is where the list is)
+@base:                           ; lvl_ptr += spawn_base * 5
+    ldx spawn_base
+    beq @rts
+:   lda lvl_ptr
+    clc
+    adc #5
+    sta lvl_ptr
+    bcc :+
+    inc lvl_ptr+1
+:   dex
+    bne :--
+@rts:
+    rts
+.endproc
+.proc spawn_shift                ; spawn_idx == 51: slide the window forward
+    lda spawn_base
+    clc
+    adc #51
+    sta spawn_base
+    bra spawn_reload
+.endproc
+.proc spawn_seek                 ; respawn / level start: window from entry 0,
+    stz spawn_base               ; then skip every entry whose fire_cam < cam
+    jsr spawn_reload             ; (else they would all fire at once)
+@sff:
+    lda spawn_idx
+    cmp #51
+    bcc :+
+    jsr spawn_shift
+:   lda spawn_idx
+    asl
+    asl
+    clc
+    adc spawn_idx                ; entry offset = idx*5 (< 256: idx <= 50 here)
+    tay
+    lda spawn_tab+1,y
+    cmp #$FF
+    beq @done
+    cmp cam_x+1
+    bcc @sfn
+    bne @done
+    lda spawn_tab,y
+    cmp cam_x
+    bcs @done
+@sfn:
+    inc spawn_idx
+    bra @sff
+@done:
+    rts
+.endproc
+
+; ---------------------------------------------------------------------------
 ; load_level: bind the engine's per-level pointers/limits to the CURRENT bank's
 ; level_hdr (leveldata.s), and copy the small tables (rooms/pipes/blocks/spawns)
 ; to RAM so the rest of the engine keeps absolute indexed addressing. Lives in
@@ -9929,22 +10012,11 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     cpy #0
     bne :-
 @noblocks:
-    lda hdr_buf+16             ; spawn list -> RAM (256 bytes; the $FFFF sentinel
-    sta lvl_ptr                  ; inside the data ends the live part)
-    lda hdr_buf+17
-    sta lvl_ptr+1
-    ldy #0
-:   lda (lvl_ptr),y
-    sta spawn_tab,y
-    iny
-    bne :-
-    inc lvl_ptr+1
-:   lda (lvl_ptr),y              ; second page (spawn_tab is 384 bytes)
-    sta spawn_tab+256,y
-    iny
-    cpy #128
-    bne :-
-    stz water_on
+    stz $1FF1                    ; no cold list address yet (the kit stub sets it)
+    stz $1FF2
+    stz spawn_base               ; spawn list -> RAM: the window from entry 0
+    jsr spawn_reload             ; (spawn_reload above; 384 bytes, $FFFF-ended;
+    stz water_on                 ;  a no-op on kit levels until the stub has run)
     lda cur_level                ; 1-3 (bank 2): copy the L3 overlay to RAM + enable
     cmp #2                       ; the water shimmer (GB LevelParamTable / $d014).
     bne @nol3                    ; The packer stores the blob at the TITLE0 address
@@ -10690,7 +10762,9 @@ w3_fcv = $0128                ;   probing through the banked reader EVERY
 
 ; build_shtab: the sub-pixel shift/mask tables — for every byte b and subx k:
 ; the 16-bit b<<(2k) split lo/hi, and the same of b's transparency mask (boot).
-.segment "LEVELS"
+.segment "BOOT6"                 ; one-shot boot code: runs from the $1500 window
+                                 ; (still resident at the boot call sites), so it
+                                 ; no longer costs the LEVELS prefix in every bank
 .proc build_shtab
     ldx #0
 @b:
@@ -10744,6 +10818,7 @@ w3_fcv = $0128                ;   probing through the banked reader EVERY
     bne @mt
     rts
 .endproc
+.segment "LEVELS"
 
 ; find_free_evict: find_free_obj, but a FULL pool steals a cosmetic slot
 ; (popup / debris shard / squash corpse / flip corpse) instead of failing.
@@ -10869,6 +10944,7 @@ w3_fcv = $0128                ;   probing through the banked reader EVERY
 .endproc
 
 ; build_row48: fill the dy*48 tables (boot).
+.segment "BOOT6"                 ; (boot-only, like build_shtab above)
 .proc build_row48
     stz tmpL
     stz tmpH

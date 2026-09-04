@@ -67,8 +67,10 @@ W3SPT    = $A7C0                 ; bank 6: 3x .addr spawn lists (pack_banks pin)
     tax
     lda W3SPT,x
     sta tmpL2
-    lda W3SPT+1,x
-    sta tmpH2
+    sta $1FF1                    ; keep the cold-bank list address for the engine's
+    lda W3SPT+1,x                ; spawn WINDOW (main.s spawn_reload): a respawn or
+    sta tmpH2                    ; a window shift past entry 51 re-copies from here
+    sta $1FF2
     ldy #0
 :   lda (tmpL2),y
     sta spawn_tab,y

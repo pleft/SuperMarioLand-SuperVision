@@ -482,3 +482,21 @@ tables at one pin ($B520) in each world's own resident bank; the mapped bank
 selects the table, w3_ball itself is unchanged, and the packers byte-assert
 the paste. When a generator runs once per world, EVERY file it writes must be
 world-suffixed -- grep for unsuffixed open() calls in any new generator.
+
+## E36: a FIXED routine that maps a non-prefix page must not call prefix code
+
+set_bank is in the LEVELS prefix. cold_copy (FIXED) called it to map the cold
+page: the rts returned into cold data (the prefix is not mapped there) and 3-1
+froze at its first respawn. Anything that runs under bank 6 / page 10 must be
+FIXED- or RAM-resident and must do the $2020/$2021/$2026 dance inline, as the
+kit's w3_bank does.
+
+## E37: "free RAM" at $1F80-$1FEF is only free AFTER the kit stub has run
+
+The W3/W4 stub relocates its loader to $1F80 and executes it there; its image
+reaches ~$1FE9 (and grows with every stub edit). himod ($1FA0), the composer's
+CX_*/CS_B and any new variable placed there are clobbered at every kit level
+load and must be (re)initialised by the kit init, which runs after the loader.
+Never store INTO that range from the stub itself (self-modifying its own tail).
+A grep of rom.map does not show any of this: the kit's RAM equates live in
+kit_w3.inc / w3aux.s -- grep those too (E33 amendment).

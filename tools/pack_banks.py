@@ -540,8 +540,8 @@ def pack_w3(img, sym, prefix, l11):
             hdr += bytes((v & 0xFF, v >> 8))
         assert len(hdr) == HDR_SIZE
         tail[i * HDR_SIZE:(i + 1) * HDR_SIZE] = hdr
-    assert W3HDR + len(tail) <= 0xBE50, \
-        f"W3 bank-1 tail runs into the far kit by {W3HDR + len(tail) - 0xBE50} bytes"
+    assert W3HDR + len(tail) <= 0xBE58, \
+        f"W3 bank-1 tail runs into the far kit by {W3HDR + len(tail) - 0xBE58} bytes"
     toff = 1 * STRIDE + (W3HDR - BASE)
     assert all(b == 0xFF for b in img[toff:toff + len(tail)]), \
         "bank 1 tail not free for W3 (1-1 region grew past W3HDR?)"
@@ -553,7 +553,7 @@ def pack_w3(img, sym, prefix, l11):
         "bank 1 $B520 not free for the W3 ball table"
     img[boff:boff + len(ball)] = ball
     if far3:
-        assert far3_at == 0xBE50, "W3FAR moved -- update pack_banks"
+        assert far3_at == 0xBE58, "W3FAR moved -- update pack_banks"
         assert far3_at + len(far3) <= 0xC000, \
             f"W3 far kit overruns bank 1 by {far3_at + len(far3) - 0xC000} bytes " \
             "(ld65 sized the segment past its memory area and the write silently " \

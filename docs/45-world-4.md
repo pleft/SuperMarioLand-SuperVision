@@ -225,3 +225,34 @@ budget (bud_base = 2 for levels >= 6, main.s load_level) defers a mover's MOVE
 together with its redraw, so VM waits stretch under load; 3-1's battery (one
 mover live) measures the same $40 at the GB's 45. Raising the budget to 3 was
 measured to overrun the frame on 3-3 (docs/44), so this stays.
+
+## BUG (found verifying 4-2, fixed 2026-09-04): the spawner jammed at entry 52
+
+spawn_check indexes the RAM spawn table with an 8-bit Y = idx*5 -- and every
+spawn handler takes that Y (overlay ABI) -- which caps the LIVE table at 51
+entries. World-4 lists are 58-68 entries (4-1 68, 4-2 58, 4-3 63; 4-1 even
+exceeds the 384-byte RAM copy). On 4-2 the $3A lift is entry 52: its offset
+wrapped to 4, spawn_check read garbage, never fired, never advanced -- no lift,
+and nothing spawned for the rest of the level (the $36 stones after it). 4-1's
+late entries were silently dropping too.
+
+Fix (main.s): the RAM copy is a WINDOW onto the ROM list. `spawn_base` ($1FF0)
+= the ROM entry at spawn_tab[0]; `spawn_shift` slides it 51 entries when
+spawn_idx reaches 51 (consumed entries are never needed again); `spawn_seek`
+rebuilds the window from ROM at every respawn/level start and fast-forwards
+past the checkpoint (replacing the two FIXED fast-forward loops, so FIXED got
+smaller). Kit levels keep their list in the COLD page (the W3/W4 header's +16
+is only the resident $FFFF sentinel): the stub saves the cold list address at
+$1FF1/2 and `cold_copy` (FIXED, because the prefix is not mapped under the cold
+page) does the page dance inline. Prefix room came from moving build_shtab /
+build_row48 into BOOT6; the far kit moved $BE50 -> $BE58 for the stub's 6 bytes.
+
+Two traps hit on the way (laws E36/E37 in docs/35): set_bank lives in the
+prefix, so a FIXED routine must not call it to map the cold page (3-1 froze at
+its first respawn); and the kit stub RELOCATES ITS LOADER TO $1F80 and runs it
+there -- $1F80..~$1FE9 is live code during a level load, so RAM chosen from
+"the free bytes above W3CTAG" ($1FE0-$1FE6, first try) was the loader's own
+tail (its jmp $1500 operand) and the stub's stores self-modified it: 4-2 froze
+at start. The composer's CX_* ($1FE0-$1FE3) and stash B ($1FA0-$1FDB, = himod,
+harmless only while CX_BUILD=0) sit in the same transient region and are
+re-cleared by the kit init, which runs after the loader.
