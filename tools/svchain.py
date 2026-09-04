@@ -16,7 +16,8 @@ def emit(seq):
 route=open(sys.argv[1]).read()
 seq=expand(route)
 n=len(seq)
-subprocess.run(['/tmp/svshot','build/super-mario-land.sv','9',str(n),'1','/tmp/ch.fb','/tmp/ch.ram',route,''],capture_output=True)
+LEVEL=sys.argv[3] if len(sys.argv)>3 else '9'
+subprocess.run(['/tmp/svshot','build/super-mario-land.sv',LEVEL,str(n),'1','/tmp/ch.fb','/tmp/ch.ram',route,''],capture_output=True)
 R=np.fromfile('/tmp/ch.ram',dtype=np.uint8).astype(int).reshape(-1,0x2000)
 best=(-1,0)
 for f in range(min(n,R.shape[0])):

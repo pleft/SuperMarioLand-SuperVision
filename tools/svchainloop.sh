@@ -12,7 +12,7 @@ for it in $(seq 1 40); do
   if grep -q GOAL /tmp/chainloop_$it.log; then
     echo "GOAL at iteration $it -- route in $ROUTE"; exit 0
   fi
-  OUT=$(python3 tools/svchain.py "$ROUTE" "$PREFIX")
+  OUT=$(python3 tools/svchain.py "$ROUTE" "$PREFIX" "$LEVEL")
   X=$(echo "$OUT" | sed 's/.*world x \([0-9]*\).*/\1/')
   echo "iter $it: $OUT"
   if [ "$X" -lt $((LASTX+8)) ]; then
