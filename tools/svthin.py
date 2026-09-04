@@ -14,7 +14,10 @@ def warp(ck):   # checkpoint warp: camera poke + a fall = death -> respawn at th
     return f"0xB4:{(ck+60)&255}@100,0xB5:{(ck+60)>>8}@100,0x1B:200@101,0x53:1@300,0x50:1@300", ".100,.300," + PLAY, 420
 def place(cam, sprx):   # no death: everything up to cam spawns at once (GB-unlike, but the scene is what we want)
     return f"0xB4:{cam&255}@100,0xB5:{cam>>8}@100,0xA4:{sprx}@100,0x53:1@100,0x50:1@100", ".100,.30," + FIGHT + "," + PLAY, 120
+def fly(cam):   # 4-3 (autoscroll, no d-pad): camera poke, plane at its default, autofire
+    return f"0xB4:{cam&255}@100,0xB5:{cam>>8}@100", ".100,A700", 160, cam, cam + 400
 SCENES = {  # (level, name): (pokes, script, first frame, cam lo, cam hi)
+    (11, "s200"): fly(200), (11, "s800"): fly(800), (11, "s1400"): fly(1400), (11, "s2000"): fly(2000),
     (9, "start"):   ("0x53:1@40,0x50:1@40", ".40," + PLAY, 60, 100, 520),
     (9, "cannon"):  place(560, 100) + (540, 900),
     (9, "pillars"): warp(1920) + (1900, 2300),      # (a respawn skips every entry fired before it: pessimistic scenes below instead)

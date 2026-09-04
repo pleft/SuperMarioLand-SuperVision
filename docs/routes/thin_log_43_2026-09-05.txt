@@ -1,0 +1,99 @@
+s200: baseline 30.8% over 640 frames, 6.43 objs; candidates [(64, '0x53'), (112, '0x53'), (128, '0x53'), (176, '0x53'), (208, '0x53'), (256, '0x53'), (272, '0x53'), (368, '0x53'), (400, '0x53'), (432, '0x53'), (464, '0x53'), (496, '0x53'), (512, '0x52')]
+  drop    64 0x53 y 40 (moving): 30.8% (640 fr, 6.44 objs) -> revert
+  drop   112 0x53 y 56 (moving): 29.5% (640 fr, 6.42 objs) -> KEEP
+  drop   128 0x53 y 96 (moving): 28.6% (640 fr, 6.43 objs) -> revert
+  drop   176 0x53 y 72 (moving): 25.8% (640 fr, 6.18 objs) -> KEEP
+  drop   208 0x53 y 40 (moving): 23.3% (640 fr, 5.92 objs) -> KEEP
+  drop   256 0x53 y 88 (moving): 20.2% (640 fr, 5.60 objs) -> KEEP
+  drop   272 0x53 y 64 (moving): 18.4% (640 fr, 5.26 objs) -> KEEP
+  drop   368 0x53 y 40 (moving): 14.7% (640 fr, 4.92 objs) -> KEEP
+  drop   400 0x53 y 72 (moving): 12.8% (640 fr, 4.71 objs) -> KEEP
+  drop   432 0x53 y104 (moving): 12.5% (640 fr, 4.49 objs) -> revert
+  drop   464 0x53 y 72 (moving): 11.2% (640 fr, 4.39 objs) -> KEEP
+  drop   496 0x53 y 40 (moving): 9.5% (640 fr, 4.22 objs) -> KEEP
+  drop   512 0x52 y 32 (moving): 8.9% (640 fr, 4.10 objs) -> revert
+s200: final 9.5% (was 30.8%); kept [(112, '0x53'), (176, '0x53'), (208, '0x53'), (256, '0x53'), (272, '0x53'), (368, '0x53'), (400, '0x53'), (464, '0x53'), (496, '0x53')]
+   (warning: only 92 measured frames)
+s800: baseline 30.4% over 92 frames, 6.39 objs; candidates [(512, '0x52'), (576, '0x52'), (640, '0x52'), (704, '0x52'), (768, '0x52'), (800, '0x52'), (864, '0x52'), (880, '0x52'), (1024, '0x53'), (1040, '0x59'), (1056, '0x52'), (1088, '0x59'), (1120, '0x52'), (1120, '0x53')]
+   (warning: only 92 measured frames)
+  drop   512 0x52 y 32 (moving): 30.4% (92 fr, 6.39 objs) -> revert
+   (warning: only 92 measured frames)
+  drop   576 0x52 y 32 (moving): 30.4% (92 fr, 6.39 objs) -> revert
+   (warning: only 106 measured frames)
+  drop   640 0x52 y112 (moving): 31.1% (106 fr, 6.45 objs) -> revert
+  drop   704 0x52 y112 (moving): 25.3% (640 fr, 6.40 objs) -> KEEP
+  drop   768 0x52 y 32 (moving): 20.5% (640 fr, 6.01 objs) -> KEEP
+  drop   800 0x52 y112 (moving): 20.5% (640 fr, 6.01 objs) -> revert
+  drop   864 0x52 y 40 (moving): 17.5% (640 fr, 5.42 objs) -> KEEP
+  drop   880 0x52 y 96 (moving): 15.5% (640 fr, 5.23 objs) -> KEEP
+  drop  1024 0x53 y 32 (moving): 11.6% (640 fr, 4.93 objs) -> KEEP
+  drop  1040 0x59 y 80 (moving): 9.1% (640 fr, 4.49 objs) -> KEEP
+  drop  1056 0x52 y 88 (moving): 8.0% (640 fr, 4.29 objs) -> KEEP
+  drop  1088 0x59 y 32 (moving): 6.9% (640 fr, 4.10 objs) -> KEEP
+  drop  1120 0x52 y112 (moving): 5.6% (640 fr, 4.00 objs) -> KEEP
+  drop  1120 0x53 y 40 (moving): 5.2% (640 fr, 3.91 objs) -> revert
+s800: final 5.6% (was 30.4%); kept [(704, '0x52'), (768, '0x52'), (864, '0x52'), (880, '0x52'), (1024, '0x53'), (1040, '0x59'), (1056, '0x52'), (1088, '0x59'), (1120, '0x52')]
+   (warning: only 145 measured frames)
+s1400: baseline 47.6% over 145 frames, 8.91 objs; candidates [(1120, '0x53'), (1184, '0x59'), (1200, '0x53'), (1216, '0x59'), (1248, '0x52'), (1280, '0x53'), (1296, '0x59'), (1328, '0x53'), (1344, '0x59'), (1392, '0x53'), (1392, '0x52'), (1424, '0x53'), (1456, '0x59'), (1472, '0x53'), (1520, '0x59'), (1536, '0x53'), (1616, '0x59'), (1632, '0x53'), (1648, '0x52'), (1680, '0x52'), (1696, '0x59'), (1728, '0x52'), (1760, '0x53')]
+   (warning: only 145 measured frames)
+  drop  1120 0x53 y 40 (moving): 47.6% (145 fr, 8.76 objs) -> revert
+   (warning: only 146 measured frames)
+  drop  1184 0x59 y 40 (moving): 47.3% (146 fr, 8.77 objs) -> revert
+   (warning: only 146 measured frames)
+  drop  1200 0x53 y104 (moving): 45.9% (146 fr, 8.77 objs) -> KEEP
+   (warning: only 146 measured frames)
+  drop  1216 0x59 y112 (moving): 45.9% (146 fr, 8.77 objs) -> revert
+   (warning: only 145 measured frames)
+  drop  1248 0x52 y 40 (moving): 47.6% (145 fr, 8.76 objs) -> revert
+  drop  1280 0x53 y112 (moving): 45.8% (640 fr, 8.66 objs) -> revert
+   (warning: only 157 measured frames)
+  drop  1296 0x59 y 64 (moving): 40.8% (157 fr, 7.52 objs) -> KEEP
+   (warning: only 154 measured frames)
+  drop  1328 0x53 y 56 (moving): 39.0% (154 fr, 7.36 objs) -> KEEP
+   (warning: only 171 measured frames)
+  drop  1344 0x59 y 96 (moving): 34.5% (171 fr, 7.40 objs) -> KEEP
+   (warning: only 193 measured frames)
+  drop  1392 0x53 y 32 (moving): 24.4% (193 fr, 6.41 objs) -> KEEP
+   (warning: only 210 measured frames)
+  drop  1392 0x52 y 72 (moving): 14.3% (210 fr, 5.16 objs) -> KEEP
+   (warning: only 210 measured frames)
+  drop  1424 0x53 y104 (moving): 11.4% (210 fr, 4.72 objs) -> KEEP
+   (warning: only 210 measured frames)
+  drop  1456 0x59 y 64 (moving): 9.5% (210 fr, 4.25 objs) -> KEEP
+   (warning: only 210 measured frames)
+  drop  1472 0x53 y 64 (moving): 8.6% (210 fr, 3.95 objs) -> revert
+   (warning: only 210 measured frames)
+  drop  1520 0x59 y 64 (moving): 9.5% (210 fr, 4.25 objs) -> revert
+   (warning: only 210 measured frames)
+  drop  1536 0x53 y 56 (moving): 9.5% (210 fr, 4.25 objs) -> revert
+   (warning: only 210 measured frames)
+  drop  1616 0x59 y 72 (moving): 9.5% (210 fr, 4.25 objs) -> revert
+   (warning: only 210 measured frames)
+  drop  1632 0x53 y 48 (moving): 9.5% (210 fr, 4.25 objs) -> revert
+   (warning: only 210 measured frames)
+  drop  1648 0x52 y 72 (moving): 9.5% (210 fr, 4.25 objs) -> revert
+   (warning: only 210 measured frames)
+  drop  1680 0x52 y 88 (moving): 9.5% (210 fr, 4.25 objs) -> revert
+   (warning: only 210 measured frames)
+  drop  1696 0x59 y112 (moving): 9.5% (210 fr, 4.25 objs) -> revert
+   (warning: only 210 measured frames)
+  drop  1728 0x52 y 56 (moving): 9.5% (210 fr, 4.25 objs) -> revert
+   (warning: only 210 measured frames)
+  drop  1760 0x53 y 72 (moving): 9.5% (210 fr, 4.25 objs) -> revert
+   (warning: only 210 measured frames)
+s1400: final 9.5% (was 47.6%); kept [(1200, '0x53'), (1296, '0x59'), (1328, '0x53'), (1344, '0x59'), (1392, '0x53'), (1392, '0x52'), (1424, '0x53'), (1456, '0x59')]
+s2000: baseline 8.6% over 640 frames, 3.41 objs; candidates [(1648, '0x52'), (1680, '0x52'), (1696, '0x59'), (1728, '0x52'), (1760, '0x53'), (1776, '0x59'), (1808, '0x53'), (1824, '0x53'), (1856, '0x59'), (1936, '0x53'), (1968, '0x53'), (2080, '0x52'), (2112, '0x52'), (2160, '0x53'), (2160, '0x52')]
+  drop  1648 0x52 y 72 (moving): 8.6% (640 fr, 3.42 objs) -> revert
+  drop  1680 0x52 y 88 (moving): 8.6% (640 fr, 3.42 objs) -> revert
+  drop  1696 0x59 y112 (moving): 8.6% (640 fr, 3.41 objs) -> revert
+  drop  1728 0x52 y 56 (moving): 8.6% (640 fr, 3.42 objs) -> revert
+  drop  1760 0x53 y 72 (moving): 8.6% (640 fr, 3.42 objs) -> revert
+  drop  1776 0x59 y104 (moving): 8.6% (640 fr, 3.42 objs) -> revert
+  drop  1808 0x53 y 48 (moving): 8.4% (640 fr, 3.41 objs) -> revert
+  drop  1824 0x53 y 96 (moving): 8.3% (640 fr, 3.48 objs) -> revert
+  drop  1856 0x59 y 88 (moving): 6.2% (640 fr, 3.28 objs) -> KEEP
+  drop  1936 0x53 y 32 (moving): 5.2% (640 fr, 3.15 objs) -> KEEP
+  drop  1968 0x53 y104 (moving): 5.2% (640 fr, 2.96 objs) -> revert
+  drop  2080 0x52 y 72 (moving): 4.5% (640 fr, 2.68 objs) -> revert
+  drop  2112 0x52 y 48 (moving): 1.6% (640 fr, 2.51 objs) -> KEEP
+s2000: final 1.6% (was 8.6%); kept [(1856, '0x59'), (1936, '0x53'), (2112, '0x52')]

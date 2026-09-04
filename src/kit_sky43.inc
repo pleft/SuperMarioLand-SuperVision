@@ -564,6 +564,8 @@ sq_t:  .byte SUB_T, SUB_T+1, SUB_T+2, SUB_T+3
     jsr obj_alloc_typed
     bcs @full
     stz o_pdr,x
+    lda #$FF
+    sta o_st,x                   ; no column read yet (upd_torp's gate)
     lda spr_x                    ; the missile shows at (hull left + 9, hull top + 4) on
     clc                          ; its first frame and moves 2/f from there (GB OAM 4-3:
                                  ; 44,46,48.. with the hull at 35). The port's upd_torp
@@ -615,6 +617,12 @@ sq_t:  .byte SUB_T, SUB_T+1, SUB_T+2, SUB_T+3
     sta feet_col+1
     jsr col_shift
     ldx oi
+    lda feet_col                 ; read the map only when the nose enters a NEW
+    cmp o_st,x                   ; column: the tile under it cannot change in
+    beq @fly                     ; between, and three missiles reading the banked
+    sta o_st,x                   ; map every frame were ~10% of the frame (profiled;
+                                 ; the column cache thrashes with 8 probing objects).
+                                 ; o_st is free on a missile (the VM param byte).
     lda o_y,x
     clc
     adc #14                      ; visual y (+8) + the GB's +6 nose row

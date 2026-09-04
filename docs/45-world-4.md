@@ -607,3 +607,19 @@ svgold hash changes on purpose, and its recorded route must be re-checked
   boss-specific bank-3 code?); and the arena overruns ~1/3 of frames with
   three missiles up (render-bound), which stretches every VM timing there
   (the $62's 33 frames took 67).
+
+### 4-3 congestion (2026-09-05)
+
+Placed-camera scenes (autofire; the plane at its default), stall rate before
+thinning: x 200 31%, x 800 34%, x 1400 46%, x 2000 9%, x 2600 3%, x 3200 7%
+-- and 14-32% even with the fire button untouched. Attribution at x 1400
+(idle 32%): removing every $59 -> 6%, every $53 -> 10%, $52/$5A -> 25%; the
+profile is the same shape as 4-1's (sprite blit 19%, margin blank 12%,
+restore_bg 11%, render_all 8%, map reads ~20%): ~6 sprites redrawn a frame
+at ~700 cycles a tile is the frame. Gating the missile's map read to column
+changes (upd_torp, o_st = last column) bought one point: the reads are not
+the missiles'. `svthin` (fly scenes s200/s800/s1400/s2000, law E42) dropped
+29 of 4-3's 63 entries -- all moving ($53 x15, $52 x8, $59 x6): 31 -> 9.5%,
+30 -> 5.6%, 48 -> 9.5% (210-frame scene), 8.6 -> 1.6%. The first two
+stretches stop above the 4% target: no remaining single drop gains a point.
+This is the heaviest thinning so far and the user has not seen it yet.
