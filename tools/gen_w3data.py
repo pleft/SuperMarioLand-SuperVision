@@ -45,7 +45,8 @@ SEEDS = {
     # EAS3 build compiles out the native $3F handler), $54. The 24-type closure
     # fits the $1500 window with ~79 B to spare (docs/45); 4-3's types ($4D $52
     # $53 $59 $61) push it over and force the table relocation, added with 4-3.
-    4: [0x38, 0x39, 0x49, 0x55, 0x56, 0x3A, 0x3F, 0x54],
+    4: [0x38, 0x39, 0x49, 0x55, 0x56, 0x3A, 0x3F, 0x54,
+        0x4D, 0x52, 0x53, 0x59, 0x61],      # 4-3 (tables now resident: W3TAB)
 }
 
 
@@ -197,17 +198,25 @@ def main():
         # (w3_hi.svt for the missile, w1_obj_8000.svt otherwise).
         ENGINE_IDS = {0xA0, 0xA1, 0xA2, 0xA3, 0xB0, 0xB1, 0xB2, 0xB3,  # the Fly (W3: the Kumo)
                       0xA8, 0xA9}                                    # its squashed corpse (FLY_SQ)
+        PARK_END = 0xEC if WORLD == 4 else 0xE4   # (see below)
         raw = []
         for p in params:
             raw.append(dlist(p, DL_RIGHT)); raw.append(dlist(p, DL_LEFT))
         used = set(b for l in raw for b in l if b & 0x80 and b != 0xFF)
-        extra = sorted(b for b in used if b >= 0xDD)
-        free = [i for i in range(0xDD, 0xE4)] + \
+        # ids INSIDE the band keep their own slot (draw_quad resolves $A0..top-1
+        # through the slice at the id itself); only ids at/after the band top need
+        # a parking slot -- so $E2/$E3 no longer consume two of them (4-3)
+        extra = sorted(b for b in used if b >= PARK_END)
+        # parking slots after the overlay: World 3 has 7 ($DD-$E3; the slice ends
+        # exactly at $BB80 where creature33 sits in bank 6). World 4's cold page has
+        # nothing at $BB80-$BBFF, so it parks 15 ($DD-$EB) -- 4-3's 43-type closure
+        # needs 8 (the W3 count was measured 8 vs 7 for it, docs/45). The slice then
+        # ends exactly at $BC00 (the W3X walk pin).
+        free = [i for i in range(0xDD, PARK_END) if i not in used] + \
                [i for i in range(0xA0, 0xDD) if i not in used and i not in ENGINE_IDS]
-        assert len(extra) <= len(free), f"W3: {len(extra)} out-of-range tile ids, {len(free)} free slots"
+        assert len(extra) <= len(free), f"W{WORLD}: {len(extra)} out-of-range tile ids, {len(free)} free slots"
         remap = {b: free[k] for k, b in enumerate(extra)}
-        order = list(range(0xA0, 0xE4))   # 68 slots: $A0-$DC overlay + 7 parking slots
-                                          # ($DD-$E3); ends exactly at $BB80 (creature33)
+        order = list(range(0xA0, PARK_END))  # $A0-$DC overlay + the parking slots
         for b, slot in remap.items():
             order[slot - 0xA0] = b
         def conv(lst):
@@ -223,7 +232,7 @@ def main():
             body += conv(dlist(p, DL_RIGHT))
             body += conv(dlist(p, DL_LEFT))
         open(f"build/w{WORLD}tiles.txt", "w").write(" ".join(f"{t:02X}" for t in order))
-        assert len(order) == 0x44, "W3 tile slice must be the full $A0-$E3 table (draw_quad)"
+        assert len(order) == PARK_END - 0xA0, f"W{WORLD} tile slice must be the full $A0..{PARK_END-1:02X} table (draw_quad quad_top)"
         f.write("; display lists live in BANK 6 at W3DLB (pack_banks pin)\n")
         f.write("w3_dlo:\n    .byte " + ",".join(f"<(W3DLB+{s})" for s in starts) + "\n")
         f.write("w3_dhi:\n    .byte " + ",".join(f">(W3DLB+{s})" for s in starts) + "\n")

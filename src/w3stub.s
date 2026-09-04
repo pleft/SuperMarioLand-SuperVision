@@ -16,8 +16,13 @@ LINK_DDR = $2021                 ; MAGNUM page (docs/37): banking here does
 LINK_DAT = $2022                 ;   not restart the LCD scan; $2022 must read 0
                                  ;   at the $2021 write, $0F = the panel's drive
 FLAGS    = $0B                   ; NMI | TIMER_IRQ | LCD (load_level's mask)
+.ifdef W4KIT                     ; page 10 (World 4): tighter layout, docs/45
+W3WIN    = $8000                 ;   the kit window image (pack_w4 pin; the copy
+W3SPT    = $B11E                 ;   uses >W3WIN only: PAGE-ALIGNED) / spawn lists
+.else
 W3WIN    = $A800                 ; bank 6: the kit window image (pack_banks pin)
 W3SPT    = $A7C0                 ; bank 6: 3x .addr spawn lists (pack_banks pin)
+.endif
 
 .segment "STUB1"                 ; runs at $1500 (the ovl_bind entry)
     ldx #<__STUB2_SIZE__

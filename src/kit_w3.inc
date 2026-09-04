@@ -44,9 +44,15 @@ W3CDATA  = $0200                 ; 16 slots x 16 tile bytes (page-aligned)
 W3CTAG   = $1F80                 ; 16 x [col lo][col hi]
 W3CSLOTS = 16
 W3CMB    = $1FFF                 ; map_base hi when the cache was filled
+.ifdef W4KIT                     ; World 4's cold page (10) is laid out tighter
+W3SCRB   = $B124                 ; (docs/45: window $8000, stash $86F8, maps
+W3DLB    = $B71B                 ;   $8ABF-$B11E, spt, scripts, dlists, slice ->
+W3TILB   = $B93C                 ;   $BDFC, walk $BE00 -- pack_w4 writes all)
+.else
 W3SCRB   = $B200                 ; bank 6 pins (pack_banks writes all three):
 W3DLB    = $B540                 ;   scripts / metasprite display lists /
 W3TILB   = $B740                 ;   the compact W3 tile slice
+.endif
 W3SYSC   = $2026
 W3LINK   = $2021                 ; MAGNUM page (docs/37): banking here does
 W3LINKV  = $2022                 ;   NOT restart the LCD scan. $2022 must read

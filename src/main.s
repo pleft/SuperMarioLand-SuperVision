@@ -964,6 +964,9 @@ main_loop:
     rts                          ; near the level end (a room visit rebases the fb
 .endproc                         ; lattice) -- tile 0 drew as literal '0' glyphs
 
+quad_top = $1FF3                 ; draw_quad's slice band top per world (load_level):
+                                 ; $E4 (W3) / $EC (W4). Free RAM above the spawner's
+                                 ; $1FF0-2 (E37: past the stub loader's $1F80-$1FE9).
 himod = $1FA0                    ; windowed broken/used overlay for cols >= 360 (64 B,
                                  ; 32 slots x 2; above W3CTAG $1F80-$1F9F, below W3CMB
                                  ; $1FFF). Cleared with the W3/W4 kit init (w2code.s).
@@ -4179,7 +4182,7 @@ music_data:
 ; start it FRESH from column 0. Score, coins, lives and Mario's power-ups
 ; (big/superball) PERSIST; everything level-local resets. Levels shipped so far:
 ; 1-1 and 1-2 — the wrap constant grows as more of World 1 comes online.
-NUM_LEVELS = 11                  ; 1-1..3-3 (W3) + 4-1, 4-2 (W4, docs/45)
+NUM_LEVELS = 12                  ; 1-1..3-3 (W3) + 4-1, 4-2, 4-3 (W4, docs/45)
 W3HDR = $B540                    ; W3 headers: PINNED bank-1 tail (pack_banks
                                  ; asserts 1-1's region ends below, and lays
                                  ; the W3 far/stub/bg-charset after)
@@ -9897,6 +9900,11 @@ spawn_base = $1FF0
                                  ; prefix, byte-identical at this address in every bank.
     jsr set_bank                 ; MAGNUM: $2021 only -- SYS_CTRL (and the LCD
                                  ; scan) is left alone
+    lda #$E4                     ; draw_quad's slice band top: W3 $E4, W4 $EC
+    cpx #9                       ; (X = cur_level from the bank lookup above)
+    bcc :+
+    lda #$EC
+:   sta quad_top
     lda #<level_hdr              ; header base: bank 0 = the linked address; banks 1+
     sta lvl_ptr                  ; keep theirs where bank 0 has the TITLE (the packer
     lda #>level_hdr              ; overlays it — the title runs only with bank 0 mapped)
@@ -10362,9 +10370,12 @@ wcyc: .byte 2, 5, 1              ; port pose ids for GB metasprites 1, 2, 3
     rol src_ptr+1
     cpx #$A0
     bcc @common
-    cpx #$E4                     ; $A0-$E3: 68 slice slots -- W3's overlay at its
+    cpx quad_top                 ; $A0..top-1: the slice -- W3's overlay at its
     bcs @common                  ; own ids + parking for its base-sheet ids
-                                 ; (docs/43); $E6/$EE/$EF stay chardata
+                                 ; (docs/43); $E6/$EE/$EF stay chardata. The top
+                                 ; is per world (load_level): W3 $E4 (68 slots,
+                                 ; creature33 sits at $BB80), W4 $EC (76 slots:
+                                 ; 4-3's closure parks 6 ids -- docs/45)
     clc
     adc hdr_buf+18
     sta src_ptr
@@ -11783,6 +11794,7 @@ lvl_bank_tab:   .byte 7, 0, 2, 3, 4, 5
                 .byte 1, 1, 1           ; 1-1 now has bank 7 to itself, so bank 1
                 .byte 9                 ; 4-1: World 4's own pair, pages 9 (resident)
                 .byte 9                 ; 4-2: same W4 pair (resident page 9 + cold 10)
+                .byte 9                 ; 4-3: same W4 pair
                                         ; + 10 (cold) -- bank 1 and bank 6 are full
                                         ; to 25 and 292 bytes (docs/45)
                                         ; is W3's alone (cold data still in 6)

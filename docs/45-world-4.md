@@ -297,3 +297,26 @@ from 2010/1977 B to 1784 B for both worlds -- room for 4-3's 43-type closure
 Trap: pack_w4 runs after make_512k has already written the image, so a pack_w4
 failure left a fresh-looking half-built .sv and `make` then said "Nothing to be
 done" -- Makefile now has .DELETE_ON_ERROR.
+
+## 4-3 packs: World 4's own page-10 layout (2026-09-04)
+
+Three levels' maps (9823 B dedup'd) plus the 43-type kit no longer fit around
+the bank-6 pins, so World 4's cold page is laid out edge to edge, every pin
+asserted by pack_w4 (cfg/w4code.cfg, kit_w3.inc / w3stub.s `.ifdef W4KIT`):
+
+    $8000 window image 1784 B  (PAGE-ALIGNED: the stub copies from >W3WIN only)
+    $86F8 W3X2 stash head 967 B   $8ABF maps+rooms+spawns 9823 B   $B11E spt
+    $B124 scripts 1527 B   $B71B display lists 545 B   $B93C tile slice 1216 B
+    (76 slots: draw_quad's band top is per world, quad_top $1FF3 = $EC here,
+    $E4 for W3; ids inside the band keep their own slot, only ids >= the top
+    are parked)   $BE00 W3X walk 476 B   -> 4 bytes spare.
+
+Resident page 9: per-type tables at $B000 (362 B), then a HOLE to $B51F that
+takes the header-pointed pieces (pipes/blocks/sentinel/stub), so the tail at
+W3HDR is headers + charset only (2192 B, was 31 B over the far kit).
+
+**4-3 is the Sky Pop aeroplane level** (a vehicle stage like 2-3: no walkable
+floor -- its "ground" tiles $53/$55/$57 are below the solid threshold; the
+render is sky and clouds and Mario falls from the spawn). It needs the vehicle
+player path (veh_vec, as kit_mar23's veh_init installs for 2-3) in the World-4
+kit plus its VM enemies ($4D $52 $53 $59, boss $61) -- the next phase.

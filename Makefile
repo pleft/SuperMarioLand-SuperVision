@@ -38,7 +38,7 @@ all: $(ROM)
 godmode:                         # the TEST ROM -> build/super-mario-land-god.sv
 	$(MAKE) GODMODE=1
 
-$(ROM): $(OBJS) $(CFG) tools/pack_banks.py tools/gen_w2abi.py src/w2code.s src/kit_mar23.inc src/kit_w3.inc $(wildcard src/kit_sh*.inc) src/w2stub.s src/w3stub.s tools/gen_w3data.py src/w3aux.s cfg/w3aux.cfg tools/make_512k.py cfg/w2code.cfg cfg/w2stub.cfg cfg/w3stub.cfg cfg/w3code.cfg $(W2GFX) build/gfx/w3_ovl_9310.svt
+$(ROM): $(OBJS) $(CFG) tools/pack_banks.py tools/gen_w2abi.py src/w2code.s src/kit_mar23.inc src/kit_w3.inc $(wildcard src/kit_sh*.inc) src/w2stub.s src/w3stub.s tools/gen_w3data.py src/w3aux.s cfg/w3aux.cfg tools/make_512k.py cfg/w2code.cfg cfg/w2stub.cfg cfg/w3stub.cfg cfg/w3code.cfg cfg/w4code.cfg $(W2GFX) build/gfx/w3_ovl_9310.svt
 	$(LD) -C $(CFG) $(OBJS) -o $@ -m build/rom.map -Ln build/rom.lbl --dbgfile build/rel.dbg
 	python3 tools/gen_w2abi.py build/rel.dbg build/w2abi.inc
 	$(AS) $(ASFLAGS) -I build src/w3aux.s -o build/w3aux.o
@@ -57,7 +57,7 @@ $(ROM): $(OBJS) $(CFG) tools/pack_banks.py tools/gen_w2abi.py src/w2code.s src/k
 	$(LD) -C cfg/w3code.cfg build/w3code.o -o build/w3code.bin -m build/w3code.map -Ln build/w3code.lbl
 	python3 tools/gen_w3data.py super-mario-land-gb.gb 4
 	$(AS) $(ASFLAGS) -I build -D EAS3 -D W4KIT src/w2code.s -o build/w4code.o
-	$(LD) -C cfg/w3code.cfg build/w4code.o -o build/w4code.bin -m build/w4code.map -Ln build/w4code.lbl
+	$(LD) -C cfg/w4code.cfg build/w4code.o -o build/w4code.bin -m build/w4code.map -Ln build/w4code.lbl
 	$(AS) $(ASFLAGS) -I build src/w3stub.s -o build/w3stub.o
 	$(LD) -C cfg/w3stub.cfg build/w3stub.o -o build/w3stub.bin
 	$(AS) $(ASFLAGS) -I build -D W4KIT src/w3stub.s -o build/w4stub.o

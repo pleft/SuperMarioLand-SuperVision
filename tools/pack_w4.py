@@ -18,9 +18,14 @@ _spec = importlib.util.spec_from_file_location("pb", os.path.join(os.path.dirnam
 pb = importlib.util.module_from_spec(_spec); _spec.loader.exec_module(pb)
 
 BASE, BANK, STRIDE, HDR_SIZE = pb.BASE, pb.BANK, pb.STRIDE, pb.HDR_SIZE
-W3HDR, W3WIN, W3SPT = 0xB540, 0xA800, 0xA7C0
+W3HDR, W3WIN, W3SPT = 0xB540, 0x8000, 0xB11E   # page-10 layout (docs/45), edge to edge:
+                                                # x2 head, maps $83C8-$AA27, spt, window $AA30,
+                                                # scripts $B128, dlists $B720, slice $B940
+                                                # (76 slots -> $BE00), walk $BE00 (cfg/w4code.cfg)
+W4SCR, W4DL, W4SLICE, W4X, W4DATA = 0xB124, 0xB71B, 0xB93C, 0xBE00, 0x8ABF
+W4X2 = 0x86F8                                   # the stash head follows the window (cfg/w4code.cfg)
 RES, COLD = 9, 10                       # World 4's page pair
-LEVELS = (9, 10)                        # 4-1, 4-2; 4-3 joins here
+LEVELS = (9, 10, 11)                    # 4-1, 4-2, 4-3
 
 def seg(mapfile, name):
     m = re.search(rf"^{name}\s+([0-9A-F]+)\s+\S+\s+([0-9A-F]+)", open(mapfile).read(), re.M)
@@ -43,8 +48,9 @@ def main():
     xcode = full[w2c_sz + far_sz:w2c_sz + far_sz + x_sz]
     x2code = full[w2c_sz + far_sz + x_sz:w2c_sz + far_sz + x_sz + x2_sz]
     assert len(win) <= 0x800, f"W4 window kit is {len(win)}B, the $1500 window is $800"
-    assert far_at == 0xBE58 and x_at == 0xBC00 and (not x2_sz or x2_at == 0x8000), \
+    assert far_at == 0xBE58 and x_at == W4X and (not x2_sz or x2_at == W4X2), \
         "W4 kit pins moved -- update pack_w4"
+    assert W3WIN + len(win) <= W4X2 and W4X2 + x2_sz <= W4DATA, "W4 window/stash/data overlap"
 
     # ---- COLD page: maps/rooms/spawns + the kit's pinned blobs ----------
     cold = bytearray(b"\xFF" * BANK)
@@ -61,8 +67,8 @@ def main():
                 rooms_raw.setdefault(h, d); ids.append(h)
         room_ids.append(ids)
     grids = list(rooms_raw)
-    tabs, pool = pb.dedup_maps(surfs + [rooms_raw[h] for h in grids], BASE + 0x400)
-    addr = BASE + 0x400
+    tabs, pool = pb.dedup_maps(surfs + [rooms_raw[h] for h in grids], W4DATA)
+    addr = W4DATA
     tab_at = []
     for t in tabs:
         tab_at.append(addr); addr += len(t)
@@ -73,12 +79,13 @@ def main():
         spawn_at.append(addr); addr += len(sp)
     assert addr <= W3SPT, f"W4 cold data overruns ${W3SPT:04X} by {addr - W3SPT}"
     blob = b"".join(tabs) + pool + b"".join(spawns)
-    cold[0x400:0x400 + len(blob)] = blob
+    cold[W4DATA - BASE:W4DATA - BASE + len(blob)] = blob
     spt = b"".join(bytes((a & 0xFF, a >> 8)) for a in spawn_at)
     cold[W3SPT - BASE:W3SPT - BASE + len(spt)] = spt
+    assert W3WIN + len(win) <= W4SCR, "W4 window image runs into the scripts pin"
     cold[W3WIN - BASE:W3WIN - BASE + len(win)] = win
-    pins = ((0xB200, "build/w4scripts.bin"), (0xB540, "build/w4dlists.bin"),
-            (0xB740, None))                   # tile slice below caps each blob's gap
+    pins = ((W4SCR, "build/w4scripts.bin"), (W4DL, "build/w4dlists.bin"),
+            (W4SLICE, None))                  # tile slice below caps each blob's gap
     for (pin, path_), (nxt, _) in zip(pins, pins[1:]):
         d = open(path_, "rb").read()
         assert pin - BASE + len(d) <= BANK, f"W4 ${pin:04X} blob overruns the bank"
@@ -89,16 +96,20 @@ def main():
     order = [int(t, 16) for t in open("build/w4tiles.txt").read().split()]
     ovl = open("build/gfx/w4_ovl_8A00.svt", "rb").read()
     obj = open("build/gfx/w4_obj_8000.svt", "rb").read()
+    base = open("build/gfx/w1_obj_8000.svt", "rb").read()   # = the FIXED chardata sheet
     hi = open("build/gfx/w3_hi.svt", "rb").read()
     HI = {0xF9: 0, 0xFA: 1, 0xFB: 2, 0xFE: 3}
     def tile(t):
         if t in HI: return hi[HI[t] * 16:(HI[t] + 1) * 16]
         if 0xA0 <= t <= 0xDC: return ovl[(t - 0xA0) * 16:(t - 0xA0 + 1) * 16]
-        return obj[t * 16:(t + 1) * 16]
+        if t >= 0xE4: return base[t * 16:(t + 1) * 16]   # "stays chardata" ids ($E6/$EE/$EF..):
+        return obj[t * 16:(t + 1) * 16]                 # the engine draws them from the FIXED sheet
     slice_ = b"".join(tile(t) for t in order)
-    cold[0xB740 - BASE:0xB740 - BASE + len(slice_)] = slice_
-    cold[0xBC00 - BASE:0xBC00 - BASE + len(xcode)] = xcode
-    if x2code: cold[0:len(x2code)] = x2code
+    assert W4SLICE + len(slice_) <= W4X, f"W4 tile slice ({len(slice_)}B) runs into the walk pin at ${W4X:04X}"
+    cold[W4SLICE - BASE:W4SLICE - BASE + len(slice_)] = slice_
+    assert W4X + len(xcode) <= 0xC000, "W4 walk overruns the page"
+    cold[W4X - BASE:W4X - BASE + len(xcode)] = xcode
+    if x2code: cold[W4X2 - BASE:W4X2 - BASE + len(x2code)] = x2code
     img[COLD * STRIDE:COLD * STRIDE + BANK] = cold
 
     # ---- RESIDENT page: prefix + headers/pipes/blocks + stub + charset + far
@@ -126,17 +137,20 @@ def main():
     # are a free hole. Pack the small pieces (pipes/blocks/sentinel) into it before
     # spilling past the header region -- that reclaims (min(LEVELS)-6)*24 bytes and
     # keeps the resident tail under the far kit at $BE50 with 4-2 (and eases 4-3).
-    gap = [0, (min(LEVELS) - 6) * HDR_SIZE]                 # [cursor, end) inside tail
+    # the small header-pointed pieces (pipes/blocks/sentinel/stub) go into the
+    # HOLE above the per-type tables in this page ($B000+tables .. $B51F, ~940 B
+    # free) instead of the tail: with three levels the tail (headers + stub +
+    # charset) ran 31 B into the far kit at $BE58 (docs/45). Header slots 0-2
+    # (World 3's 6-8) stay zero: the engine pin is W3HDR + (level-6)*24.
+    hole = [0xB000 + (w3t_sz if w3t_sz else 0)]
     def place(d):
         if not d:
             return 0
-        if gap[0] + len(d) <= gap[1]:                      # fits the pre-header hole
-            at = W3HDR + gap[0]
-            tail[gap[0]:gap[0] + len(d)] = d
-            gap[0] += len(d)
-        else:                                              # spill after the header region
-            at = W3HDR + len(tail)
-            tail.extend(d)
+        at = hole[0]
+        assert at + len(d) <= pb.W3BALL, f"W4 resident hole runs into the ball pin by {at + len(d) - pb.W3BALL}"
+        assert all(b == 0xFF for b in res[at - BASE:at - BASE + len(d)]), f"W4 hole at ${at:04X} not free"
+        res[at - BASE:at - BASE + len(d)] = d
+        hole[0] += len(d)
         return at
     pieces = {}
     for i, lv in enumerate(LEVELS):
@@ -146,7 +160,7 @@ def main():
             pieces[(i, key)] = (place(d), len(d) // per)
     sent_at = place(b"\xFF\xFF")
     stub = open("build/w4stub.bin", "rb").read()
-    stub_at = W3HDR + len(tail); tail += stub
+    stub_at = place(stub)
     bgc_at = W3HDR + len(tail)
     # the SHARED charset (font + common scenery) already sitting in the prefix we
     # copied, with World 4's overlay over $31-$6F -- exactly what pack_w3 does for
@@ -176,7 +190,7 @@ def main():
         hdr.append(pieces[(i, "pipes")][1])
         hdr += bytes((pieces[(i, "blocks")][0] & 0xFF, pieces[(i, "blocks")][0] >> 8))
         hdr.append(pieces[(i, "blocks")][1])
-        quad_base = 0xB740 - 0xA0 * 16
+        quad_base = W4SLICE - 0xA0 * 16
         for v in (sent_at, quad_base, stub_at, bgc_at):
             hdr += bytes((v & 0xFF, v >> 8))
         assert len(hdr) == HDR_SIZE, f"header is {len(hdr)}B, expected {HDR_SIZE}"
