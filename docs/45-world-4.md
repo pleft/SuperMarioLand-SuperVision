@@ -468,3 +468,8 @@ after the pillars ($36 at 2208/2240). After: pillars 4.6%, Pionpi fight 4.3%,
 script dies there, so that stretch is measured on 192 frames only).
 `tools/pack_w4.py` is now a Makefile dependency of the ROM (it was not, and a
 THIN edit built nothing -- E35's cousin).
+
+4-2 surveyed the same way: one hot stretch, x 1408-1535 at 13.5% (eight $54
+orbiters spawn between fire_cam 1136 and 1536, three or four alive at once).
+THIN drops every other one (1184, 1296, 1392, 1536): 2.2% after. The rest of
+4-2 sits at the 0.5-2% baseline. Shipped as ~/Desktop/sml_0904e.sv.

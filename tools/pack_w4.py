@@ -49,6 +49,7 @@ THIN = {
         (1648, 0x55, 88), (1808, 0x55, 88), (1968, 0x55, 88),   # 3 of the 6 pillar hazards
         (1840, 0x02, 128),                      # the middle of the 3 pillar plants
         (2208, 0x36, 32), (2240, 0x36, 32)],    # 2 of the 3 stone-droppers after the pillars
+    10: [(1184, 0x54, 48), (1296, 0x54, 112), (1392, 0x54, 112), (1536, 0x54, 96)],  # 4 of the 8 orbiters at x 1328-1728 (13.5% overrun)
 }
 def thin_spawns(lv, d):
     drops = set(THIN.get(lv, []))
