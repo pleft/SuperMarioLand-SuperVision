@@ -297,8 +297,10 @@ CXS_BOXOK  = $0153               ; 1 = CXA_* box computed this walk
     lda o_vy,x
     and #$01
     bne @right
-    lda #0                       ; GB $2879: probe the LEFT edge before stepping
-    jsr w3_wall
+    lda #<-8                     ; GB $2879: probe one tile LEFT of the object
+    jsr w3_wall                  ; ($2b84: col = (ffc3 + ffa4 - 8) >> 3, and ffc3 IS
+                                 ; o_x for a VM object -- the $53 spawns at 192 on
+                                 ; both; the GB's Tatanga turns 8px before the wall)
     bcs @xblocked
 @left:
     lda o_xl,x                   ; default direction is LEFT (GB: ffc3 -= vx)
@@ -490,8 +492,9 @@ CXS_BOXOK  = $0153               ; 1 = CXA_* box computed this walk
 ; w3_wall: the GB's HORIZONTAL probe (Call_000_2b84 left / 2b9a right): the
 ; tile at (edge x, ffc2) is solid when $5F <= tile < $F0 (note $5F, one below
 ; read_solid's floor rule, and coins $F4 pass). A = the probed edge's x offset:
-; 0 = left edge, W*8-8 = right edge (GB col = (ffae - 8) >> 3 with ffae = x + W*8;
-; obj x = o_x + 8). Row: (o_y + 8) >> 3 - 2. C=1 solid. Keeps X and tmpH3 (dx).
+; -8 = one tile left of the object (GB $2b84), W*8-8 = the right edge ($2b9a:
+; col = (ffae - 8) >> 3 with ffae = ffc3 + W*8; ffc3 = o_x for VM objects).
+; Row: (o_y + 8) >> 3 - 2. C=1 solid. Keeps X and tmpH3 (dx).
 .proc w3_probe                   ; A = row delta from the feet row
     pha
     lda o_xl,x                   ; column = (world x + 4) >> 3
@@ -527,11 +530,15 @@ CXS_BOXOK  = $0153               ; 1 = CXA_* box computed this walk
     rts
 .endproc
 .proc w3_wall
+    pha                          ; A = SIGNED x offset (-8, or W*8-8)
     clc
     adc o_xl,x
     sta feet_col
-    lda o_xh,x
-    adc #0
+    pla
+    and #$80                     ; sign-extend the offset into the high byte
+    beq :+                       ; (AND keeps the carry of the low add)
+    lda #$FF
+:   adc o_xh,x
     sta feet_col+1
     lsr feet_col+1
     ror feet_col

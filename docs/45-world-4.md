@@ -629,3 +629,12 @@ build it ran against (GOAL, 4640 frames), but the kit changed underneath it
 (wall probe, W3TAB moves) and on the current build it stalls at cam 1501 --
 law E34 in action. Kept as docs/routes/level_07_candidate_2026-09-05.txt; every
 route (3-2, 4-1, 4-2, 4-3) is re-recorded once on the final kit build.
+
+Tatanga's LEFT turn matched after one more reading of $2b84: the GB probes the
+tile one to the LEFT of the object (col = (ffc3 + ffa4 - 8) >> 3, and ffc3 is
+the port's o_x for a VM object -- the $53 spawns at 192 on both), so the left
+probe now uses offset -8: port 15-17 vs GB 16-17, right 127-128 on both. The
+TOP turn stays open: GB at obj y 57, port at 47 (the port turns when the
+sprite meets the ceiling tiles; the GB 10 px before). The ceiling probe ($2c21:
+ffad = ffc2 - 8(h-1), level row = (ffad - 32) >> 3) lands on a sky row there,
+so the GB's early turn is not that probe either -- still to find.
