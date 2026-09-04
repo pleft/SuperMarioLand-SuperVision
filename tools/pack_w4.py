@@ -27,8 +27,8 @@ W4X2 = 0x86F8                                   # the stash head follows the win
 # World 4 = two page PAIRS with the same layout: (9,10) for 4-1/4-2 with the W4
 # kit, (11,12) for 4-3 with the Sky Pop kit (w43code: the W4 kit + the vehicle
 # player in SKYFAR, resident at $A680 in page 11). docs/45.
-PAIRS = ((9, 10, (9, 10), "w4code", "w4stub"),
-         (11, 12, (11,), "w43code", "w43stub"))
+PAIRS = ((9, 10, (9, 10), "w4code", "w4stub", "w4"),
+         (11, 12, (11,), "w43code", "w43stub", "w43"))   # last = gen_w3data data-set tag
 SKYFAR_AT = 0xA680
 
 def seg(mapfile, name):
@@ -50,11 +50,11 @@ def main():
     path = sys.argv[1]
     img = bytearray(open(path, "rb").read())
     assert len(img) == 0x80000, f"{path}: expected the 512K image (run after make_512k)"
-    for RES, COLD, LEVELS, KIT, STUB in PAIRS:
-        pack_pair(img, RES, COLD, LEVELS, KIT, STUB)
+    for RES, COLD, LEVELS, KIT, STUB, TAG in PAIRS:
+        pack_pair(img, RES, COLD, LEVELS, KIT, STUB, TAG)
     open(path, "wb").write(bytes(img))
 
-def pack_pair(img, RES, COLD, LEVELS, KIT, STUB):
+def pack_pair(img, RES, COLD, LEVELS, KIT, STUB, TAG):
 
     # ---- the kit image, split at its linked segment boundaries ----------
     full = open(f"build/{KIT}.bin", "rb").read()
@@ -104,7 +104,7 @@ def pack_pair(img, RES, COLD, LEVELS, KIT, STUB):
     cold[W3SPT - BASE:W3SPT - BASE + len(spt)] = spt
     assert W3WIN + len(win) <= W4SCR, "W4 window image runs into the scripts pin"
     cold[W3WIN - BASE:W3WIN - BASE + len(win)] = win
-    pins = ((W4SCR, "build/w4scripts.bin"), (W4DL, "build/w4dlists.bin"),
+    pins = ((W4SCR, f"build/{TAG}scripts.bin"), (W4DL, f"build/{TAG}dlists.bin"),
             (W4SLICE, None))                  # tile slice below caps each blob's gap
     for (pin, path_), (nxt, _) in zip(pins, pins[1:]):
         d = open(path_, "rb").read()
@@ -113,7 +113,7 @@ def pack_pair(img, RES, COLD, LEVELS, KIT, STUB):
             f"W4 ${pin:04X} blob ({len(d)}B) runs into the ${nxt:04X} pin by {pin + len(d) - nxt}B"
         cold[pin - BASE:pin - BASE + len(d)] = d
     # tile slice: World 4's own overlay, same id-preserving order as W3's
-    order = [int(t, 16) for t in open("build/w4tiles.txt").read().split()]
+    order = [int(t, 16) for t in open(f"build/{TAG}tiles.txt").read().split()]
     ovl = open("build/gfx/w4_ovl_8A00.svt", "rb").read()
     obj = open("build/gfx/w4_obj_8000.svt", "rb").read()
     base = open("build/gfx/w1_obj_8000.svt", "rb").read()   # = the FIXED chardata sheet
@@ -135,7 +135,7 @@ def pack_pair(img, RES, COLD, LEVELS, KIT, STUB):
     # ---- RESIDENT page: prefix + headers/pipes/blocks + stub + charset + far
     res = bytearray(img[1 * STRIDE:1 * STRIDE + BANK])      # bank 1 = prefix + W3 tail
     res[W3HDR - BASE:] = b"\xFF" * (BANK - (W3HDR - BASE))  # drop W3's tail, keep the prefix
-    ball = open("build/w4ball.bin", "rb").read()            # w3_ballt pin ($B520): the copy
+    ball = open(f"build/{TAG}ball.bin", "rb").read()            # w3_ballt pin ($B520): the copy
     res[pb.W3BALL - BASE:W3HDR - BASE] = b"\xFF" * (W3HDR - pb.W3BALL)  # above inherited W3's
     res[pb.W3BALL - BASE:pb.W3BALL - BASE + len(ball)] = ball           # rows; paste W4's
     w3t_at, w3t_sz = seg(KITMAP, "W3TAB")      # the per-type tables (docs/45):

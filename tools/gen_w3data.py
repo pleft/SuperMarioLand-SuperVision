@@ -45,8 +45,13 @@ SEEDS = {
     # EAS3 build compiles out the native $3F handler), $54. The 24-type closure
     # fits the $1500 window with ~79 B to spare (docs/45); 4-3's types ($4D $52
     # $53 $59 $61) push it over and force the table relocation, added with 4-3.
-    4: [0x38, 0x39, 0x49, 0x55, 0x56, 0x3A, 0x3F, 0x54,
-        0x4D, 0x52, 0x53, 0x59, 0x61],      # 4-3 (tables now resident: W3TAB)
+    4: [0x38, 0x39, 0x49, 0x55, 0x56, 0x3A, 0x3F, 0x54],   # 4-1 + 4-2 only (pages 9/10)
+    # "World 43" = 4-3 alone (its own page pair 11/12 and kit w43code): $53 $52
+    # (spawns $50 -> $5A), $59, $54, $4D, $06 (two bobbing hazards before the
+    # arena), the boss $61 and its death chain $62 $5B $60 $5C..; sharing one W4
+    # data set put every 4-3 type into 4-1/4-2's cold page, which had 4 bytes
+    # left (the $06 alone pushed the script blob 16 B into the dlist pin).
+    43: [0x4D, 0x52, 0x53, 0x54, 0x59, 0x61, 0x06],
 }
 
 
@@ -177,7 +182,7 @@ def main():
         f.write("; $36 are all harmless on every side, and treating them as hurtful\n")
         f.write("; killed Mario when he bounced on a corpse (user-reported).\n")
         f.write("w3_side:\n    .byte " + ",".join(f"${ROM[CONTACT_TBL+5*t+2]:02X}" for t in types) + "\n")
-        if WORLD == 4:
+        if WORLD >= 4:
             # contact column +4 = the TORPEDO/missile result (GB $2aad, State_0D):
             # 4-3's Sky Pop missiles kill VM types through it (kit_sky43 torp_hit)
             f.write("; contact table column +4: what a MISSILE turns the type into\n")
@@ -203,7 +208,7 @@ def main():
         # (w3_hi.svt for the missile, w1_obj_8000.svt otherwise).
         ENGINE_IDS = {0xA0, 0xA1, 0xA2, 0xA3, 0xB0, 0xB1, 0xB2, 0xB3,  # the Fly (W3: the Kumo)
                       0xA8, 0xA9}                                    # its squashed corpse (FLY_SQ)
-        PARK_END = 0xEC if WORLD == 4 else 0xE4   # (see below)
+        PARK_END = 0xEC if WORLD >= 4 else 0xE4   # (see below)
         raw = []
         for p in params:
             raw.append(dlist(p, DL_RIGHT)); raw.append(dlist(p, DL_LEFT))

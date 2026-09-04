@@ -547,3 +547,32 @@ svgold hash changes on purpose, and its recorded route must be re-checked
   hull + 16. Now screen-space (+2 + this frame's camera step, `vstep`) from
   hull + 9: 44,46,48.. in the same frames as the GB. (2-3's torpedo has the
   same world-space motion; left as accepted.)
+
+### 4-3 against the GB, round 2 (2026-09-05)
+
+* **Horizontal wall probe** (GB $2879/$28f0, probes $2b84/$2b9a): the VM
+  mover never probed walls when stepping in x, so every walker went through
+  them and Tatanga flew out of its arena (culled at screen -21). Now: before
+  each x step the tile at the leading edge (left: o_x; right: o_x + W*8 - 8;
+  row (o_y+8)/8 - 2) is read; $5F <= tile < $F0 is solid (one below the
+  floor rule's $60 -- the arena's left wall IS a column of $5F); the response
+  is phys0 & $0C: $00 walk on, $04 flip the x direction, $0C restart the
+  script. Tatanga (phys0 $54) now bounces inside the arena (x 7..195 vs the
+  GB's 16..192, y 47..136 vs 56..136 -- its turning points still differ by
+  up to 9 px, open). battery31 caught my first version reading the floor
+  row (HUD offset) and turned the boulder into a statue; fixed.
+* **4-3 has its own data set** ("world 43" in gen_w3data, build/w43*.bin,
+  w43data.inc, pack_w4 PAIRS tag): the shared W4 set had put every 4-3 type
+  into 4-1/4-2's cold page (4 bytes left); the two $06 hazards before the
+  arena did not fit. 4-1/4-2's roster is back to its 24 types.
+* **Type $06** (two bobbing 16x16 hazards before the arena): added; motion
+  matches the GB (dx -4 / dy +-4 per 8 frames).
+* **The $1500 window**: w3_fetch/w3_cue/w3_morph/w3_child/w3_face moved to
+  the resident W3TAB area (pure logic; every page dance restores the resident
+  page before returning to them). W2C is at $627 of $6F8 now.
+* **Spawn timing** verified for the whole level: every GB slot activation
+  is a constant 111 frames from the port's (trace start offset), including
+  $54/$06/$61 at the end once the window reload read page 12.
+* Overrun: with three missiles in flight the port skips about every third
+  logic frame (profile: sprite blit 22%, margin blank 10%, restore_bg 10%,
+  map reads 19%). 4-3 gets the congestion survey once its objects are done.

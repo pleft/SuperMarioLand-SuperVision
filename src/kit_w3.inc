@@ -93,11 +93,12 @@
 .assert w3_ballbox = $B000, error, "w3_ballbox must sit at the W3BOX pin ($B000)"
 .segment "W2C"
 
-.if .defined(W4KIT)               ; each world's kit carries ITS OWN data set --
-
-.include "w4data.inc"            ; scripts, display lists, tile slice, tables --
-.else                            ; because they live in that world's COLD BANK and
-.include "w3data.inc"            ; its sprite overlay differs (docs/45).
+.if .defined(SKY43)               ; each kit carries ITS OWN data set: they live in
+.include "w43data.inc"           ; that pair's COLD page and the overlays differ.
+.elseif .defined(W4KIT)          ; 4-3 = "world 43" (gen_w3data), pages 11/12
+.include "w4data.inc"            ; 4-1/4-2, pages 9/10
+.else
+.include "w3data.inc"            ; World 3, bank 6 (docs/45)
 .endif
 .include "w3auxabi.inc"        ; aux_compose/aux_uncompose (page 8, docs/42)            ; every table here is read BEFORE the reader or
                                  ; the draw maps bank 6, so some may live in the
@@ -293,6 +294,10 @@ CXS_BOXOK  = $0153               ; 1 = CXA_* box computed this walk
     lda o_vy,x
     and #$01
     bne @right
+    lda #0                       ; GB $2879: probe the LEFT edge before stepping
+    jsr w3_wall
+    bcs @xblocked
+@left:
     lda o_xl,x                   ; default direction is LEFT (GB: ffc3 -= vx)
     sec
     sbc tmpH3
@@ -303,6 +308,20 @@ CXS_BOXOK  = $0153               ; 1 = CXA_* box computed this walk
     ldx oi                       ; checks ride == oi+1; tmpH3 = dx)
     bra @ystep
 @right:
+    lda w3_ph1,x                 ; GB $28f0: probe the RIGHT edge, x + W*8 - 8
+    lsr
+    lsr
+    lsr
+    lsr
+    and #7
+    asl
+    asl
+    asl
+    sec
+    sbc #8
+    jsr w3_wall
+    bcs @xblocked
+@rightgo:
     lda o_xl,x
     clc
     adc tmpH3
@@ -311,6 +330,27 @@ CXS_BOXOK  = $0153               ; 1 = CXA_* box computed this walk
     inc o_xh,x
 :   jsr w3_carry_rt
     ldx oi
+    bra @ystep
+@xblocked:                       ; solid ahead: phys byte 0 & $0C (GB $28ce/$2958)
+    ldy w3_ti,x                  ; $00 = walk on regardless, $04 = FLIP the x
+    lda w3_phys0,y               ; direction (Tatanga bounces off the arena walls,
+    and #$0C                     ; 4-3), $0C = RESTART the script. This probe was
+    beq @xthrough                ; missing: every VM walker went through walls.
+    cmp #$04
+    bne @xrestart
+    lda o_vy,x
+    eor #$01
+    sta o_vy,x
+    bra @ystep
+@xrestart:
+    stz w3_pc,x
+    stz o_tmr,x
+    bra @ystep
+@xthrough:
+    lda o_vy,x
+    and #$01
+    bne @rightgo
+    bra @left
 @ystep:
     lda o_vx,x
     lsr
@@ -377,52 +417,152 @@ CXS_BOXOK  = $0153               ; 1 = CXA_* box computed this walk
     rts
 .endproc
 
-; --- opcode fetch: runs extended ops until one sets the wait counter ------
-.proc w3_morph                   ; F3: become another type, fresh context
-    lda tmpL3
-    ldy #W3_NTYPES-1
-:   cmp w3_typetab,y
-    beq @found
-    dey
-    bpl :-
-    stz o_type,x                 ; unknown target: despawn
-    rts
-@found:
+
+
+                        ; sound mailbox the port has no capture for (FD)
+
+; (w3_f6 lives in FIXED -- main.s -- the window is full; exported via w2abi)
+.segment "W2C"
+.segment "W2FAR"
+.segment "W2C"
+
+.proc w3_getop                   ; A = script[pc]; pc++ (the blob is in bank 6)
+    ldy w3_ti,x
+    lda w3_scrlo,y               ; script base (bank 6) + this slot's PC
+    clc
+    adc #<W3SCRB
+    sta tmpL
+    lda w3_scrhi,y
+    adc #>W3SCRB
+    sta tmpH
+    lda tmpL
+    clc
+    adc w3_pc,x
+    sta tmpL
+    bcc :+
+    inc tmpH
+:   inc w3_pc,x
+    stz W3LINKV
+    lda w3_cold
+    sta W3LINK
+    lda #$0F
+    sta W3LINKV
+    ldy #0
+    lda (tmpL),y
+    tay
+    stz W3LINKV        ; back to THIS LEVEL's resident bank -- hardcoding 1 here
+    lda cur_bank       ; left World 4 running in World 3's bank after every single
+    sta W3LINK         ; script fetch: its VM then read W3's blob at W4's offsets,
+                       ; so waits and velocities came out of the bg charset (4-1's
+                       ; upside-down Piranha travelled 36px instead of 16, docs/45)
+    lda #$0F
+    sta W3LINKV
     tya
-    sta w3_ti,x
-    jmp w3_init_keepdir
-.endproc
-
-.proc w3_child                   ; tmpL3 = the GB type to spawn
-                                 ; (3-3's boulders were gated off while the boss
-                                 ; DRIFTED -- its walk made the arena flicker. With
-                                 ; the F0 flip-bit fix the boss stands still and the
-                                 ; boulders cost nothing visible: measured over 1971
-                                 ; arena frames, boss intact 95%, boulders 100%.
-                                 ; GB-faithful again: every cycle throws one.)
-    lda tmpL3                    ; 3-3: ONE boulder at a time (user decision) --
-    cmp #$33                     ; the boss waits for the last one to leave before
-    bne @spawn                   ; throwing again. (Only Hiyoihoi's child is $33,
-    ldx #9                       ;  and it morphs to $47 the moment it spawns.)
-@scan:
-    lda o_type,x
-    cmp #OBJ_W3
-    bne @next
-    lda w3_ti,x
-    cmp #21                      ; a boulder ($47) is still out
-    beq @none
-@next:
-    dex
-    bpl @scan
-@spawn:
-    jsr w3_spawn_at              ; engine: a slot at the parent's exact position
-    bcs @none
-    jsr w3_morph                 ; kit: the type lookup + a fresh VM context
-@none:
-    ldx oi                       ; the VM loop runs on the PARENT's slot
     rts
 .endproc
 
+; --- F0: direction control (disasm $2711-$2789) ---------------------------
+.segment "W2FAR"
+.segment "W2C"
+
+.segment "W2FAR"
+.segment "W2C"
+
+; --- terrain probes (the port's own tile semantics) -----------------------
+; In the RESIDENT page's W3TAB area (mapped whenever the kit runs; w3_read's
+; own page dance restores it before returning here): the $1500 window is
+; full to the byte and the cold-page layout pins its size (docs/45).
+.segment "W3TAB"
+.proc w3_ceil                    ; C=1 when the tile ABOVE the object is SOLID:
+    lda w3_ph1,x                 ; the GB probes ffc2 - (h-1)*8 at the floor
+    and #$07                     ; probe's column (h = phys1 & 7). The port's
+    eor #$FF                     ; "feet row" sits one row under the GB's probe
+    ina                          ; row, so the delta is -(h-1): measured, the
+    ina                          ; Suu restarts at GB y55 exactly like the GB
+    bra w3_probe                 ; (-h fired a row early, y63).
+.endproc
+.proc w3_floor                   ; C=1 when the tile under the object is SOLID
+    lda #0
+.endproc                         ; falls through
+; w3_wall: the GB's HORIZONTAL probe (Call_000_2b84 left / 2b9a right): the
+; tile at (edge x, ffc2) is solid when $5F <= tile < $F0 (note $5F, one below
+; read_solid's floor rule, and coins $F4 pass). A = the probed edge's x offset:
+; 0 = left edge, W*8-8 = right edge (GB col = (ffae - 8) >> 3 with ffae = x + W*8;
+; obj x = o_x + 8). Row: (o_y + 8) >> 3 - 2. C=1 solid. Keeps X and tmpH3 (dx).
+.proc w3_probe                   ; A = row delta from the feet row
+    pha
+    lda o_xl,x                   ; column = (world x + 4) >> 3
+    clc
+    adc #4
+    sta feet_col
+    lda o_xh,x
+    adc #0
+    sta feet_col+1
+    lsr feet_col+1
+    ror feet_col
+    lsr feet_col+1
+    ror feet_col
+    lsr feet_col+1
+    ror feet_col
+    lda o_y,x                    ; GB ffc2+8 == port o_y+8+8 (the visual-8 law)
+    clc
+    adc #16
+    lsr
+    lsr
+    lsr
+    sec
+    sbc #2
+    sta mrow
+    pla
+    clc
+    adc mrow
+    sta mrow
+    phx
+    jsr read_solid               ; A = 1 solid / 0 open
+    plx
+    lsr                          ; -> C
+    rts
+.endproc
+.proc w3_wall
+    clc
+    adc o_xl,x
+    sta feet_col
+    lda o_xh,x
+    adc #0
+    sta feet_col+1
+    lsr feet_col+1
+    ror feet_col
+    lsr feet_col+1
+    ror feet_col
+    lsr feet_col+1
+    ror feet_col
+    lda o_y,x                    ; GB row = (ffc2 - $10) >> 3 with ffc2 = o_y + 24;
+    clc                          ; the port's map rows exclude the 16px HUD (mrow =
+    adc #8                       ; screen y/8 - 2, as w3_probe does)
+    lsr
+    lsr
+    lsr
+    sec
+    sbc #2
+    sta mrow
+    phx
+    jsr read_solid               ; (for the read: feet_tile = the raw tile)
+    plx
+    lda feet_tile
+    cmp #$5F
+    bcc @open
+    cmp #$F0
+    bcs @open
+    sec
+    rts
+@open:
+    clc
+    rts
+.endproc
+
+; --- pure VM logic moved out of the $1500 window (full to the byte): these run
+; with the resident page mapped and only call RAM code (w3_getop restores the
+; page before returning), so the resident W3TAB area holds them (docs/45).
 .proc w3_fetch
 @loop:
     jsr w3_getop
@@ -515,8 +655,7 @@ CXS_BOXOK  = $0153               ; 1 = CXA_* box computed this walk
     adc #0
     sta o_xh,x
 :   jmp @loop                    ; F2/F5/F7/FD/FE: unused by the kit types, or a
-.endproc                         ; sound mailbox the port has no capture for (FD)
-
+.endproc
 .proc w3_cue                     ; tmpH2 = F9/FA, tmpL3 = the GB sound id.
     lda tmpL3                    ; F9 nn -> $dff8 nn (SFX_DFF8_01.. are 11..14,
     dec                          ; contiguous), FA nn -> $dfe0 nn (SFX_DFE0_01..
@@ -538,48 +677,50 @@ CXS_BOXOK  = $0153               ; 1 = CXA_* box computed this walk
     ldx oi
     rts
 .endproc
-; (w3_f6 lives in FIXED -- main.s -- the window is full; exported via w2abi)
-.segment "W2C"
-.segment "W2FAR"
-.segment "W2C"
-
-.proc w3_getop                   ; A = script[pc]; pc++ (the blob is in bank 6)
-    ldy w3_ti,x
-    lda w3_scrlo,y               ; script base (bank 6) + this slot's PC
-    clc
-    adc #<W3SCRB
-    sta tmpL
-    lda w3_scrhi,y
-    adc #>W3SCRB
-    sta tmpH
-    lda tmpL
-    clc
-    adc w3_pc,x
-    sta tmpL
-    bcc :+
-    inc tmpH
-:   inc w3_pc,x
-    stz W3LINKV
-    lda w3_cold
-    sta W3LINK
-    lda #$0F
-    sta W3LINKV
-    ldy #0
-    lda (tmpL),y
-    tay
-    stz W3LINKV        ; back to THIS LEVEL's resident bank -- hardcoding 1 here
-    lda cur_bank       ; left World 4 running in World 3's bank after every single
-    sta W3LINK         ; script fetch: its VM then read W3's blob at W4's offsets,
-                       ; so waits and velocities came out of the bg charset (4-1's
-                       ; upside-down Piranha travelled 36px instead of 16, docs/45)
-    lda #$0F
-    sta W3LINKV
+; --- opcode fetch: runs extended ops until one sets the wait counter ------
+.proc w3_morph                   ; F3: become another type, fresh context
+    lda tmpL3
+    ldy #W3_NTYPES-1
+:   cmp w3_typetab,y
+    beq @found
+    dey
+    bpl :-
+    stz o_type,x                 ; unknown target: despawn
+    rts
+@found:
     tya
+    sta w3_ti,x
+    jmp w3_init_keepdir
+.endproc
+.proc w3_child                   ; tmpL3 = the GB type to spawn
+                                 ; (3-3's boulders were gated off while the boss
+                                 ; DRIFTED -- its walk made the arena flicker. With
+                                 ; the F0 flip-bit fix the boss stands still and the
+                                 ; boulders cost nothing visible: measured over 1971
+                                 ; arena frames, boss intact 95%, boulders 100%.
+                                 ; GB-faithful again: every cycle throws one.)
+    lda tmpL3                    ; 3-3: ONE boulder at a time (user decision) --
+    cmp #$33                     ; the boss waits for the last one to leave before
+    bne @spawn                   ; throwing again. (Only Hiyoihoi's child is $33,
+    ldx #9                       ;  and it morphs to $47 the moment it spawns.)
+@scan:
+    lda o_type,x
+    cmp #OBJ_W3
+    bne @next
+    lda w3_ti,x
+    cmp #21                      ; a boulder ($47) is still out
+    beq @none
+@next:
+    dex
+    bpl @scan
+@spawn:
+    jsr w3_spawn_at              ; engine: a slot at the parent's exact position
+    bcs @none
+    jsr w3_morph                 ; kit: the type lookup + a fresh VM context
+@none:
+    ldx oi                       ; the VM loop runs on the PARENT's slot
     rts
 .endproc
-
-; --- F0: direction control (disasm $2711-$2789) ---------------------------
-.segment "W2FAR"
 .proc w3_face                    ; tmpL3 = argument
     lda tmpL3
     and #$C0
@@ -646,61 +787,6 @@ CXS_BOXOK  = $0153               ; 1 = CXA_* box computed this walk
     and tmpH2
     sta o_vy,x
 @rts:
-    rts
-.endproc
-.segment "W2C"
-
-.segment "W2FAR"
-.segment "W2C"
-
-; --- terrain probes (the port's own tile semantics) -----------------------
-; In the RESIDENT page's W3TAB area (mapped whenever the kit runs; w3_read's
-; own page dance restores it before returning here): the $1500 window is
-; full to the byte and the cold-page layout pins its size (docs/45).
-.segment "W3TAB"
-.proc w3_ceil                    ; C=1 when the tile ABOVE the object is SOLID:
-    lda w3_ph1,x                 ; the GB probes ffc2 - (h-1)*8 at the floor
-    and #$07                     ; probe's column (h = phys1 & 7). The port's
-    eor #$FF                     ; "feet row" sits one row under the GB's probe
-    ina                          ; row, so the delta is -(h-1): measured, the
-    ina                          ; Suu restarts at GB y55 exactly like the GB
-    bra w3_probe                 ; (-h fired a row early, y63).
-.endproc
-.proc w3_floor                   ; C=1 when the tile under the object is SOLID
-    lda #0
-.endproc                         ; falls through
-.proc w3_probe                   ; A = row delta from the feet row
-    pha
-    lda o_xl,x                   ; column = (world x + 4) >> 3
-    clc
-    adc #4
-    sta feet_col
-    lda o_xh,x
-    adc #0
-    sta feet_col+1
-    lsr feet_col+1
-    ror feet_col
-    lsr feet_col+1
-    ror feet_col
-    lsr feet_col+1
-    ror feet_col
-    lda o_y,x                    ; GB ffc2+8 == port o_y+8+8 (the visual-8 law)
-    clc
-    adc #16
-    lsr
-    lsr
-    lsr
-    sec
-    sbc #2
-    sta mrow
-    pla
-    clc
-    adc mrow
-    sta mrow
-    phx
-    jsr read_solid               ; A = 1 solid / 0 open
-    plx
-    lsr                          ; -> C
     rts
 .endproc
 .segment "W2C"

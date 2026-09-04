@@ -58,6 +58,7 @@ $(ROM): $(OBJS) $(CFG) tools/pack_banks.py tools/pack_w4.py tools/thin.json tool
 	python3 tools/gen_w3data.py super-mario-land-gb.gb 4
 	$(AS) $(ASFLAGS) -I build -D EAS3 -D W4KIT src/w2code.s -o build/w4code.o
 	$(LD) -C cfg/w4code.cfg build/w4code.o -o build/w4code.bin -m build/w4code.map -Ln build/w4code.lbl
+	python3 tools/gen_w3data.py super-mario-land-gb.gb 43
 	$(AS) $(ASFLAGS) -I build -D EAS3 -D W4KIT -D SKY43 src/w2code.s -o build/w43code.o
 	$(LD) -C cfg/w43code.cfg build/w43code.o -o build/w43code.bin -m build/w43code.map -Ln build/w43code.lbl
 	$(AS) $(ASFLAGS) -I build src/w3stub.s -o build/w3stub.o
