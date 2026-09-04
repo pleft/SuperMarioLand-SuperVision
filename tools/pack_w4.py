@@ -35,6 +35,32 @@ def seg(mapfile, name):
     m = re.search(rf"^{name}\s+([0-9A-F]+)\s+\S+\s+([0-9A-F]+)", open(mapfile).read(), re.M)
     return (int(m.group(1), 16), int(m.group(2), 16)) if m else (0, 0)
 
+
+# ---- congestion thinning (user decision 2026-09-04, docs/45) ----------------
+# The port cannot afford every object the GB spawns in its busiest stretches:
+# profiled on the real core, 4-1's pillar run (six bobbing $55 hazards + plants
+# + debris) overran 14.5% of frames and the first Pionpi fight 7% -- the user
+# sees that as flicker and slowdown. His call: compromise ONLY in congested
+# areas -- half the hazards, half the plants, fewer projectiles. Entries are
+# named by (fire_cam, type, o_y) from build/levels/level_NN_spawns.bin; every
+# named entry must exist (a typo must fail the build, not silently keep it).
+THIN = {
+    9: [(208, 0x02, 128),                       # plant on the pipe of the first Pionpi fight (x 400)
+        (1648, 0x55, 88), (1808, 0x55, 88), (1968, 0x55, 88),   # 3 of the 6 pillar hazards
+        (1840, 0x02, 128),                      # the middle of the 3 pillar plants
+        (2208, 0x36, 32), (2240, 0x36, 32)],    # 2 of the 3 stone-droppers after the pillars
+}
+def thin_spawns(lv, d):
+    drops = set(THIN.get(lv, []))
+    out = bytearray(); i = 0; seen = set()
+    while i + 1 < len(d) and not (d[i] == 0xFF and d[i+1] == 0xFF):
+        e = d[i:i+5]; key = (e[0] | e[1] << 8, e[3], e[2])
+        if key in drops: seen.add(key)
+        else: out += e
+        i += 5
+    assert seen == drops, f"level {lv}: THIN entries not found: {drops - seen}"
+    return bytes(out) + d[i:]
+
 def main():
     path = sys.argv[1]
     img = bytearray(open(path, "rb").read())
@@ -67,7 +93,7 @@ def pack_pair(img, RES, COLD, LEVELS, KIT, STUB):
     for lv in LEVELS:
         p = f"build/levels/level_{lv:02d}"
         surfs.append(open(p + ".bin", "rb").read())
-        spawns.append(open(p + "_spawns.bin", "rb").read())
+        spawns.append(thin_spawns(lv, open(p + "_spawns.bin", "rb").read()))
         ids = []
         for r in range(3):
             f = f"{p}_room{r}.bin"

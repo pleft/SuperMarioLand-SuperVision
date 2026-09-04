@@ -322,12 +322,17 @@ CXS_BOXOK  = $0153               ; 1 = CXA_* box computed this walk
     lda o_vy,x
     and #$02
     bne @fall
-    jsr w3_ceil                  ; rising: solid above it? (GB Call_000_2c21,
-    bcc @rise                    ; probed BEFORE the move)
-    ldy w3_ti,x                  ; blocked: phys byte 0 & $C0 -- $00 pass
-    lda w3_phys0,y               ; through, $40 turn to falling, $C0 RESTART the
-    and #$C0                     ; script. The Suu ($E0) climbs a scripted 96px
-    beq @rise                    ; but rests at its ceiling: 3-2 RE, GB restarts
+    ldy w3_ti,x                  ; phys byte 0 & $C0 -- $00 pass through, $40
+    lda w3_phys0,y               ; turn to falling, $C0 RESTART the script. A
+    and #$C0                     ; pass-through mover skips the PROBE itself:
+    beq @rise                    ; its verdict was ignored, and 4-1's six bobbing
+    pha                          ; $55 hazards re-probed the banked map every
+    jsr w3_ceil                  ; tick (profiled: w3_read + mod_ptr = 10% of
+    pla                          ; the frame in the pillar stretch, docs/45).
+    bcc @rise                    ; (rising: solid above it? GB Call_000_2c21,
+                                 ; probed BEFORE the move; PLA keeps C.) The
+                                 ; Suu ($E0) climbs a scripted 96px but rests
+                                 ; at its ceiling: 3-2 RE, GB restarts
     cmp #$40                     ; it at y55 -- without this the port Suu hung
     bne :+                       ; 16-40px above its tile.
     lda o_vy,x
@@ -344,12 +349,14 @@ CXS_BOXOK  = $0153               ; 1 = CXA_* box computed this walk
     sta o_y,x
     rts
 @fall:
+    ldy w3_ti,x                  ; the response is the type's phys byte 0
+    lda w3_phys0,y               ; (ffc7) & $30 -- $00 pass through, $10 land
+    and #$30                     ; (stop falling), $30 RESTART the script
+    beq @fmove                   ; (Batadon's hop loop). Pass-through: no probe.
+    pha
     jsr w3_floor                 ; solid under it? (GB Call_000_2bbb)
+    pla                          ; (PLA keeps C)
     bcc @fmove
-    ldy w3_ti,x                  ; blocked: the response is the type's phys
-    lda w3_phys0,y               ; byte 0 (ffc7) & $30 -- $00 pass through,
-    and #$30                     ; $10 land (stop falling), $30 RESTART the
-    beq @fmove                   ; script (Batadon's hop loop)
     cmp #$10
     bne :+
     lda o_vy,x
@@ -619,6 +626,10 @@ CXS_BOXOK  = $0153               ; 1 = CXA_* box computed this walk
 .segment "W2C"
 
 ; --- terrain probes (the port's own tile semantics) -----------------------
+; In the RESIDENT page's W3TAB area (mapped whenever the kit runs; w3_read's
+; own page dance restores it before returning here): the $1500 window is
+; full to the byte and the cold-page layout pins its size (docs/45).
+.segment "W3TAB"
 .proc w3_ceil                    ; C=1 when the tile ABOVE the object is SOLID:
     lda w3_ph1,x                 ; the GB probes ffc2 - (h-1)*8 at the floor
     and #$07                     ; probe's column (h = phys1 & 7). The port's
@@ -664,6 +675,7 @@ CXS_BOXOK  = $0153               ; 1 = CXA_* box computed this walk
     lsr                          ; -> C
     rts
 .endproc
+.segment "W2C"
 
 ; --- 3-3's SPHERE: the x-3 rescue ending, armed exactly like 1-3's (docs/25).
 ; 3-3's arena is geometrically identical to 1-3's -- the sphere is $E1 at world

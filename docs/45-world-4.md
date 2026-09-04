@@ -429,3 +429,42 @@ deferral frames, stalls 2% flat). load_level now gives World 4 (levels 9+) a
 budget of 6; World 3 keeps 2 (its 40x24 lifts overran at 3, docs/44). svgold
 9/9 identical, battery31 all pass. The lever's ceiling is the frame: re-measure
 if a later 4-x scene shows stalls above the baseline.
+
+### Congestion, measured and thinned (2026-09-04, user: "nothing fixed ... find those areas, solve the problem")
+
+The user's call: compromise ONLY in congested areas -- half the pipe plants,
+drop projectile shooters. Two new tools made that a measurement instead of a
+guess:
+
+* `tools/svprof.c` -- the real core with a PC sampler in `Loop6502` (every
+  256 cycles; gated on death_anim == 0 and Mario on screen; PROF_FROM/TO/OUT/
+  ALIVE env). Build like svshot but compile watara.c with
+  `-DLoop6502=orig_Loop6502`.
+* `tools/svcongest.py LEVEL` -- warps to every checkpoint, plays a fixed
+  run/jump/fire script, and reports per 128px camera bin the logic-stall rate
+  (timer_sub unchanged across a display frame with Mario on screen and
+  unfrozen = the main loop overran), the mean live objects and the types.
+
+4-1 before: x 2048-2175 (the $55 pillars) 14.5% of frames overrun with 4.7
+objects live; x 256-383 (the first Pionpi fight) 7.0%; x 2176+ 8.4%. Removing
+every $55 by poke took the pillars to 1.3%, so the hazards are the cost. The
+profile there: ~50% of the CPU in the render pipeline (sprite_blit 15%,
+blit_tile 8%, render_all 7%, restore_bg 6%, blit_blank 5%), ~13% in map reads
+(w3_read 5.5%, mod_ptr 4.4%, map_transform, mod_test), the VM fetch itself
+under 0.5% (its two page dances per script byte are NOT the problem).
+
+Engine side: a pass-through mover (phys0 & $C0 / & $30 == 0) no longer runs
+the ceiling/floor probe whose verdict it ignores (w3_move; the probes moved
+to the resident W3TAB area because the $1500 window is pinned by the cold
+layout). Semantics identical (svgold 9/9, battery31); the stall rate did not
+move, so the probes were not the bottleneck either -- the sprites are.
+
+Data side (`tools/pack_w4.py THIN`, entries by (fire_cam, type, o_y), the
+build fails if one is missing): 4-1 drops the plant on the first Pionpi
+fight's pipe (x 400), three of the six pillar hazards ($55 at fire_cam 1648/
+1808/1968), the middle pillar plant (1840) and two of the three stone-droppers
+after the pillars ($36 at 2208/2240). After: pillars 4.6%, Pionpi fight 4.3%,
+1920-2047 3.7%; 2176+ stays 8.3% (platform + $38 + its stones; the survey's
+script dies there, so that stretch is measured on 192 frames only).
+`tools/pack_w4.py` is now a Makefile dependency of the ROM (it was not, and a
+THIN edit built nothing -- E35's cousin).
