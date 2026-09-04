@@ -391,3 +391,25 @@ Also found while re-homing w3_hp: **himod (the cols>=360 overlay) sat on the
 composer's stash CS_B ($1FA0-$1FDB, object slots 7-9)**. Moved to $1C00-$1C3F
 above the EAS3 kits' window code; the three kit cfgs now cap W2WIN at $1BFF so
 the linker refuses a kit that grows into it.
+
+### The plant "erased partially" (2026-09-04, user: every pipe plant, both sides)
+
+Reproduced on the real core with a per-frame metric (non-sky pixels in each
+4px byte-half of the plant's 8x16 sprite above the pipe rim): on the shipped
+build 80 of 520 plant-up frames along the 4-1 route had one byte-half empty.
+Not an erase at all: `draw_quad`'s OBJ-behind-BG rule sampled the quad's two
+bytes on rows 0/5/7 of the BACKGROUND and skipped the whole quad when any of
+them was non-white -- so a ladder pole behind the plant (4-1 has one behind
+almost every pipe) took the plant's cell away whenever the sample hit a pole
+line. The GB's OAM priority (attr bit7, OAM-checked on tiles $92-$95) is per
+PIXEL: the sprite shows through every colour-0 background pixel and the pole's
+lines draw over it. The blit's aligned fast path now applies exactly that
+(`bmerge`: allow = pixels whose background is 0; dst = (dst & ~(M & allow)) |
+(src & allow)), and the whole-quad sample is gone; the plant also emerges 1px
+at a time now instead of 8. FIXED is full to the byte (CODE ends $EFF9): the
+helper works in the shifted path's idle zero-page masks. Every behind object
+(plant, pillar, cannon) is spawned 4px-aligned and never moves in x, so the
+shifted path carries no behind case. Like-for-like on the same scripts: 80 -> 0
+and 80 -> 15 byte-half frames, the 15 being the metric splitting a sprite that
+sits 3px into its byte (pixel dumps show it intact). svgold 9/9 identical,
+battery31 all pass.

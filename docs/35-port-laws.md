@@ -526,3 +526,9 @@ ball_hits' generic |dx|<10,|dy|<10 is not the GB's ball test (docs/12,
 docs/38 s12). For type 36 in worlds >= 3, FIXED calls `w3_ballbox` at $B000
 (first in every EAS3 kit's W3TAB paste; the kit asserts the address). A kit
 that puts anything before it in W3TAB breaks every Superball kill.
+
+### E41. OBJ-behind-BG priority is per pixel, never per cell
+The GB hides a priority sprite only under non-zero background PIXELS. Any
+port rule that decides per quad/cell ("skip the quad if a sample is non-white")
+will delete the sprite under decorations (4-1's poles behind every pipe plant).
+The blit's `bmerge` is the only correct place; `w3_behind` just sets the flag.

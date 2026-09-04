@@ -10422,40 +10422,12 @@ wcyc: .byte 2, 5, 1              ; port pose ids for GB metasprites 1, 2, 3
                                  ; (the user's "intermittently visible" cannon,
                                  ; reported three times before this was found).
     jsr set_dst
-    lda blit_behind              ; it (the GB shows such a sprite only over BG
-    beq :+                       ; colour 0, and the background is already painted
-    ldy #0                       ; by the time sprites run, so testing the cell IS
-    lda (dst_ptr),y              ; the test -- exact for the pillar inside its pipe).
-    iny                          ; Sample the quad's FULL 8px width (bytes 0+1) on
-    ora (dst_ptr),y              ; both rows: byte 0 alone is a 4px sliver, and the
-    ldy #VRAM_STRIDE*5           ; pipe's art is vertical stripes -- with the right
-    ora (dst_ptr),y              ; camera sub-byte phase the sliver landed on a
-    iny                          ; white stripe, read 0, and the cannon drew ON the
-    ora (dst_ptr),y              ; pipe it should hide in. Rows 0, 5 AND 7: rows
-    tax                          ; 0+2 both sat above the rim while the quad's
-    lda dst_ptr                  ; lower rows straddled INTO the pipe, and the
-    clc                          ; whole quad drew over it (user-reported twice).
-    adc #<(VRAM_STRIDE*7)        ; A straddling quad is now skipped whole: the
-    sta dst_ptr                  ; head emerges 8px at a time instead of 1 -- the
-    lda dst_ptr+1                ; port's per-quad blit cannot split a quad at
-    adc #>(VRAM_STRIDE*7)        ; the rim. (Y is 8-bit: stride*7=336 needs the
-    sta dst_ptr+1                ; pointer bumped; blit re-derives dst from
-    ldy #0                       ; set_dst state? NO -- restore it below.)
-    txa
-    ora (dst_ptr),y
-    iny
-    ora (dst_ptr),y
-    tax
-    lda dst_ptr                  ; restore dst_ptr for the blit
-    sec
-    sbc #<(VRAM_STRIDE*7)
-    sta dst_ptr
-    lda dst_ptr+1
-    sbc #>(VRAM_STRIDE*7)
-    sta dst_ptr+1
-    txa
-    beq :+
-    rts
+    ; blit_behind (w3_behind): the GB's OBJ-behind-BG priority is now applied
+    ; PER PIXEL inside the blit (bmerge). The whole-quad sample that lived here
+    ; hid a plant's 8x8 cell whenever ANY background pixel under it was non-white
+    ; -- the ladder poles behind 4-1's pipe plants took a whole column off every
+    ; plant (user: "the plant gets erased partially", both sides). The GB shows
+    ; the sprite through every colour-0 pixel and the pole's lines over it.
 :   stz blit_opaque              ; Mario is transparent (GB colour 0 = see-through)
     jmp sprite_blit_subpx
 ; (tail call)
@@ -11048,6 +11020,38 @@ ok:
 ; with optional horizontal flip (do_flip). Each row's 2 source bytes are shifted
 ; left by spr_subx*2 bits into 3 dst bytes (the sprite can spill into a 3rd byte),
 ; merged with transparency. Unifies the byte-aligned + flipped paths.
+; bmerge: the GB's OBJ-behind-BG priority (OAM attr bit7) per PIXEL: A = the
+; sprite's opaque mask M, X = its pixels, Y = the dst byte index. Only pixels
+; whose background is colour 0 take the sprite: allow = ~expand((d | d>>1) & $55)
+; -> dst = (dst & ~(M & allow)) | (src & allow). 4-1's plants (OAM-checked: attr
+; $C0/$C8 on tiles $92-$95) show through the white of the poles behind them
+; and are covered by the poles' lines, exactly as on the GB.
+; Scratch: m0/m1/m2 -- the SHIFTED path's masks, idle on the aligned path that
+; is the only caller (zero page: 11 bytes cheaper than absolute temps, and no
+; new RAM -- E39).
+.proc bmerge
+    sta m0                       ; M
+    lda (cur_dst),y
+    sta m1                       ; d
+    lsr
+    ora m1
+    and #$55
+    sta m2
+    asl
+    ora m2
+    eor #$FF
+    sta m2                       ; allow = pixels where d == 0
+    and m0                       ; M & allow
+    eor #$FF
+    and m1
+    sta m1                       ; d & ~(M & allow)
+    txa
+    and m2                       ; src & allow
+    ora m1
+    sta (cur_dst),y
+    rts
+.endproc
+
 .proc sprite_blit_subpx
     lda src_ptr
     sta cur_src
@@ -11115,6 +11119,8 @@ ok:
     sta tmp_src
     tax
     lda MASKTAB,x                ; M(src) from the table (docs: shtab_hi page 0)
+    ldx blit_behind              ; OBJ behind BG (plant/pillar/cannon): per pixel
+    bne @a0b
     eor #$FF
     and (cur_dst),y
     ora tmp_src
@@ -11126,6 +11132,8 @@ ok:
     sta tmp_src
     tax
     lda MASKTAB,x
+    ldx blit_behind
+    bne @a1b
     eor #$FF
     and (cur_dst),y
     ora tmp_src
@@ -11165,6 +11173,18 @@ ok:
     jmp @arow                    ;  branch)
 @adone:
     rts
+@a0b:
+    ldx tmp_src
+    jsr bmerge
+    bra @a1
+@a1b:
+    ldx tmp_src
+    jsr bmerge
+    bra @a2
+                                 ; (the SHIFTED path below has no behind case: every
+                                 ;  behind object -- pipe plant, pillar, cannon -- is
+                                 ;  spawned at a 4px-aligned x and never moves in x,
+                                 ;  so it always takes the aligned fast path)
 @row:
     lda do_flip
     beq @noflip
