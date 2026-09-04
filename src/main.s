@@ -964,9 +964,36 @@ main_loop:
     rts                          ; near the level end (a room visit rebases the fb
 .endproc                         ; lattice) -- tile 0 drew as literal '0' glyphs
 
+himod = $1FA0                    ; windowed broken/used overlay for cols >= 360 (64 B,
+                                 ; 32 slots x 2; above W3CTAG $1F80-$1F9F, below W3CMB
+                                 ; $1FFF). Cleared with the W3/W4 kit init (w2code.s).
 ; mod_ptr: map_ptr = &tile_mod[feet_col*2 + (mrow>>3)] ; tmpL = bit mask (1<<(mrow&7)).
 ; The "modified" bitmap is 1 bit per surface (col,row): set = used ?-block / broken brick.
+; tile_mod holds 360 columns (720 B). Surface columns >= 360 (World 4's levels run
+; to 480) would index PAST the array into the object SoA -- a broken brick there
+; corrupted o_* and never stayed broken (user-found; docs/45). Those columns use a
+; 32-wide windowed overlay `himod` ($1FA0, 64 B) instead: slot = col & 31. No two
+; World-4 modifiable tiles past col 360 share a (slot,row) pair (verified by the
+; extractor), so the window never aliases. Columns 0-359 (all of Worlds 1-3, whose
+; widest level is 2-3 at exactly 360) are byte-for-byte unchanged.
 .proc mod_ptr
+    lda feet_col+1
+    beq @lo                      ; col < 256 -> tile_mod
+    lda feet_col                 ; 256..511 (max col 479): decide by the low byte --
+    cmp #<360                    ; cols 360..511 all have low >= $68, cols 256..359 < $68
+    bcc @lo                      ; 256..359 -> tile_mod
+                                 ; else col >= 360 -> windowed himod, slot = col & 31
+    lda mrow
+    cmp #8                       ; C = (mrow >= 8): the +1 row byte, folded into...
+    lda feet_col
+    and #31
+    rol                          ; ...slot*2 by ROL (slot <= 31 so C stays clear after)
+    adc #<himod
+    sta map_ptr
+    lda #>himod
+    sta map_ptr+1
+    bne @mask                    ; >himod ($1F) != 0 -> always
+@lo:
     lda feet_col
     asl
     sta map_ptr
@@ -994,6 +1021,7 @@ main_loop:
     lda map_ptr+1
     adc #>tile_mod
     sta map_ptr+1
+@mask:
     lda mrow
     and #7
     tax

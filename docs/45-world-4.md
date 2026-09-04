@@ -171,3 +171,33 @@ Repeat until the log prints GOAL, then move the result to
 the whole chain and it must be re-searched from the start.
 
 Remaining pits to cross: cols 200-219, 280-321, 360-383, 399-401, 420-423.
+
+## BUG (user-found, confirmed 2026-09-03): breakable bricks past world-col 360 don't stay broken
+
+Symptom (user, big Mario, ~x3264 in 4-1): bonking a $82 brick plays the break
+animation + scores, but the brick REAPPEARS and can be re-bonked for score again,
+indefinitely.
+
+Root cause: `tile_mod` (the broken/used/collected bitmap, main.s) is 720 bytes =
+360 world-columns x 2 (16 rows). 4-1 is **460 columns** -- the first level past
+360. `mod_ptr` = tile_mod + col*2 + (row>=8). For col 408 (x3264, the 3rd $82
+trio) that is tile_mod+817, which is 97 bytes PAST the array, landing in the
+object SoA (o_pdr region, ~$103C). The object pass rewrites it every frame, so
+the mod bit never survives -> `map_transform` keeps returning $82 -> the brick is
+re-solid and re-breakable. PROVEN: at col408 two bonks scored +50 each
+(008300->008350->008400) with the block never removed. Bricks at col <=359
+(x<=2872) are fine (verified: col129 breaks and persists until death).
+
+Also latent from the same undersizing: the ROOM region keys at bytes 640-679
+(= surface cols 320-339); 4-1 has 460 surface cols AND rooms, so cols 320-339
+collide with room cells. The old design assumed surface <= 320 cols (comment at
+tile_mod).
+
+Fix requires enlarging tile_mod to the widest W4 level (4-3 = 480 cols -> 960 B
+surface + 40 B room = ~1000 B, vs 720 today) and moving the room region off the
+surface range. BLOCKER: BSS is exactly full (4096/4096); ZP/RCODE/kit-window/
+HUDSHADOW/kit-cache fill $0000-$1FFF; revpix (256B) and HUDSHADOW (640B) are both
+hot/fully-used. So this needs a deliberate RAM-budget pass -- natural to do with
+the 4-2/4-3 kit-roster RAM work (they need bank/RAM changes anyway). Interim: the
+affected bricks are OPTIONAL (not on the completing route); small Mario and level
+completability are unaffected.

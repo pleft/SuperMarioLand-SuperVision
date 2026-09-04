@@ -91,6 +91,10 @@ init:                            ; $1500: bind our vector table
                                  ; The composer is OFF by default anyway: v2
                                  ; trailed on the FIRST Batadon (user-caught,
                                  ; docs/42) -- poke $1FE0=1 to enable
+    ldx #63                      ; clear himod ($1FA0, main.s mod_ptr): the windowed
+:   stz $1FA0,x                  ; broken/used overlay for surface cols >= 360. World-4
+    dex                          ; levels run past tile_mod's 360 cols; a fresh level
+    bpl :-                       ; starts with nothing broken there.
     jmp w3_cinval
 .else
     rts
