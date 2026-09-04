@@ -588,11 +588,11 @@ sq_t:  .byte SUB_T, SUB_T+1, SUB_T+2, SUB_T+3
 .endproc
 
 .proc upd_torp
-    lda o_xl,x                   ; +2px/f ON SCREEN (GB OAM: 44,46,48,... per frame
+    lda vstep                    ; +2px/f ON SCREEN (GB OAM: 44,46,48,... per frame
     clc                          ; while the camera advances 0.5/f), so the world
-    adc #2                       ; step is 2 + this frame's camera step (vstep)
-    adc vstep
-    sta o_xl,x
+    adc #2                       ; step is 2 + this frame's camera step (vstep) --
+    adc o_xl,x                   ; summed FIRST: a second adc after the low-byte
+    sta o_xl,x                   ; add ate its carry and missiles wrapped 256px left
     bcc :+
     inc o_xh,x
 :   lda o_xl,x                   ; off the right edge (GB kills at OAM $A9)
