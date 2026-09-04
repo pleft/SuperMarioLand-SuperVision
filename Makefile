@@ -110,3 +110,7 @@ clean:
 	rm -f $(OBJS) $(ROM) build/god/*.o build/super-mario-land-god.sv
 
 .PHONY: all clean
+
+# a failed pack step (pack_w4 after make_512k) must not leave a fresh-looking,
+# half-built image behind -- make would then report "Nothing to be done"
+.DELETE_ON_ERROR:

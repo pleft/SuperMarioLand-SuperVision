@@ -284,3 +284,16 @@ entry 52 through the window shift (spawn_base 51 at f4414 on the route), rises
 and falls at 0.5px/frame between y40 and y100 with a 240-frame period at a fixed
 x -- the W3 $3A script already GB-measured on 3-3 (docs/44). Boarded from the
 x2918 ledge with a short hop (J9) timed to the low phase; run-jumps overshoot it.
+
+## Per-type tables relocated to the resident bank (2026-09-04, for 4-3)
+
+gen_w3data now emits w3_typetab/scrlo/scrhi/phys0-2/stomp/side and the three
+exception tables into segment W3TAB (cfg/w3code.cfg: W3TABM $B000..$B51F, listed
+LAST so the bytes end the kit .bin); pack_banks pastes them at $B000 in bank 1,
+pack_w4 at $B000 in page 9 (over bank 1's inherited copy). Every reader already
+runs with the resident bank mapped, so no code changed. The $1500 windows fell
+from 2010/1977 B to 1784 B for both worlds -- room for 4-3's 43-type closure
+(+~217 B) with ~50 B to spare. Gate: svgold 9/9, battery31 10/10, 4-1/4-2 boot.
+Trap: pack_w4 runs after make_512k has already written the image, so a pack_w4
+failure left a fresh-looking half-built .sv and `make` then said "Nothing to be
+done" -- Makefile now has .DELETE_ON_ERROR.

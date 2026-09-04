@@ -107,6 +107,13 @@ def main():
     ball = open("build/w4ball.bin", "rb").read()            # w3_ballt pin ($B520): the copy
     res[pb.W3BALL - BASE:W3HDR - BASE] = b"\xFF" * (W3HDR - pb.W3BALL)  # above inherited W3's
     res[pb.W3BALL - BASE:pb.W3BALL - BASE + len(ball)] = ball           # rows; paste W4's
+    w3t_at, w3t_sz = seg("build/w4code.map", "W3TAB")      # the per-type tables (docs/45):
+    if w3t_sz:                                              # LAST in the kit .bin, resident
+        assert w3t_at == 0xB000, "W3TABM moved -- update pack_w4"   # at $B000 (W3's copy from
+        w3t = full[len(full) - w3t_sz:]                     # bank 1 sits there: replace it)
+        assert w3t_at + w3t_sz <= pb.W3BALL, f"W4 tables run into the ball pin by {w3t_at + w3t_sz - pb.W3BALL}"
+        res[w3t_at - BASE:pb.W3BALL - BASE] = b"\xFF" * (pb.W3BALL - w3t_at)
+        res[w3t_at - BASE:w3t_at - BASE + w3t_sz] = w3t
     # the engine finds a header at W3HDR + (level-6)*24, so slot 3 is level 9's:
     # reserve every slot UP TO the highest level here, or the pipes/blocks that
     # follow land inside the header region and the header write then clobbers

@@ -562,6 +562,19 @@ def pack_w3(img, sym, prefix, l11):
         assert all(b == 0xFF for b in img[foff:foff + len(far3)]), \
             f"bank 1 ${far3_at:04X} not free for the W3 far kit"
         img[foff:foff + len(far3)] = far3
+    # the per-type tables (segment W3TAB, docs/45): LAST in the kit .bin (cfg
+    # lists its memory area last), resident at $B000 in bank 1 -- every reader
+    # runs with the resident bank mapped, so no bank dance and no window space
+    tm = re.search(r"^W3TAB\s+([0-9A-F]+)\s+\S+\s+([0-9A-F]+)", m3, re.M)
+    if tm:
+        tab_at, tab_sz = int(tm.group(1), 16), int(tm.group(2), 16)
+        assert tab_at == 0xB000, "W3TABM moved -- update pack_banks"
+        tab = full3[len(full3) - tab_sz:]
+        assert tab_at + tab_sz <= 0xB520, f"W3 tables run into the ball pin by {tab_at + tab_sz - 0xB520}"
+        toff = 1 * STRIDE + tab_at - BASE
+        assert all(b == 0xFF for b in img[toff:toff + tab_sz]), "bank 1 $B000 not free for the W3 tables"
+        img[toff:toff + tab_sz] = tab
+        print(f"pack_banks: W3 tables {tab_sz}B at $B000")
     print(f"pack_banks: W3 far kit {len(far3)}B at ${far3_at:04X}")
     print(f"pack_banks: W3 -> bank 6 cold {len(cold) + len(spt) + len(win)}B, "
           f"bank 1 tail {len(tail)}B at ${W3HDR:04X} "
