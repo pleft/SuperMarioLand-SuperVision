@@ -514,3 +514,14 @@ three plants, the last hazards, the stone-droppers and the walkers were each
 tried and reverted). Every plant in both levels survived the algorithm --
 dropping one never bought a point. Shipped ~/Desktop/sml_0904f.sv; svgold
 9/9 identical, battery31 all pass.
+
+World 3 under the same algorithm (2026-09-04, "apply it in all congested
+areas in all levels"): `svcongest` found 3-2's first stretch (x 128-511) at
+13-19% -- five Tokotokos ($25) with two Nokobons and a plant -- and nothing
+else above baseline in 3-1/3-3 (3-3's arena is docs/44's own story).
+`svthin 7 start`: the two plants were tried first and bought nothing
+(reverted); dropping three of the five Tokotokos (fire_cam 112, 208, 224)
+took it from 12.5% to 1.9%. pack_banks.py now applies tools/thin.json to the
+World 1-3 lists too (tools/thin.py is the shared reader). Consequence: 3-2's
+svgold hash changes on purpose, and its recorded route must be re-checked
+(log: docs/routes/thin_log_w3_2026-09-04.txt).

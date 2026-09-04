@@ -1,0 +1,14 @@
+start: baseline 12.5% over 1118 frames, 4.14 objs; candidates [(272, '0x2'), (336, '0x2'), (0, '0x25'), (48, '0x4'), (112, '0x25'), (160, '0x4'), (208, '0x25'), (224, '0x25'), (288, '0x25'), (448, '0x25'), (480, '0xe')]
+  drop   272 0x2 y104 (static): 12.4% (1117 fr, 3.84 objs) -> revert
+  drop   336 0x2 y 24 (static): 12.4% (1113 fr, 3.97 objs) -> revert
+  drop     0 0x25 y 32 (moving): 12.9% (1138 fr, 4.27 objs) -> revert
+  drop    48 0x4 y120 (moving): 13.0% (1127 fr, 4.06 objs) -> revert
+  drop   112 0x25 y 32 (moving): 6.8% (1095 fr, 3.45 objs) -> KEEP
+  drop   160 0x4 y112 (moving): 6.8% (1098 fr, 3.28 objs) -> revert
+  drop   208 0x25 y 56 (moving): 4.5% (1085 fr, 2.76 objs) -> KEEP
+  drop   224 0x25 y 56 (moving): 1.9% (1083 fr, 2.28 objs) -> KEEP
+start: final 1.9% (was 12.5%); kept [(112, '0x25'), (208, '0x25'), (224, '0x25')]
+   (warning: only 223 measured frames)
+start: baseline 1.8% over 223 frames, 2.29 objs; candidates [(192, '0x36'), (192, '0x36'), (208, '0x36'), (208, '0x36'), (224, '0x36'), (224, '0x36'), (384, '0x49'), (48, '0x3c'), (128, '0x4'), (272, '0x4')]
+   (warning: only 223 measured frames)
+start: final 1.8% (was 1.8%); kept []

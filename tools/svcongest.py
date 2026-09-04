@@ -9,9 +9,11 @@ S = "/private/tmp/claude-501/-Users-pleft-Dev-SuperMarioLand/407973b1-4713-4577-
 lbl = {m.group(2): int(m.group(1), 16) for m in re.finditer(r'al 00([0-9A-F]{4}) \.(\w+)', open('build/rom.lbl').read())}
 ot, ti, ts = lbl['o_type'], lbl['w3_ti'], lbl['timer_sub']
 frz = [lbl[n] for n in ('mario_grow', 'mario_shrink', 'death_anim', 'goal_phase', 'bonus_phase', 'pipe_phase')]
-page = {9: 9, 10: 9, 11: 11}[lvl]; kit = {9: 'w4code', 10: 'w4code', 11: 'w43code'}[lvl]
-kl = {m.group(2): int(m.group(1), 16) for m in re.finditer(r'al 00([0-9A-F]{4}) \.(\w+)', open(f'build/{kit}.lbl').read())}
-tab = list(open(rom, 'rb').read()[page * 0x8000 + kl['w3_typetab'] - 0x8000:][:48])
+page = {6: 1, 7: 1, 8: 1, 9: 9, 10: 9, 11: 11}.get(lvl); kit = {6: 'w3code', 7: 'w3code', 8: 'w3code', 9: 'w4code', 10: 'w4code', 11: 'w43code'}.get(lvl)
+if kit:
+    kl = {m.group(2): int(m.group(1), 16) for m in re.finditer(r'al 00([0-9A-F]{4}) \.(\w+)', open(f'build/{kit}.lbl').read())}
+    tab = list(open(rom, 'rb').read()[page * 0x8000 + kl['w3_typetab'] - 0x8000:][:48])
+else: tab = [0] * 48        # Worlds 1-2: no VM types
 play = ",".join(["R30,J16,.6,F12,Q16,.8"] * 24)
 bins = collections.defaultdict(lambda: [0, 0, 0, collections.Counter()])   # frames, stalls, objsum, types
 for ck in (0, 640, 1280, 1920, 2240):

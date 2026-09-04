@@ -44,18 +44,7 @@ def seg(mapfile, name):
 # areas -- half the hazards, half the plants, fewer projectiles. Entries are
 # named by (fire_cam, type, o_y) from build/levels/level_NN_spawns.bin; every
 # named entry must exist (a typo must fail the build, not silently keep it).
-THIN = {int(k): [tuple(e) for e in v] for k, v in
-        __import__("json").load(open("tools/thin.json")).items()}   # written by tools/svthin.py
-def thin_spawns(lv, d):
-    drops = set(THIN.get(lv, []))
-    out = bytearray(); i = 0; seen = set()
-    while i + 1 < len(d) and not (d[i] == 0xFF and d[i+1] == 0xFF):
-        e = d[i:i+5]; key = (e[0] | e[1] << 8, e[3], e[2])
-        if key in drops: seen.add(key)
-        else: out += e
-        i += 5
-    assert seen == drops, f"level {lv}: THIN entries not found: {drops - seen}"
-    return bytes(out) + d[i:]
+from thin import THIN, thin_spawns          # tools/thin.json (docs/45, E42)
 
 def main():
     path = sys.argv[1]

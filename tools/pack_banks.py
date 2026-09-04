@@ -31,6 +31,7 @@ worlds 2-4 load ONLY two overlays over W1's base sheets):
 RULE 5: reads only gitignored build artifacts; output is gitignored.
 Usage: pack_banks.py <image.sv> <mapfile> <level:bank> [<level:bank> ...]
 """
+from thin import thin_spawns
 import os, re, json, sys
 
 BANK = 0x4000
@@ -164,6 +165,7 @@ def main():
         for key, suffix in (("map", ".bin"), ("pipes", "_pipes.bin"),
                             ("blocks", "_blocks.bin"), ("spawns", "_spawns.bin")):
             blobs[key] = open(lv + suffix, "rb").read()
+            if key == "spawns": blobs[key] = thin_spawns(level, blobs[key])   # tools/thin.json (E42)
         rooms = []
         for r in range(3):
             p = f"{lv}_room{r}.bin"
@@ -414,7 +416,7 @@ def pack_w3(img, sym, prefix, l11):
     for lv in (6, 7, 8):
         p = f"build/levels/level_{lv:02d}"
         surfs.append(open(p + ".bin", "rb").read())
-        spawns.append(open(p + "_spawns.bin", "rb").read())
+        spawns.append(thin_spawns(lv, open(p + "_spawns.bin", "rb").read()))   # tools/thin.json (E42)
         ids = []
         for r in range(3):
             d = open(f"{p}_room{r}.bin", "rb").read()

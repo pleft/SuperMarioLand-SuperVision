@@ -20,9 +20,12 @@ SCENES = {  # (level, name): (pokes, script, first frame, cam lo, cam hi)
     (9, "pillars"): warp(1920) + (1900, 2300),      # (a respawn skips every entry fired before it: pessimistic scenes below instead)
     (9, "pillars2"): place(1748, 40) + (1740, 2300),  # walked in: all six hazards + plants alive, as in real play
     (10, "orbiters2"): place(1150, 40) + (1150, 1700),
+    (7, "start"):   ("0x53:1@40,0x50:1@40", ".40," + PLAY, 60, 100, 520),   # 3-2: Tokotokos + Nokobons + a plant
+    (6, "start"):   ("0x53:1@40,0x50:1@40", ".40," + PLAY, 60, 100, 520),
     (10, "orbiters"): warp(1280) + (1280, 1700),
 }
-STATIC = {0x02, 0x49, 0x55, 0x36, 0x0C}; LIFTS = {0x0A, 0x0B}
+STATIC = {0x02, 0x49, 0x55, 0x36, 0x0C, 0x1C}   # $1C = W3's static shooter
+LIFTS = {0x0A, 0x0B}
 lbl = {m.group(2): int(m.group(1), 16) for m in re.finditer(r'al 00([0-9A-F]{4}) \.(\w+)', open('build/rom.lbl').read())}
 ot, ts = lbl['o_type'], lbl['timer_sub']
 frz = [lbl[n] for n in ('mario_grow', 'mario_shrink', 'death_anim', 'goal_phase', 'bonus_phase', 'pipe_phase')]
