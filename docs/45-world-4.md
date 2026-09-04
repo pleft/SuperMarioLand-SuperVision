@@ -278,3 +278,9 @@ deep-start at cam 1280: spawn (1496,136), x 1448-1496, y 112-160; port instance
 at (1328,112): x 1280-1328, y 88-136, f2412 -> f2556). Two lanes (o_y 48 / 112)
 and both hurt from every side; the script's velocity ladder decodes to exactly
 this loop.
+
+**$3A lift (x2928) -- VERIFIED on the port after the spawner fix.** Spawns from
+entry 52 through the window shift (spawn_base 51 at f4414 on the route), rises
+and falls at 0.5px/frame between y40 and y100 with a 240-frame period at a fixed
+x -- the W3 $3A script already GB-measured on 3-3 (docs/44). Boarded from the
+x2918 ledge with a short hop (J9) timed to the low phase; run-jumps overshoot it.
