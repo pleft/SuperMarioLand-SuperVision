@@ -486,8 +486,36 @@ CXS_BOXOK  = $0153               ; 1 = CXA_* box computed this walk
 @done:
     rts
 @other:
-    jmp @loop                    ; F2/F5/F7/FB/FC/FD: unused by W3 kit types
-.endproc
+    cmp #$FB                     ; FB nn (GB $2839): RESTART the script unless the
+    bne :+                       ; object is within nn px to the RIGHT of Mario --
+    ldx oi                       ; (objx - c202) < nn unsigned. 4-3's $53 flies
+    lda o_xl,x                   ; straight, restarting, until it is 32px from the
+    sec                          ; plane, then dives (GB-traced: the port dived 70
+    sbc cam_x                    ; frames early while this op was skipped). Port
+    sec                          ; coords: (o_x - cam) - spr_x; the GB's +8 on
+    sbc spr_x                    ; both sides cancels.
+    cmp tmpL3
+    bcs @restart
+    jmp @loop                    ; within range: carry on with the dive
+@restart:
+    stz w3_pc,x                  ; else PC = 0 and keep interpreting
+    jmp @loop
+:   cmp #$FC                     ; FC nn (GB $2856): teleport to GB (x $70, y nn)
+    bne :+
+    ldx oi
+    lda tmpL3
+    sec
+    sbc #24                      ; GB y -> port o_y (the +24 law)
+    sta o_y,x
+    lda cam_x
+    clc
+    adc #$70-8                   ; GB screen x $70 = sprite left $68 + cam
+    sta o_xl,x
+    lda cam_x+1
+    adc #0
+    sta o_xh,x
+:   jmp @loop                    ; F2/F5/F7/FD/FE: unused by the kit types, or a
+.endproc                         ; sound mailbox the port has no capture for (FD)
 
 .proc w3_cue                     ; tmpH2 = F9/FA, tmpL3 = the GB sound id.
     lda tmpL3                    ; F9 nn -> $dff8 nn (SFX_DFF8_01.. are 11..14,

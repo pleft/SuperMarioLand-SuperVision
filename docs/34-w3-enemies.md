@@ -178,3 +178,14 @@ nothing new had to be extracted.
 
 LESSON (law E-class): "it was capture-verified" in a comment is not the same as
 "I verified it". The HP and cadence were right; the geometry never was.
+
+## VM opcodes the 4-3 scripts brought in (2026-09-05, from the interpreter at $2676)
+
+| op | GB ($27xx) | port |
+|---|---|---|
+| `FB nn` | `(ffc3 - c202) < nn` unsigned -> continue, else PC = 0 and keep interpreting. $53 flies straight, restarting its script, until it is within nn=32 px right of the plane, then dives. | implemented (kit_w3.inc w3_fetch @other); GB-traced: the dive now starts where the GB's does |
+| `FC nn` | teleport: ffc2 = nn, ffc3 = $70 ($62) | implemented (o_y = nn-24, o_x = cam + $68) |
+| `F5 nn` | if `rDIV & 3 == 0` act as F1 (spawn), else continue: a 1-in-4 random spawn | not used by any kit type |
+| `F7` | Call $2b2a: every live slot becomes type $27 ($4F) | not implemented (3-3 accepted as is) |
+| `FD nn` | `$dfe8 = nn` (a sound mailbox, $5B) | operand consumed, no capture of that mailbox yet |
+| `FE nn` | no-op | no-op |
