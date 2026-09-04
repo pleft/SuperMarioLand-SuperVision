@@ -1,0 +1,68 @@
+# Congestion thinning, the user's algorithm (2026-09-04): in a congested scene,
+# drop STATIC enemies first (pipe plants, cannons with their missiles, fixed
+# hazards, stone-droppers) one at a time -- rebuild, re-measure -- keep a drop
+# only if the frame-overrun rate falls; if the scene is still congested, do the
+# same with MOVING enemies. Lifts are never dropped. Results land in
+# tools/thin.json (read by pack_w4.py) and are printed as a table for docs/45.
+#   python3 tools/svthin.py LEVEL SCENE [threshold%]     (scenes below)
+import sys, re, json, subprocess, collections, numpy as np
+S = "/private/tmp/claude-501/-Users-pleft-Dev-SuperMarioLand/407973b1-4713-4577-a0e2-b3e1ebdabcd8/scratchpad"
+ROM = "build/super-mario-land.sv"
+PLAY = ",".join(["R30,J16,.6,F12,Q16,.8"] * 24)
+FIGHT = ",".join(["J16,.20,F8,.20,L8,.20,R8,.20"] * 8)
+def warp(ck):   # checkpoint warp: camera poke + a fall = death -> respawn at the checkpoint
+    return f"0xB4:{(ck+60)&255}@100,0xB5:{(ck+60)>>8}@100,0x1B:200@101,0x53:1@300,0x50:1@300", ".100,.300," + PLAY, 420
+def place(cam, sprx):   # no death: everything up to cam spawns at once (GB-unlike, but the scene is what we want)
+    return f"0xB4:{cam&255}@100,0xB5:{cam>>8}@100,0xA4:{sprx}@100,0x53:1@100,0x50:1@100", ".100,.30," + FIGHT + "," + PLAY, 120
+SCENES = {  # (level, name): (pokes, script, first frame, cam lo, cam hi)
+    (9, "start"):   ("0x53:1@40,0x50:1@40", ".40," + PLAY, 60, 100, 520),
+    (9, "cannon"):  place(560, 100) + (540, 900),
+    (9, "pillars"): warp(1920) + (1900, 2300),      # (a respawn skips every entry fired before it: pessimistic scenes below instead)
+    (9, "pillars2"): place(1748, 40) + (1740, 2300),  # walked in: all six hazards + plants alive, as in real play
+    (10, "orbiters2"): place(1150, 40) + (1150, 1700),
+    (10, "orbiters"): warp(1280) + (1280, 1700),
+}
+STATIC = {0x02, 0x49, 0x55, 0x36, 0x0C}; LIFTS = {0x0A, 0x0B}
+lbl = {m.group(2): int(m.group(1), 16) for m in re.finditer(r'al 00([0-9A-F]{4}) \.(\w+)', open('build/rom.lbl').read())}
+ot, ts = lbl['o_type'], lbl['timer_sub']
+frz = [lbl[n] for n in ('mario_grow', 'mario_shrink', 'death_anim', 'goal_phase', 'bonus_phase', 'pipe_phase')]
+def measure(lvl, scene):
+    pk, script, f0, lo, hi = scene; n = sum(int(s[1:]) for s in script.split(','))
+    # invulnerable (hurt_inv topped up every 100 frames): the scene must SURVIVE long
+    # enough to be measured -- a 127-frame baseline once accepted a drop on noise
+    pk = pk + ',' + ','.join(f"{lbl['hurt_inv']}:250@{f}" for f in range(f0, n, 100))
+    subprocess.run(['/tmp/svshot', ROM, str(lvl), str(n), '1', S + '/th.fb', S + '/th.ram', script, pk], capture_output=True)
+    R = np.fromfile(S + '/th.ram', dtype=np.uint8).reshape(-1, 0x2000)
+    ok = [f for f in range(f0 + 1, len(R)) if not any(R[f][a] for a in frz) and not any(R[f-1][a] for a in frz)
+          and R[f][0x1B] < 150 and lo <= (int(R[f][0xB4]) | int(R[f][0xB5]) << 8) <= hi]
+    st = sum(1 for f in ok if R[f][ts] == R[f-1][ts]); objs = sum(sum(1 for k in range(10) if R[f][ot+k]) for f in ok)
+    if len(ok) < 300: print(f'   (warning: only {len(ok)} measured frames)')
+    return (100.0 * st / len(ok) if ok else 0.0), len(ok), (objs / len(ok) if ok else 0)
+def entries(lvl):
+    d = open(f"build/levels/level_{lvl:02d}_spawns.bin", "rb").read(); i = 0; out = []
+    while not (d[i] == 0xFF and d[i+1] == 0xFF):
+        out.append((d[i] | d[i+1] << 8, d[i+3], d[i+2])); i += 5
+    return out
+def build():
+    import os, time
+    t = os.path.getmtime(ROM) + 2 if os.path.exists(ROM) else time.time()   # make compares mtimes at 1s: a table written in the ROM's second built nothing
+    os.utime('tools/thin.json', (t, t))
+    r = subprocess.run(['make'], capture_output=True, text=True); assert 'built' in r.stdout, r.stdout[-400:] + r.stderr[-400:]
+def main():
+    lvl, name = int(sys.argv[1]), sys.argv[2]; thr = float(sys.argv[3]) if len(sys.argv) > 3 else 4.0
+    scene = SCENES[(lvl, name)]; lo, hi = scene[3], scene[4]
+    thin = json.load(open("tools/thin.json")); cur = [tuple(e) for e in thin.get(str(lvl), [])]
+    cands = [e for e in entries(lvl) if lo - 160 <= e[0] + 192 <= hi + 160 and e[1] not in LIFTS and e not in cur]
+    cands.sort(key=lambda e: (0 if e[1] in STATIC else 1, e[0]))
+    build(); base = measure(lvl, scene); print(f"{name}: baseline {base[0]:.1f}% over {base[1]} frames, {base[2]:.2f} objs; candidates {[(e[0], hex(e[1])) for e in cands]}")
+    best = base[0]; log = []
+    for e in cands:
+        if best <= thr: break
+        thin[str(lvl)] = [list(x) for x in cur + [e]]; json.dump(thin, open("tools/thin.json", "w"), indent=1); build()
+        m = measure(lvl, scene); keep = m[0] <= best - 1.0
+        print(f"  drop {e[0]:5d} {hex(e[1])} y{e[2]:3d} ({'static' if e[1] in STATIC else 'moving'}): {m[0]:.1f}% ({m[1]} fr, {m[2]:.2f} objs) -> {'KEEP' if keep else 'revert'}")
+        log.append((e, m[0], keep))
+        if keep: cur.append(e); best = m[0]
+    thin[str(lvl)] = [list(x) for x in cur]; json.dump(thin, open("tools/thin.json", "w"), indent=1); build()
+    fin = measure(lvl, scene); print(f"{name}: final {fin[0]:.1f}% (was {base[0]:.1f}%); kept {[(e[0], hex(e[1])) for e, m, k in log if k]}")
+main()

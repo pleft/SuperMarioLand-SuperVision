@@ -473,3 +473,44 @@ THIN edit built nothing -- E35's cousin).
 orbiters spawn between fire_cam 1136 and 1536, three or four alive at once).
 THIN drops every other one (1184, 1296, 1392, 1536): 2.2% after. The rest of
 4-2 sits at the 0.5-2% baseline. Shipped as ~/Desktop/sml_0904e.sv.
+
+### The congestion algorithm (user, 2026-09-04) and its result on 4-1 / 4-2
+
+User: "a) first start dropping STATIC enemies, e.g. pipe plants and cannons
+(with their missiles) one at a time and remeasure; b) if the congestion is not
+solved from a) then drop MOVING enemies again one at a time and remeasure" --
+"if the plan works on 4-1 then we should document it and apply it in all
+congested areas in all levels". Implemented as `tools/svthin.py LEVEL SCENE`
+(law E42):
+
+* a SCENE is a reproducible placement on the real core (a camera + Mario poke
+  so every entry up to the camera is alive, as it would be when walked in; a
+  checkpoint WARP is not usable -- the respawn seek skips every entry fired
+  before it, so a warped scene is emptier than the user's) plus a fixed
+  fight/run/jump script and a camera window; Mario is kept invulnerable
+  (hurt_inv topped up) so 1000-3000 frames get measured -- a 127-frame
+  baseline once accepted a drop on noise;
+* the metric is the logic-stall rate (main loop overran a display frame:
+  timer_sub unchanged, Mario on screen and unfrozen); baseline 2-4%;
+* candidates are the spawn entries whose world x lies within the window
+  (+/-160), lifts excluded, STATIC first ($02 plant, $49 cannon, $55 hazard,
+  $36 stone-dropper, $0C), then moving; each is dropped alone, the ROM
+  rebuilt, the scene re-measured; the drop stays only if the rate fell by a
+  full point; the search stops at 4%;
+* the accepted drops are `tools/thin.json` (read by pack_w4.py, a build
+  dependency; a missing entry fails the build).
+
+From an EMPTY table (the earlier hand-picked drops were discarded):
+
+| scene | before | after | dropped (fire_cam type) |
+|---|---|---|---|
+| 4-1 pillars (walked in at x 1748) | 20.7% | 6.7% | cannons 1744 $49, 1904 $49; hazards 1776, 1808, 1936 $55 |
+| 4-1 cannon after the 640 pit | 12.0% | 2.7% | cannon 528 $49 |
+| 4-1 start | 5.2% | 4.0% | hazard 48 $55 |
+| 4-2 orbiters (walked in at x 1150) | 13.7% | 3.2% | orbiters 1136, 1184, 1296, 1344 $54 |
+
+The pillars stop at 6.7%: no remaining single drop gains a point there (the
+three plants, the last hazards, the stone-droppers and the walkers were each
+tried and reverted). Every plant in both levels survived the algorithm --
+dropping one never bought a point. Shipped ~/Desktop/sml_0904f.sv; svgold
+9/9 identical, battery31 all pass.

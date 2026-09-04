@@ -1,0 +1,46 @@
+pillars2: baseline 20.7% over 2498 frames, 5.62 objs; candidates [(1584, '0x2'), (1616, '0x55'), (1648, '0x55'), (1680, '0x2'), (1744, '0x49'), (1776, '0x55'), (1808, '0x55'), (1840, '0x2'), (1904, '0x49'), (1936, '0x55'), (1968, '0x55'), (2000, '0x2'), (2016, '0xc'), (2192, '0x36'), (2208, '0x36'), (2240, '0x36'), (2240, '0x36'), (1456, '0x39'), (1520, '0x38'), (1824, '0x0'), (2144, '0x38')]
+  drop  1584 0x2 y112 (static): 28.3% (2789 fr, 6.61 objs) -> revert
+  drop  1616 0x55 y 88 (static): 20.2% (2677 fr, 5.76 objs) -> revert
+  drop  1648 0x55 y 88 (static): 21.5% (2680 fr, 5.81 objs) -> revert
+  drop  1680 0x2 y128 (static): 25.1% (2514 fr, 5.92 objs) -> revert
+  drop  1744 0x49 y112 (static): 17.1% (2595 fr, 5.57 objs) -> KEEP
+  drop  1776 0x55 y 88 (static): 13.8% (2337 fr, 4.92 objs) -> KEEP
+  drop  1808 0x55 y 88 (static): 11.9% (2406 fr, 4.67 objs) -> KEEP
+  drop  1840 0x2 y128 (static): 12.2% (2514 fr, 4.47 objs) -> revert
+  drop  1904 0x49 y112 (static): 9.8% (2601 fr, 4.45 objs) -> KEEP
+  drop  1936 0x55 y 88 (static): 6.7% (2601 fr, 4.06 objs) -> KEEP
+  drop  1968 0x55 y 88 (static): 6.0% (2601 fr, 3.71 objs) -> revert
+  drop  2000 0x2 y128 (static): 6.7% (2601 fr, 3.71 objs) -> revert
+  drop  2016 0xc y 40 (static): 6.7% (2601 fr, 4.06 objs) -> revert
+  drop  2192 0x36 y 32 (static): 6.7% (2601 fr, 3.91 objs) -> revert
+  drop  2208 0x36 y 32 (static): 6.7% (2601 fr, 3.93 objs) -> revert
+  drop  2240 0x36 y 32 (static): 6.7% (2601 fr, 3.89 objs) -> revert
+  drop  2240 0x36 y 32 (static): 6.7% (2601 fr, 3.89 objs) -> revert
+  drop  1456 0x39 y104 (moving): 6.7% (2602 fr, 4.07 objs) -> revert
+  drop  1520 0x38 y 72 (moving): 6.7% (2602 fr, 4.07 objs) -> revert
+  drop  1824 0x0 y112 (moving): 7.4% (2425 fr, 3.82 objs) -> revert
+  drop  2144 0x38 y 40 (moving): 6.5% (2559 fr, 3.71 objs) -> revert
+pillars2: final 6.7% (was 20.7%); kept [(1744, '0x49'), (1776, '0x55'), (1808, '0x55'), (1904, '0x49'), (1936, '0x55')]
+cannon: baseline 12.0% over 1078 frames, 2.03 objs; candidates [(208, '0x2'), (528, '0x49'), (256, '0x56'), (560, '0x56'), (720, '0x4'), (736, '0x56'), (832, '0x56'), (848, '0x4')]
+  drop   208 0x2 y128 (static): 12.0% (1078 fr, 2.03 objs) -> revert
+  drop   528 0x49 y128 (static): 2.7% (1034 fr, 0.90 objs) -> KEEP
+cannon: final 2.7% (was 12.0%); kept [(528, '0x49')]
+start: baseline 5.2% over 1327 frames, 3.13 objs; candidates [(48, '0x55'), (80, '0x2'), (208, '0x2'), (256, '0x56')]
+  drop    48 0x55 y 88 (static): 4.0% (1234 fr, 2.79 objs) -> KEEP
+start: final 4.0% (was 5.2%); kept [(48, '0x55')]
+orbiters2: baseline 13.7% over 2892 frames, 4.10 objs; candidates [(800, '0x55'), (848, '0x55'), (880, '0x49'), (896, '0x55'), (1152, '0x2'), (944, '0x4'), (960, '0x0'), (1040, '0x9'), (1136, '0x54'), (1184, '0x54'), (1232, '0x54'), (1248, '0x0'), (1296, '0x54'), (1344, '0x54'), (1392, '0x54'), (1472, '0x54'), (1504, '0x4'), (1536, '0x54')]
+  drop   800 0x55 y 96 (static): 13.2% (2881 fr, 3.86 objs) -> revert
+  drop   848 0x55 y 96 (static): 13.2% (2881 fr, 3.86 objs) -> revert
+  drop   880 0x49 y120 (static): 13.2% (2881 fr, 3.86 objs) -> revert
+  drop   896 0x55 y 88 (static): 13.2% (2881 fr, 3.86 objs) -> revert
+  drop  1152 0x2 y 88 (static): 14.2% (2883 fr, 4.03 objs) -> revert
+  drop   944 0x4 y 64 (moving): 12.8% (2881 fr, 3.79 objs) -> revert
+  drop   960 0x0 y112 (moving): 12.9% (2881 fr, 3.76 objs) -> revert
+  drop  1040 0x9 y104 (moving): 13.7% (2892 fr, 4.10 objs) -> revert
+  drop  1136 0x54 y112 (moving): 10.6% (2881 fr, 3.53 objs) -> KEEP
+  drop  1184 0x54 y 48 (moving): 5.9% (2936 fr, 2.74 objs) -> KEEP
+  drop  1232 0x54 y112 (moving): 5.2% (2936 fr, 2.50 objs) -> revert
+  drop  1248 0x0 y112 (moving): 6.4% (2935 fr, 2.65 objs) -> revert
+  drop  1296 0x54 y112 (moving): 4.5% (2936 fr, 2.44 objs) -> KEEP
+  drop  1344 0x54 y 48 (moving): 3.2% (2936 fr, 2.35 objs) -> KEEP
+orbiters2: final 3.2% (was 13.7%); kept [(1136, '0x54'), (1184, '0x54'), (1296, '0x54'), (1344, '0x54')]

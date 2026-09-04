@@ -532,3 +532,11 @@ The GB hides a priority sprite only under non-zero background PIXELS. Any
 port rule that decides per quad/cell ("skip the quad if a sample is non-white")
 will delete the sprite under decorations (4-1's poles behind every pipe plant).
 The blit's `bmerge` is the only correct place; `w3_behind` just sets the flag.
+
+### E42. Congestion is thinned by the user's algorithm, never by hand
+Find hot stretches with `tools/svcongest.py LEVEL` (stall rate per 128px);
+thin them with `tools/svthin.py LEVEL SCENE`: static enemies first (plants,
+cannons with their missiles, fixed hazards, stone-droppers), then moving,
+ONE entry at a time, rebuild, re-measure, keep only a full-point gain, stop
+at 4%. The table is tools/thin.json; the log goes into docs/45. Lifts are
+never dropped. Apply it to every level's hot stretch (user's decision).
