@@ -264,3 +264,11 @@ culls kit objects only when they fall below y 168. A horizontally escaping
 object keeps a slot and its per-frame cost for the rest of the level. Check the
 GB's off-screen rule (it frees slots that leave the 176px window) and add the
 same to w3_ffc7/w3_step before 4-3 (which has more shooters).
+
+**$54 (x1328.., 15 spawns) -- VERIFIED.** A 48x48 orbit around its spawn point:
+from (x0, y0) up-left to (x0-24, y0-24), down-left to (x0-48, y0), down-right
+to (x0-24, y0+24), back -- period 144 frames, identical on both engines (GB
+deep-start at cam 1280: spawn (1496,136), x 1448-1496, y 112-160; port instance
+at (1328,112): x 1280-1328, y 88-136, f2412 -> f2556). Two lanes (o_y 48 / 112)
+and both hurt from every side; the script's velocity ladder decodes to exactly
+this loop.
