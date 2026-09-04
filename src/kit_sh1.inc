@@ -23,8 +23,21 @@
     lda tmpL3
     cmp cam_x
     bcc @cull
-@keep:
-    clc
+.if .not (.defined(MAR23) .or .defined(EAS3)) ; (not 2-3: its bank is full to 10
+                                 ;  bytes and its enemies never escape rightward;
+                                 ;  not the W3/W4 kit: w3_step bounds every VM slot
+                                 ;  itself, every frame -- the window is full)
+    lda o_xl,x                   ; RIGHT-side bound: an object >= 256px ahead of
+    sec                          ; the camera (96px past the screen's right edge;
+    sbc cam_x                    ; spawns land at +192..204 and walk in) is gone
+    lda o_xh,x                   ; for good. 4-2: a $4B missile fired rightward
+    sbc cam_x+1                  ; ran 1700px ahead of Mario for 1400 frames,
+    bmi @keep                    ; holding its slot and its per-frame cost
+    cmp #1                       ; (docs/45; the GB lets one fly ~220px past the
+    bcs @cull                    ; edge before it vanishes -- never 1700).
+.endif                           ;  enemies never escape rightward there)
+@keep:                           ; (bmi: within the 20px grace LEFT of the camera
+    clc                          ;  the difference is negative -- not a cull)
     rts
 @cull:
     stz o_type,x

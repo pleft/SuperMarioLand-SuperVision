@@ -257,13 +257,19 @@ at start. The composer's CX_* ($1FE0-$1FE3) and stash B ($1FA0-$1FDB, = himod,
 harmless only while CX_BUILD=0) sit in the same transient region and are
 re-cleared by the kit init, which runs after the loader.
 
-**$4B (moai missile) never culled off-screen right -- OPEN.** On the 4-2 route
+**$4B (moai missile) never culled off-screen right -- FIXED 2026-09-04.** On the 4-2 route
 capture a $4B (the $49 pillar's missile, F3 from $4A) flew right at 1px/frame
 from x3320 to x4712+ (slot 9, ~1400 frames) without ever being freed: the port
 culls kit objects only when they fall below y 168. A horizontally escaping
 object keeps a slot and its per-frame cost for the rest of the level. Check the
 GB's off-screen rule (it frees slots that leave the 176px window) and add the
 same to w3_ffc7/w3_step before 4-3 (which has more shooters).
+Fix: w3_step frees any VM slot whose x is >= 2 pages ahead of the camera
+(257..511px; spawns land at +192..204), every frame; l3_cull got the same bound
+for the 1-3/2-2 kits (not 2-3: its bank is 10 bytes from full; not W3/W4: the
+window is full and w3_step covers them). GB reference: its rightward $4Bs lived
+~700 frames and vanished ~220px past the screen edge (gb10s trace); the port now
+bounds them at <= 511px instead of never. Gate: svgold 9/9, battery31 10/10.
 
 **$54 (x1328.., 15 spawns) -- VERIFIED.** A 48x48 orbit around its spawn point:
 from (x0, y0) up-left to (x0-24, y0-24), down-left to (x0-48, y0), down-right

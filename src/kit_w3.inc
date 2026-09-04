@@ -158,6 +158,13 @@ CXS_BOXOK  = $0153               ; 1 = CXA_* box computed this walk
     cmp #OBJ_W3
     beq :+
     rts
+:   lda o_xh,x                   ; RIGHT-side bound, every live slot every frame
+    sec                          ; (l3_cull only runs on the contact path, which
+    sbc cam_x+1                  ; a far object never enters): >= 2 pages ahead
+    cmp #2                       ; of the camera (257..511px) is beyond anything
+    bcc :+                       ; that can be seen -- spawns land at +192..204.
+    stz o_type,x                 ; 4-2's $4B ran 1700px ahead for 1400 frames
+    rts                          ; holding a slot (docs/45).
 :   lda o_tmr,x                  ; wait == 0 -> run opcodes until one waits
     bne @tick
     jsr w3_fetch
