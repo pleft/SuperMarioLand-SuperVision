@@ -9823,12 +9823,12 @@ spawn_base = $1FF0
     lda $1FF1                    ; (zero until the stub has run: load_level's own
     sta lvl_ptr                  ; call then does nothing and the stub copies)
     jsr @base
-    lda #6                       ; cold page: World 3 = 6, World 4 = 10 (docs/45)
-    ldx cur_level
-    cpx #9
-    bcc :+
-    lda #10
-:   jmp cold_copy                ; FIXED: this prefix is NOT mapped under the cold page
+    ldx cur_level                ; cold page per level: World 3 = 6, 4-1/4-2 = 10,
+    lda @cold-6,x                ; 4-3 = 12 (pack_w4 PAIRS, docs/45). 4-3 reloaded its
+    jmp cold_copy                ; second window from page 10 and the boss stretch
+@cold: .byte 6,6,6,10,10,12      ; never spawned (the full-level differential). A
+                                 ; table: the prefix had 2 bytes left before 2-3's
+                                 ; header hit the far kit at $A6C0.                ; FIXED: this prefix is NOT mapped under the cold page
 @flat:
     lda hdr_buf+16               ; W1/W2: the list sits in the level bank itself
     sta lvl_ptr

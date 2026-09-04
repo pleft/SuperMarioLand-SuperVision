@@ -810,12 +810,15 @@ sq_t:  .byte SUB_T, SUB_T+1, SUB_T+2, SUB_T+3
     and #3
     tax
     lda @val,x
-    pha
+    tay                          ; Y = the score code
     ldx tmpH3
-    jsr victim_xy                ; the popup at the victim (X = slot)
-    pla
-    jsr award_kill_at
-    ldx tmpH3
+    phx                          ; the victim slot rides the stack: award_kill_at
+    jsr victim_xy                ; reads the popup's Y from tmpH3 (OBJ_SUU sets it
+    lda o_y,x                    ; so), and keeping the SLOT there put every
+    sta tmpH3                    ; missile-kill popup at y ~245, off the screen
+    tya
+    jsr award_kill_at            ; popup at tmpL2/H2 (x) / tmpH3 (y)
+    plx
     jmp w3_morph                 ; tmpL3 = the new type; fresh context (X = slot)
 @rts:
     rts
