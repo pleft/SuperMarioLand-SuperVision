@@ -623,3 +623,9 @@ the missiles'. `svthin` (fly scenes s200/s800/s1400/s2000, law E42) dropped
 30 -> 5.6%, 48 -> 9.5% (210-frame scene), 8.6 -> 1.6%. The first two
 stretches stop above the 4% target: no remaining single drop gains a point.
 This is the heaviest thinning so far and the user has not seen it yet.
+
+3-2 route: the background chain-driver found a completing route on the thinned
+build it ran against (GOAL, 4640 frames), but the kit changed underneath it
+(wall probe, W3TAB moves) and on the current build it stalls at cam 1501 --
+law E34 in action. Kept as docs/routes/level_07_candidate_2026-09-05.txt; every
+route (3-2, 4-1, 4-2, 4-3) is re-recorded once on the final kit build.
