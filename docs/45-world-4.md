@@ -201,3 +201,27 @@ hot/fully-used. So this needs a deliberate RAM-budget pass -- natural to do with
 the 4-2/4-3 kit-roster RAM work (they need bank/RAM changes anyway). Interim: the
 affected bricks are OPTIONAL (not on the completing route); small Mario and level
 completability are unaffected.
+
+## 4-2 objects vs the GB (2026-09-04)
+
+Method: closed-loop routes on BOTH engines (svauto / gbauto -- an open-loop
+replay of the port's letters dies in the first gap: the port starts Mario at
+spr_x 40, the GB at 50), then per-frame object timelines compared at matched
+camera positions (tools/gbtrace + the svshot RAM dump). GB y = port y + 24.
+
+**$3F Gao (x768) -- VERIFIED.** Same spawn point (port x768, GB x776: the 8px
+systematic offset seen on every W4 object, docs/45 4-1). Stationary; spits a
+$23 fireball 92 frames after spawning on both engines (port 91), at the same
+angle and speed (-1 px/frame x, +0.5 px/frame y, aimed down-left at Mario),
+repeating every ~137 frames. Stomp -> $40 -> $41 -> $0D corpse floating off
+up-left, the W3 chain. Contact rules decode as expected: stompable, side hurts,
+the fireball hurts on every side.
+
+Measured deviation, NOT fixed (ship discipline): the timed part of the death
+chain runs ~1.35x slower on the port when many objects are live -- $40 lasted
+62 frames vs the GB's 46, the $0D arc 30 vs 19 -- with 7-8 objects resident
+(two Piranhas, $4B, the second fireball, natives $08/$0E). Cause: the mover
+budget (bud_base = 2 for levels >= 6, main.s load_level) defers a mover's MOVE
+together with its redraw, so VM waits stretch under load; 3-1's battery (one
+mover live) measures the same $40 at the GB's 45. Raising the budget to 3 was
+measured to overrun the frame on 3-3 (docs/44), so this stays.
