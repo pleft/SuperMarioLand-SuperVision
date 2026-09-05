@@ -707,3 +707,14 @@ in spots reported clean). The cap is verified by CONSTRUCTION instead: py65
 shows w3_spawn refuses at >=4 alive; svgold 9/9 identical, battery31 all pass
 (levels 0-8 untouched). The felt result and the right value of W4_ENEMY_CAP are
 for the user's playtest -- it is a one-constant change.
+
+
+### The cap must exclude platforms (2026-09-05, user: "you removed moving platforms, mario cannot advance ... havent met a single pionpi")
+
+The first cap counted ALL live OBJ_W3, but World 4's lifts ($38/$39/$3A), the
+moai pillar ($49) and 4-3's platforms ($4D/$4E) are OBJ_W3 too (standable,
+phys1 bit7). In 4-1's pit sections the lifts filled the 4-slot cap, so the NEXT
+lift Mario needed did not spawn (he could not advance) AND no Pionpi ever did.
+Fixed: the cap counts and refuses only NON-standable OBJ_W3 (real enemies), and
+a standable spawn is never capped. py65-verified: a lift spawns with 6 enemies
+alive; an enemy is blocked at 4 non-standable alive; lifts are not counted.

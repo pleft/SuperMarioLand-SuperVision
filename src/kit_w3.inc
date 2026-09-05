@@ -205,12 +205,18 @@ W4_ENEMY_CAP = 4                 ; max live VM foes on World 4 (docs/45)
     lda cur_level
     cmp #9                       ; World 4 only (9-11); W1-3 stay GB-faithful
     bcc @make
-    ldx #9                       ; the 10 object slots
-    ldy #0                       ; Y = live OBJ_W3 count
+    ldy tmpH3                    ; the NEW object: STANDABLE (phys1 bit7) = a lift /
+    lda w3_phys1,y               ; platform / the moai pillar -- NEVER capped, or
+    bmi @make                    ; Mario's ride never spawns and he is stuck (user:
+                                 ; "you removed moving platforms, mario cannot advance").
+    ldx #9                       ; count only NON-standable live OBJ_W3 = real enemies
+    ldy #0                       ; ("remove enemies not any moving sprite")
 @capcnt:
     lda o_type,x
     cmp #OBJ_W3
     bne @capnx
+    lda w3_ph1,x                 ; per-slot phys1 mirror: skip standable (lifts etc.)
+    bmi @capnx
     iny
 @capnx:
     dex
