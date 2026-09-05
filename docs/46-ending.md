@@ -66,3 +66,28 @@ REMAINING (stage 2+, docs/46 spec above): the animated Daisy/Mario/plane
 cutscene, the heart, the plane flight over clouds, and the scrolling credits
 roll. Those need the sprite tiles ($48-$51 Daisy, plane, heart, clouds)
 extracted and placed. The text ending makes the game completable now.
+
+## Stage 2: the credits roll (2026-09-05)
+
+After the three Daisy lines the ending now rolls the credits: paged role-over-
+name cards (PRODUCER/G YOKOI, DIRECTOR/S OKADA, PROGRAMMER/M YAMAMOTO), each
+cleared and held ~2.5s, cycling forever (SML has no THE END card). All text is
+the resident font. Verified on the real core: the pages render centered and
+cycle.
+
+The typewriter opening and both text blocks share one compact format to fit the
+overlay: length-prefixed tile strings (`e43g_data` for the 3 lines, `e43c_data`
+for the credits), drawn by `@drawline` (centering = 20 - len byte-columns,
+computed at runtime). This was forced by a hard bank-1 wall: the L13E overlay is
+STORED between L11CODE and the W3 tables at $B000 (slot = $AB45..$B000 = 1211
+bytes), so the 4-array glyph format (608 B for the credits alone) did not fit --
+it ran into the W3 tables. The compact strings + shared drawer brought L13E to
+$4B4 (1204 B), just under. The credits were trimmed to 3 pages for the same
+reason; more pages need either the credit data moved to a mapped bank-1 gap
+($B195-$B520 is free) or the W3 tables relocated.
+
+STILL NOT DONE (the animated cutscene): Daisy/Mario in the brick room, the
+heart, boarding the Sky Pop, and the flight over clouds. Those need the sprite
+tiles ($48-$51 Daisy, the plane, heart, clouds) extracted and a way to draw
+non-resident tiles during the ending; the bank-1 space wall makes adding that
+art non-trivial. The text ending + credits is what ships.

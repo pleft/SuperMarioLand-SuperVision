@@ -3124,32 +3124,22 @@ moth_tiles: .incbin "../build/gfx/moth.svt"
 @after:
     cmp #7
     bcs @phase7
-    dec e_tmr
-    bne @draw
-    lda #4
-    sta e_tmr
-    lda e_ix
-    cmp #35
-    bcs @typed
-    inc e_ix
-@draw:
-    ldx #0
-@gl:
-    cpx e_ix
-    bcs @rts
-    phx
-    lda e43g_y,x
-    sta dy
-    lda e43g_c,x
-    sta dcol
-    lda e43g_t,x
-    jsr get_tile_src
-    jsr set_dst
-    jsr blit_tile
-    plx
-    inx
-    bra @gl
-@typed:
+    ; phase 6: draw the 3 Daisy lines (compact, via @drawline), then hold
+    lda #<e43g_data
+    sta tmpL2
+    lda #>e43g_data
+    sta tmpH2
+@ol:
+    ldy #0
+    lda (tmpL2),y                ; dy, or $FF = done
+    cmp #$FF
+    beq @odone
+    inc tmpL2                    ; point at [len]
+    bne :+
+    inc tmpH2
+:   jsr @drawline
+    bra @ol
+@odone:
     lda #7
     sta e_phase
     lda #200
@@ -3158,42 +3148,95 @@ moth_tiles: .incbin "../build/gfx/moth.svt"
     rts
 @phase7:
     cmp #8
-    bcs @phase8
+    bcs @credits
     dec e_tmr
     bne @rts
-    jsr clear_vram
+    stz e_ix                     ; first credit page
+    stz e_tmr                    ; 0 -> draw it next frame
     lda #8
     sta e_phase
     rts
-@phase8:
-    cmp #9
-    bcs @rts
-    ldx #0
-@el:
-    cpx #6
-    bcs @edone
-    phx
-    lda e43e_y,x
+@credits:                        ; phase 8: page through the credits, looping (SML
+    lda e_tmr                    ; has no THE END card -- the roll cycles forever)
+    beq @newpage
+    dec e_tmr
+    rts
+@newpage:
+    jsr clear_vram
+    ; walk e43c_data to the current page (e_ix): skip e_ix*2 length-prefixed lines
+    lda #<e43c_data
+    sta tmpL2
+    lda #>e43c_data
+    sta tmpH2
+    lda e_ix
+    asl                          ; lines to skip = page*2
+    tax
+    beq @atpage
+@skip:
+    ldy #0
+    lda (tmpL2),y                ; len
+    sec
+    adc tmpL2                    ; += len+1 (carry set adds the +1)
+    sta tmpL2
+    bcc :+
+    inc tmpH2
+:   dex
+    bne @skip
+@atpage:
+    lda #$38                     ; line 0 of the pair -> row 7 (dy $38)
+    jsr @drawline
+    lda #$50                     ; line 1 -> row 10 (dy $50)
+    jsr @drawline
+    lda #150                     ; ~2.5s per page
+    sta e_tmr
+    inc e_ix
+    lda e_ix
+    cmp #e43c_pages
+    bcc @rts
+    stz e_ix
+    rts
+@drawline:                       ; A = dy (row*8); tmpL2/H2 -> [len][tiles]; advances past the line
+    sta tmpL3                    ; stash the row
+    ldy #0
+    lda (tmpL2),y                ; len
+    sta tmpL
+    ina
+    sta tmpH
+    ; centering: dcol = ((20-len)/2)*2 = 20 - len (in byte columns)
+    lda #20
+    sec
+    sbc tmpL
+    sta tmpH3                    ; starting dcol (byte column, even)
+    ldy #1                       ; Y indexes tiles (skip the len byte)
+@dch:
+    cpy tmpH                   ; tmpH = len+1 (loop while y <= len)
+    beq @dcdone
+    bcs @dcdone
+    phy
+    lda tmpL3
     sta dy
-    lda e43e_c,x
+    lda tmpH3
     sta dcol
-    lda e43e_t,x
+    lda (tmpL2),y
     jsr get_tile_src
     jsr set_dst
     jsr blit_tile
-    plx
-    inx
-    bra @el
-@edone:
-    lda #9
-    sta e_phase
-    rts
-e43g_t: .byte $18,$11,$0D,$0A,$12,$1C,$22,$1D,$11,$0A,$17,$14,$22,$18,$1E,$16,$0A,$1B,$12,$18,$22,$18,$1E,$1B,$1A,$1E,$0E,$1C,$1D,$12,$1C,$18,$1F,$0E,$1B
-e43g_y: .byte $30,$30,$30,$30,$30,$30,$30,$48,$48,$48,$48,$48,$48,$48,$48,$48,$48,$48,$48,$48,$60,$60,$60,$60,$60,$60,$60,$60,$60,$60,$60,$60,$60,$60,$60
-e43g_c: .byte $0C,$0E,$12,$14,$16,$18,$1A,$04,$06,$08,$0A,$0C,$10,$12,$14,$18,$1A,$1C,$1E,$20,$02,$04,$06,$08,$0C,$0E,$10,$12,$14,$18,$1A,$1E,$20,$22,$24
-e43e_t: .byte $1D,$11,$0E,$0E,$17,$0D
-e43e_y: .byte $40,$40,$40,$40,$40,$40
-e43e_c: .byte $0C,$0E,$10,$14,$16,$18
+    inc tmpH3
+    inc tmpH3                    ; next byte column (+2)
+    ply
+    iny
+    bne @dch
+@dcdone:
+    lda tmpL                    ; advance tmpL2 past this line (len+1)
+    sec
+    adc tmpL2
+    sta tmpL2
+    bcc :+
+    inc tmpH2
+:   rts
+e43g_data: .byte $30,$08,$18,$11,$2C,$0D,$0A,$12,$1C,$22,$48,$0F,$1D,$11,$0A,$17,$14,$2C,$22,$18,$1E,$2C,$16,$0A,$1B,$12,$18,$60,$12,$22,$18,$1E,$1B,$2C,$1A,$1E,$0E,$1C,$1D,$2C,$12,$1C,$2C,$18,$1F,$0E,$1B,$FF
+e43c_pages = 3
+e43c_data: .byte $08,$19,$1B,$18,$0D,$1E,$0C,$0E,$1B,$07,$10,$2C,$22,$18,$14,$18,$12,$08,$0D,$12,$1B,$0E,$0C,$1D,$18,$1B,$07,$1C,$2C,$18,$14,$0A,$0D,$0A,$0A,$19,$1B,$18,$10,$1B,$0A,$16,$16,$0E,$1B,$0A,$16,$2C,$22,$0A,$16,$0A,$16,$18,$1D,$18,$FF
 .endproc
 .segment "CODE"
 
