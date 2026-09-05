@@ -687,3 +687,34 @@ were reverted before shipping). Results:
 Not measurable yet: 3-2's thirteen droppers at x 2240-2560 (no standing
 ground: the stretch is crossed on lifts). Two plants in one stretch did cost
 a point here (4-1 x 1136/1152, side by side on the same pipe row).
+
+## 4-3 HUD garbage + 4-2 Roto Discs (2026-09-05, user reports)
+
+**4-3 HUD.** Every static cell of the status bar past "MA" was garbage in 4-3
+while the counters (score, coins, lives, timer, world digits) were right. The
+template `statusbar_tiles` is a LEVELS-prefix label at $A67E-$A6A5, read from
+whatever page is mapped. cfg/w43code.cfg had put SKYFARM (the Sky Pop vehicle
+code) at $A680 in page 11 -- "free" by the L11CODE/L13E argument, but the two
+prefix data blocks mario_poses ($A57E) and statusbar_tiles ($A67E) live below
+TITLE0 and are read at level start from the mapped page. SKYFARM now starts at
+$A6A6 (size $095A; pack_w4 SKYFAR_AT follows). Law E45.
+
+**4-2 Roto Disc ($54).** User: "no star circling". The E42 thinning had dropped
+the first four Roto Discs (fire_cam 1136/1184/1296/1344 -- the FIRST ones the
+player meets) while their anchor blocks stay in the map, so the level shows
+anchors with nothing orbiting: it reads as a broken enemy, not a missing one.
+Restored (tools/thin.json level 10: 12 -> 8 drops; the orbiter stretch's
+overrun comes back, accepted under the user's "finish first, cap later"). Rule
+added to E42: an object whose anchor/pivot is a BG tile is never a drop
+candidate.
+
+**4-2 Nyololin ($3F).** User: "not shooting a star". Could not reproduce: the
+GB script is param $2A, face Mario, wait 90 ticks, param $2B, SFX 4, F1 spawn
+$23, wait 45, restart; $23 is the star metasprite ($45, the same as the Roto
+Disc's) with dir $C0 (homes on Mario) and `morph FF` after 165 ticks. On the
+port (real core): the x768 Nyololin along the recorded route fires 92 frames
+after spawning (GB: 90 ticks); the isolated scene fires at 305/500/725; the
+x2608 one under its natural crowd (7 slots busy) fires every ~168 frames
+(GB ~140). The x2320 one dies to Mario's Superball in the stand scene within
+23 frames -- a player firing balls ahead never sees it shoot, which may be what
+was observed. Open until the user says where.

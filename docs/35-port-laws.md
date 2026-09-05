@@ -539,7 +539,9 @@ thin them with `tools/svthin.py LEVEL SCENE`: static enemies first (plants,
 cannons with their missiles, fixed hazards, stone-droppers), then moving,
 ONE entry at a time, rebuild, re-measure, keep only a full-point gain, stop
 at 4%. The table is tools/thin.json; the log goes into docs/45. Lifts are
-never dropped. Apply it to every level's hot stretch (user's decision).
+never dropped, and neither is any object whose anchor/pivot is a BG tile
+(4-2's Roto Discs: the anchors stayed and the level looked broken -- user
+report, 2026-09-05). Apply it to every level's hot stretch (user's decision).
 
 ### E43. Never use `jmp (abs,x)` -- the core adds X to the fetched target
 The Potator core implements opcode $7C wrongly: it fetches the vector at
@@ -554,3 +556,11 @@ The framebuffer stride is 48 bytes = 192 px: columns 0-39 are the screen,
 into the NEXT line's left edge. Sprites that enter from the right (the taxiing
 Sky Pop at px 232) must be clipped per 8-px piece (skip x >= 160, `draw_id`)
 -- the erase side is already safe (erase_box skips columns >= 20).
+
+### E45. The LEVELS prefix's DATA is read from the mapped page too
+`mario_poses` ($A57E) and `statusbar_tiles` ($A67E-$A6A5) sit below TITLE0 in
+the prefix and are read by FIXED code (render_status_bar at level start)
+through their labels -- from whichever page is mapped. A resident segment
+placed over them in a level page (SKYFARM at $A680 in page 11) garbles the HUD
+of that level only. Nothing goes below $A6A6 in any level page; the packers'
+"free" check must include these two blocks.

@@ -29,7 +29,7 @@ W4X2 = 0x86F8                                   # the stash head follows the win
 # player in SKYFAR, resident at $A680 in page 11). docs/45.
 PAIRS = ((9, 10, (9, 10), "w4code", "w4stub", "w4"),
          (11, 12, (11,), "w43code", "w43stub", "w43"))   # last = gen_w3data data-set tag
-SKYFAR_AT = 0xA680
+SKYFAR_AT = 0xA6A6                          # above statusbar_tiles ($A67E-$A6A5): the HUD template is read from the mapped page
 E43_PIN, E43_TILES, E43_DATA = 0x9900, 0xA000, 0xA300       # page 12: the ending blob + its sprite tiles (src/ending43.s, L13E stub)
 
 def seg(mapfile, name):
