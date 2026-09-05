@@ -540,3 +540,17 @@ cannons with their missiles, fixed hazards, stone-droppers), then moving,
 ONE entry at a time, rebuild, re-measure, keep only a full-point gain, stop
 at 4%. The table is tools/thin.json; the log goes into docs/45. Lifts are
 never dropped. Apply it to every level's hot stretch (user's decision).
+
+### E43. Never use `jmp (abs,x)` -- the core adds X to the fetched target
+The Potator core implements opcode $7C wrongly: it fetches the vector at
+table+X and then adds X AGAIN to the target. A state dispatch through it ran
+away into the wrong handlers (the ending's e_own went to 2). Dispatch with
+the push/rts idiom (`lda tab+1,x / pha / lda tab,x / pha / rts` on a table of
+`.word handler-1`). Real hardware may differ -- the ROM must run on both.
+
+### E44. A sprite piece at x >= 184 wraps into the next scanline
+The framebuffer stride is 48 bytes = 192 px: columns 0-39 are the screen,
+40-47 the hidden ring. A byte-aligned 8x8 blit at dcol >= 46 (x >= 184) spills
+into the NEXT line's left edge. Sprites that enter from the right (the taxiing
+Sky Pop at px 232) must be clipped per 8-px piece (skip x >= 160, `draw_id`)
+-- the erase side is already safe (erase_box skips columns >= 20).

@@ -30,6 +30,7 @@ W4X2 = 0x86F8                                   # the stash head follows the win
 PAIRS = ((9, 10, (9, 10), "w4code", "w4stub", "w4"),
          (11, 12, (11,), "w43code", "w43stub", "w43"))   # last = gen_w3data data-set tag
 SKYFAR_AT = 0xA680
+E43_PIN, E43_TILES, E43_DATA = 0x9900, 0xA000, 0xA300       # page 12: the ending blob + its sprite tiles (src/ending43.s, L13E stub)
 
 def seg(mapfile, name):
     m = re.search(rf"^{name}\s+([0-9A-F]+)\s+\S+\s+([0-9A-F]+)", open(mapfile).read(), re.M)
@@ -100,6 +101,19 @@ def pack_pair(img, RES, COLD, LEVELS, KIT, STUB, TAG):
     assert addr <= W3SPT, f"W4 cold data overruns ${W3SPT:04X} by {addr - W3SPT}"
     blob = b"".join(tabs) + pool + b"".join(spawns)
     cold[W4DATA - BASE:W4DATA - BASE + len(blob)] = blob
+    if LEVELS == (11,):
+        # the GAME ENDING (docs/46): the E43 code blob at E43_PIN and its 38 sprite
+        # tiles at E43_TILES, both in this pair's COLD page (4-3 has one level's
+        # maps, so $9900-$B123 is free); the L13E boot stub copies them to RAM
+        e43 = open("build/e43.bin", "rb").read(); tiles = open("build/gfx/ending.svt", "rb").read()
+        e43d = open("build/e43d.bin", "rb").read()
+        assert len(e43) <= 0x700, f"E43 blob {len(e43)}B > $700"
+        assert len(tiles) == 38 * 16, "ending.svt: expected 38 tiles"
+        for at, blob, what in ((E43_PIN, e43, "E43 code"), (E43_TILES, tiles, "E43 tiles"), (E43_DATA, e43d, "E43 scripts")):
+            assert at + len(blob) <= W4SCR, f"{what} runs into the script pin"
+            assert all(b == 0xFF for b in cold[at - BASE:at - BASE + len(blob)]), f"page {COLD} ${at:04X} not free for the {what}"
+            cold[at - BASE:at - BASE + len(blob)] = blob
+        print(f"pack_w4: E43 ending {len(e43)}B at ${E43_PIN:04X} + tiles at ${E43_TILES:04X} + scripts {len(e43d)}B at ${E43_DATA:04X} (page {COLD})")
     spt = b"".join(bytes((a & 0xFF, a >> 8)) for a in spawn_at)
     cold[W3SPT - BASE:W3SPT - BASE + len(spt)] = spt
     assert W3WIN + len(win) <= W4SCR, "W4 window image runs into the scripts pin"

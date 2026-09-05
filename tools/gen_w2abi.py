@@ -24,6 +24,9 @@ NEED = [
     "w3_hp",                     # kit_sky43: missile hits share the Superball HP counter
     "himod",                     # w2code kit init clears it (the cols>=360 overlay)
     "feet_tile",                 # kit_w3 w3_wall: the raw tile behind read_solid
+    # the E43 game-ending blob (src/ending43.s, docs/46): engine state + draw primitives
+    "e_phase", "e_own", "e_tmr", "e_ix", "hud_go", "bgc", "vxp", "vxph", "vyp", "blit_opaque",
+    "sprite_blit_subpx", "blit_tile", "clear_vram", "ring_b", "bg_chardata", "vxph_ap", "vyp_ap",
     # the vector block + the level binding
     "ovl_vec", "hdr_buf", "cur_level",
     # object slots (SoA)

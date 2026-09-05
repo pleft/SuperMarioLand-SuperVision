@@ -91,3 +91,66 @@ heart, boarding the Sky Pop, and the flight over clouds. Those need the sprite
 tiles ($48-$51 Daisy, the plane, heart, clouds) extracted and a way to draw
 non-resident tiles during the ending; the bank-1 space wall makes adding that
 art non-trivial. The text ending + credits is what ships.
+
+## Stage 3: the full animated ending -- the E43 blob (2026-09-05)
+
+DONE, on the real core, every scene of the GB ending: the brick room with Mario
+(41,104) and Daisy (103,104), OH! DAISY / DAISY typed at row 5 col 5, Daisy's
+walk to x 50 while THANK YOU MARIO. types at row 8 col 2, the heart rising from
+(71,75) to y 15, the row-5..8 blank + -YOUR QUEST IS OVER- and the kiss poses,
+the room sliding left (bricks swap phase every 20 f, the text row shifts a cell)
+while Mario walks 41 -> 66 and the empty Sky Pop taxis in 232 -> 48, boarding
+(the pair vanishes, 64 f), the plane with the riders climbing 104 -> 66 at
+1 px/2 f, the flight (corridor every 8 f, propeller every 4 f, three clouds
+drawn BEHIND the bricks, wrapping at 180+tt&63), then the corridor clears and
+the credits roll forever: role at row 15 col 2, name at row 17 col 7, all 11
+GB pairs (PRODUCER G.YOKOI ... NISHIZAWA), 400 f each, the plane + clouds still
+flying. Measured durations on the core (svshot, 1 call per display frame):
+st1 244, st2 212, st3 180, st4 242, st5 472, st6 64, st7 76, st8 546, credits
+400/pair; GB ($2A..$33, docs/46 top): 198, 213, 163, 240, 472, 64, 76, 545.
+
+ARCHITECTURE (the bank-1 wall is gone): the ending is a separate binary
+`build/e43.bin` from `src/ending43.s` + `cfg/e43.cfg`, linked to RUN at $1500
+and STORED in 4-3's cold page 12 at $9900 (pack_w4 E43_PIN); its 38 sprite
+tiles (`tools/extract_ending.py` -> build/gfx/ending.svt, GB-id order, blank
+$2C emitted as zeros) at $A000 (E43_TILES) and its text scripts at $A300
+(E43_DATA, segment E43D). L13E in bank 1 is now just `l3e_room` (3-3's) + the
+`e43_boot` stub that copies itself to $1C00, maps page 12, copies 7 pages
+$9900 -> $1500-$1BFF and 608 B $A000 -> $1D00 (the HUD shadow, dead during the
+ending), maps bank 1 back, zeroes st ($1C00) and jumps to $1500. goal_seq
+phase 4 with ending13=3 does `jsr clear_objects`, goal_phase=5, e_phase=5 and
+`jmp l3e_room_copy`; `jmp l3e_room` in l3e_seq == `jmp $1500` == e43_frame.
+RAM: vars $1C00-$1C2F, TXTBUF $1C40-$1CB7 (rows 4..9 x 20, the text a cell
+redraw restores), tiles $1D00-$1F5F. The blob is 1788 of 1792 bytes.
+
+WHAT HAD TO GIVE (the first cut was 2416 B): sprites are drawn from LISTS of
+[slot, dx, dy] (`draw_id`: Mario stand/kiss, Daisy stand/walk/kiss, plane
+empty/riders/propeller, cloud) instead of unrolled code; one `erase_at` (px,
+py, width) over `erase_box` -> `cell_redraw` (bricks / buffered text / sky);
+`row_redraw`/`row_clear`/`modz` (tt mod period) shared; the scripts left RAM:
+`fetch_txt` maps page 12 inline, reads one byte, maps bank 1 back, advances
+txp (the blob runs from RAM so the dance is safe -- the 3-3 blob does the same
+for the moth tiles). Script bytes: glyph / $FE newline (col = txc0) / $FD
+credits name line (row += 2, col 7) / $FF end (typewriter idle) / $FC wrap to
+the credits. The credits write a whole pair in one frame (`type_glyph` loop),
+the openings type at 12 f/glyph.
+
+TWO CORE FACTS LEARNED (docs/35 E43/E44): the Potator core's `jmp (abs,x)`
+($7C) is wrong (it adds X to the FETCHED target) -- the dispatch is push/rts;
+and a sprite piece at x >= 184 wraps into the NEXT scanline (stride 48 B =
+192 px, columns 40-47 are the hidden ring) -- the taxiing plane at px 232
+painted a stripe over Mario at x 24 until `draw_id` clipped pieces at x >= 160.
+
+OPEN: no ending music ($0F/$11 never implemented; the engine is silent here);
+the HUD rows are blank during the ending (the shadow holds the tiles); the
+heart rises 180 f vs the GB's 163; Mario's walk starts at 41 (GB OAM) while
+the GB's own start x is 50 in some frames (docs/46 top). Shipped as
+~/Desktop/sml_0905j_ending.sv (md5 6e9463fc); svgold 9/9 identical to the
+0905d baseline (2fe4cc2 rebuilt, md5 305b94de), battery31 all pass.
+
+NOTE ON REBUILDING OLD COMMITS: a clean worktree of 2fe4cc2/4b787c4 does NOT
+build (pack_banks: "level 5 header ($A6C5) overlaps the far kit") -- TITLE0
+lands 7 bytes later than in the dev tree. The dev tree's build/ holds a stale
+generated input the Makefile never regenerates; rsync build/ (minus .o/.sv)
+into the worktree and it builds byte-identical (305b94de). Find that input
+before trusting any from-scratch build.

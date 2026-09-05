@@ -2636,7 +2636,7 @@ quad_rows: .byte 0, 0, 8, 8
     lda ending13
     cmp #3
     bne :+
-    jmp l3e43
+    jmp e43_boot                 ; 4-3's game ending: pull the E43 blob (page 12) over this overlay
 :
     lda e_phase
     sec
@@ -3074,170 +3074,79 @@ moth_tiles: .incbin "../build/gfx/moth.svt"
 .segment "CODE"
 
 .segment "L13E"
-; ===========================================================================
-; 4-3 GAME ENDING (text; docs/46). Runs from the $1500 overlay (FIXED is full).
-; Reuses the resident BG font (A=$0A..Z=$23, 0-9=$00-09) via get_tile_src, and
-; clear_vram/set_dst/blit_tile. Reached from l3e_room when ending13==3, set by
-; 4-3's veh_clear and dispatched through the normal goal_phase-5 flow.
-; e_phase: 5 entry(clear) -> 6 type -> 7 hold -> 8 THE END -> 9 done(hold).
-.proc l3e43
-    stz vxp                      ; EVERY frame: pin the view to 0 so calc_view (still
-    stz vxph                     ; run under e_own) writes XSCROLL/YSCROLL = 0 and the
-    stz vyp                      ; text is not clipped, and force one blank HUD copy so
-    stz scroll_s                 ; the NMI's HUD flush cannot smear the score bar over
-    ldy #0                       ; the ending (shadow blanked -> copy writes nothing).
-    tya
-:   sta HUDSHADOW,y
-    sta HUDSHADOW+256,y
-    iny
+; ---------------------------------------------------------------------------
+; 4-3 GAME ENDING boot (docs/46): the real ending is the E43 blob in PAGE 12
+; ($9900, <= $600) plus its 38 sprite tiles ($A000, 608 B). This overlay is
+; stored in bank 1's 1211-byte slot below the W3 tables, far too small for it,
+; so we copy a position-independent stub to $1C00 (the dead kit's himod) and
+; let IT map page 12, copy the blob over $1500 (over this very code) and the
+; tiles into the HUD shadow, map bank 1 back and jump to $1500 = e43_entry.
+; From then on l3e_seq's "jmp l3e_room" (= jmp $1500) runs the ending.
+; ---------------------------------------------------------------------------
+.proc e43_boot
+    ldx #0
+:   lda e43_stub,x
+    sta $1C00,x
+    inx
+    cpx #e43_stub_end-e43_stub
     bne :-
-:   sta HUDSHADOW+512,y
-    iny
-    cpy #128
-    bne :-
-    lda #1
-    sta hud_go
-    lda e_phase
-    cmp #6
-    bcs @after
-    lda #1
-    sta e_own
-    lda #<bg_chardata            ; the ending text is the resident FONT, not 4-3's
-    sta bgc                      ; Egyptian BG charset (get_tile_src reads bgc)
-    lda #>bg_chardata
-    sta bgc+1
-    stz ring_b
-    stz ring_b+1
-    jsr clear_vram               ; clears $4000-$5DFF (30 pages)
-    ldy #0                       ; + the ring tail $5E00-$5FFF that scrolling shows
-    tya
-:   sta $5E00,y
-    sta $5F00,y
-    iny
-    bne :-
-    lda #6
-    sta e_phase
-    stz e_ix
-    lda #4
-    sta e_tmr
-    rts
-@after:
-    cmp #7
-    bcs @phase7
-    ; phase 6: draw the 3 Daisy lines (compact, via @drawline), then hold
-    lda #<e43g_data
-    sta tmpL2
-    lda #>e43g_data
-    sta tmpH2
-@ol:
-    ldy #0
-    lda (tmpL2),y                ; dy, or $FF = done
-    cmp #$FF
-    beq @odone
-    inc tmpL2                    ; point at [len]
-    bne :+
-    inc tmpH2
-:   jsr @drawline
-    bra @ol
-@odone:
-    lda #7
-    sta e_phase
-    lda #200
-    sta e_tmr
-@rts:
-    rts
-@phase7:
-    cmp #8
-    bcs @credits
-    dec e_tmr
-    bne @rts
-    stz e_ix                     ; first credit page
-    stz e_tmr                    ; 0 -> draw it next frame
-    lda #8
-    sta e_phase
-    rts
-@credits:                        ; phase 8: page through the credits, looping (SML
-    lda e_tmr                    ; has no THE END card -- the roll cycles forever)
-    beq @newpage
-    dec e_tmr
-    rts
-@newpage:
-    jsr clear_vram
-    ; walk e43c_data to the current page (e_ix): skip e_ix*2 length-prefixed lines
-    lda #<e43c_data
-    sta tmpL2
-    lda #>e43c_data
-    sta tmpH2
-    lda e_ix
-    asl                          ; lines to skip = page*2
-    tax
-    beq @atpage
-@skip:
-    ldy #0
-    lda (tmpL2),y                ; len
-    sec
-    adc tmpL2                    ; += len+1 (carry set adds the +1)
-    sta tmpL2
-    bcc :+
-    inc tmpH2
-:   dex
-    bne @skip
-@atpage:
-    lda #$38                     ; line 0 of the pair -> row 7 (dy $38)
-    jsr @drawline
-    lda #$50                     ; line 1 -> row 10 (dy $50)
-    jsr @drawline
-    lda #150                     ; ~2.5s per page
-    sta e_tmr
-    inc e_ix
-    lda e_ix
-    cmp #e43c_pages
-    bcc @rts
-    stz e_ix
-    rts
-@drawline:                       ; A = dy (row*8); tmpL2/H2 -> [len][tiles]; advances past the line
-    sta tmpL3                    ; stash the row
-    ldy #0
-    lda (tmpL2),y                ; len
-    sta tmpL
-    ina
-    sta tmpH
-    ; centering: dcol = ((20-len)/2)*2 = 20 - len (in byte columns)
-    lda #20
-    sec
-    sbc tmpL
-    sta tmpH3                    ; starting dcol (byte column, even)
-    ldy #1                       ; Y indexes tiles (skip the len byte)
-@dch:
-    cpy tmpH                   ; tmpH = len+1 (loop while y <= len)
-    beq @dcdone
-    bcs @dcdone
-    phy
-    lda tmpL3
-    sta dy
-    lda tmpH3
-    sta dcol
-    lda (tmpL2),y
-    jsr get_tile_src
-    jsr set_dst
-    jsr blit_tile
-    inc tmpH3
-    inc tmpH3                    ; next byte column (+2)
-    ply
-    iny
-    bne @dch
-@dcdone:
-    lda tmpL                    ; advance tmpL2 past this line (len+1)
-    sec
-    adc tmpL2
-    sta tmpL2
-    bcc :+
-    inc tmpH2
-:   rts
-e43g_data: .byte $30,$08,$18,$11,$2C,$0D,$0A,$12,$1C,$22,$48,$0F,$1D,$11,$0A,$17,$14,$2C,$22,$18,$1E,$2C,$16,$0A,$1B,$12,$18,$60,$12,$22,$18,$1E,$1B,$2C,$1A,$1E,$0E,$1C,$1D,$2C,$12,$1C,$2C,$18,$1F,$0E,$1B,$FF
-e43c_pages = 3
-e43c_data: .byte $08,$19,$1B,$18,$0D,$1E,$0C,$0E,$1B,$07,$10,$2C,$22,$18,$14,$18,$12,$08,$0D,$12,$1B,$0E,$0C,$1D,$18,$1B,$07,$1C,$2C,$18,$14,$0A,$0D,$0A,$0A,$19,$1B,$18,$10,$1B,$0A,$16,$16,$0E,$1B,$0A,$16,$2C,$22,$0A,$16,$0A,$16,$18,$1D,$18,$FF
+    jmp $1C00
 .endproc
+e43_stub:                        ; RUNS AT $1C00: relative branches + zp only
+    stz LINK_DATA                ; MAGNUM: map page 12 (w3_bank's dance)
+    lda #12
+    sta LINK_DDR
+    lda #$0F
+    sta LCD_DRIVE
+    lda #$00                     ; blob: $9900 -> $1500, 7 pages ($1500-$1BFF)
+    sta tmpL2
+    lda #$99
+    sta tmpH2
+    stz tmpL
+    lda #$15
+    sta tmpH
+    ldx #7
+@pg:
+    ldy #0
+@b: lda (tmpL2),y
+    sta (tmpL),y
+    iny
+    bne @b
+    inc tmpH2
+    inc tmpH
+    dex
+    bne @pg
+    stz tmpL2                    ; tiles: $A000 -> $1D00, 608 B (2 pages + 96)
+    lda #$A0
+    sta tmpH2
+    stz tmpL
+    lda #$1D
+    sta tmpH
+    ldx #2
+@tp:
+    ldy #0
+@tb: lda (tmpL2),y
+    sta (tmpL),y
+    iny
+    bne @tb
+    inc tmpH2
+    inc tmpH
+    dex
+    bne @tp
+    ldy #0
+@tr: lda (tmpL2),y
+    sta (tmpL),y
+    iny
+    cpy #96
+    bne @tr
+    stz LINK_DATA                ; back to bank 1 (the ending's resident bank)
+    lda #1
+    sta LINK_DDR
+    lda #$0F
+    sta LCD_DRIVE
+    stz $1C00                    ; E43 st = 0 (its RAM is uninitialised; state 0 = init)
+    jmp $1500                    ; e43_entry -> e43_frame
+e43_stub_end:
 .segment "CODE"
 
 .segment "L13E"
