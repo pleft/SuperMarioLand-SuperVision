@@ -184,7 +184,6 @@ CXS_BOXOK  = $0153               ; 1 = CXA_* box computed this walk
 
 ; --- spawn: A = GB type, Y = spawn entry offset. C=0 consumed. -------------
 .segment "W2FAR"
-W4_ENEMY_CAP = 4                 ; max live VM foes on World 4 (docs/45)
 .proc w3_spawn
     ldx #W3_NTYPES-1
 :   cmp w3_typetab,x
@@ -194,32 +193,7 @@ W4_ENEMY_CAP = 4                 ; max live VM foes on World 4 (docs/45)
     clc                          ; not a VM type: consume and forget
     rts
 @found:
-    stx tmpH3                    ; the VM type index (survives the count loop)
-    ; --- World 4 active-enemy CAP (user decision 2026-09-05): the port's renderer
-    ; overruns a display frame past ~4 moving sprites (the flicker/slowdown the user
-    ; hit all over 4-1/4-2). Per-spot spawn thinning was whack-a-mole; instead, while
-    ; W4_ENEMY_CAP VM foes are already alive, CONSUME this spawn-LIST entry without
-    ; creating one (C=0, no retry) -- the enemy just does not appear this pass and the
-    ; camera keeps moving. Only the SPAWN path (w3_spawn); w3_morph/w3_child go through
-    ; w3_spawn_at, so the boss chain and the moai's children are never capped.
-    lda cur_level
-    cmp #9                       ; World 4 only (9-11); W1-3 stay GB-faithful
-    bcc @make
-    ldx #9                       ; the 10 object slots
-    ldy #0                       ; Y = live OBJ_W3 count
-@capcnt:
-    lda o_type,x
-    cmp #OBJ_W3
-    bne @capnx
-    iny
-@capnx:
-    dex
-    bpl @capcnt
-    cpy #W4_ENEMY_CAP
-    bcc @make
-    clc                          ; over the cap: consume, spawn nothing
-    rts
-@make:
+    stx tmpH3
     lda #OBJ_W3
     jsr w2_go                    ; shared allocate + seed (x from the entry)
     bcs @full

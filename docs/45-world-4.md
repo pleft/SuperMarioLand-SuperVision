@@ -687,23 +687,3 @@ were reverted before shipping). Results:
 Not measurable yet: 3-2's thirteen droppers at x 2240-2560 (no standing
 ground: the stretch is crossed on lifts). Two plants in one stretch did cost
 a point here (4-1 x 1136/1152, side by side on the same pipe row).
-
-### Active-enemy cap replaces per-spot thinning in World 4 (2026-09-05, user decision)
-
-User, after 0905d still lagged in many spots: "Cap active enemies." The port's
-renderer overruns a display frame past ~4 moving sprites, everywhere, so the
-right lever is a global limit, not per-spot drops. w3_spawn (the spawn-LIST
-path only -- w3_morph/w3_child use w3_spawn_at, so the boss chain and the moai's
-children are never capped) now counts live OBJ_W3 and, on levels 9-11 with
-W4_ENEMY_CAP (=4) already alive, consumes the entry WITHOUT creating one (C=0,
-no retry -- the camera keeps moving, the enemy just does not appear this pass).
-The per-spot thin.json drops for 9/10/11 are cleared; World 3's stay.
-
-HONESTY NOTE: the automated congestion measurement (svcongest/svthin placed and
-warped scenes) does NOT faithfully reproduce played load -- a fixed or warped
-camera does not advance the spawner, so those scenes measured near-empty screens
-and the earlier per-spot "fixes" were largely noise (the user kept hitting lag
-in spots reported clean). The cap is verified by CONSTRUCTION instead: py65
-shows w3_spawn refuses at >=4 alive; svgold 9/9 identical, battery31 all pass
-(levels 0-8 untouched). The felt result and the right value of W4_ENEMY_CAP are
-for the user's playtest -- it is a one-constant change.
