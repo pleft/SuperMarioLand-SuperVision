@@ -1952,7 +1952,7 @@ no:
     bne @q2                       ; docs/41): a $80 with NO content entry is
     jsr find_block                ; dispatched to the BRICK handler $19E1 --
     bcs @q2                       ; small Mario hops it, big SMASHES it (+50,
-    jmp @realbrick                ; shards, gone), and it never pays a coin.
+    bra @realbrick                ; shards, gone), and it never pays a coin.
 @q2:                              ; $81's no-content default IS the single coin
     jsr hit_qblock                ; + used block, so only the $80 detours.
     bra @bonk
@@ -2255,18 +2255,19 @@ no:
     bne @done
     lda ending13                 ; sphere clear: the rope/wipe/rescue flow follows
     beq :+
-    lda #5
-    sta goal_phase
-    lda #1                       ; E_BEAT1
+    jsr clear_objects            ; the object engine stops (A = ending13 preserved)
+    ldx #5
+    stx goal_phase               ; goal_phase = 5 (X kept = 5 for @e43's e_phase)
+    cmp #3                       ; 4-3 (==3): the game-ending text overlay (l3e43)
+    beq @e43
+    lda #1                       ; E_BEAT1 (x-3 rescue)
     sta e_phase
-    lda #71                      ; GB states $1C+$1D
+    lda #71
     sta e_tmr
-    ldx #9                       ; GB $1C+: the object engine stops for the ending.
-@oclr:                           ; update_objects keeps running here (line ~446), so
-    stz o_type,x                 ; live leftovers (stones, popups) GHOST-DRAW during
-    dex                          ; the 224px scroll -- their offscreen test wraps at
-    bpl @oclr                    ; 256px (user-caught: figures + glyph trails)
     rts
+@e43:
+    stx e_phase                  ; e_phase = 5 (>=E_WIPE); e_own set in l3e43 entry
+    jmp l3e_room_copy            ; load the L13E overlay to $1500
 :   lda goal_top                 ; top door -> the ladder bonus game first
     beq @next
     bra enter_bonus
@@ -2331,7 +2332,7 @@ no:
     and #3                       ;  into [00 01 02 E5 03 01 02 E5] @ $3E7B)
     tax
     ldy #0
-:   lda @ring+1,x
+:   lda @ring,x
     sta b_prz,y
     inx
     iny
@@ -2342,7 +2343,7 @@ no:
     lda #2
     sta bonus_phase
     rts
-@ring: .byte $00,$01,$02,$E5,$03,$01,$02,$E5
+@ring: .byte $01,$02,$E5,$03,$01,$02,$E5   ; leading $00 dropped (index 0 unused; freed 1 FIXED byte for l3e43)
 .endproc
 
 ; ===========================================================================
@@ -2632,6 +2633,11 @@ quad_rows: .byte 0, 0, 8, 8
 ; shared RAM window ($1500) at the wipe -- the L3CODE kit is retired by then.
 .segment "L13E"
 .proc l3e_room
+    lda ending13
+    cmp #3
+    bne :+
+    jmp l3e43
+:
     lda e_phase
     sec
     sbc #E_WIPE
@@ -3065,6 +3071,130 @@ moth_tiles: .incbin "../build/gfx/moth.svt"
 @tofs: .byte 1, 0, 5, 4
 .endproc
 
+.segment "CODE"
+
+.segment "L13E"
+; ===========================================================================
+; 4-3 GAME ENDING (text; docs/46). Runs from the $1500 overlay (FIXED is full).
+; Reuses the resident BG font (A=$0A..Z=$23, 0-9=$00-09) via get_tile_src, and
+; clear_vram/set_dst/blit_tile. Reached from l3e_room when ending13==3, set by
+; 4-3's veh_clear and dispatched through the normal goal_phase-5 flow.
+; e_phase: 5 entry(clear) -> 6 type -> 7 hold -> 8 THE END -> 9 done(hold).
+.proc l3e43
+    stz vxp                      ; EVERY frame: pin the view to 0 so calc_view (still
+    stz vxph                     ; run under e_own) writes XSCROLL/YSCROLL = 0 and the
+    stz vyp                      ; text is not clipped, and force one blank HUD copy so
+    stz scroll_s                 ; the NMI's HUD flush cannot smear the score bar over
+    ldy #0                       ; the ending (shadow blanked -> copy writes nothing).
+    tya
+:   sta HUDSHADOW,y
+    sta HUDSHADOW+256,y
+    iny
+    bne :-
+:   sta HUDSHADOW+512,y
+    iny
+    cpy #128
+    bne :-
+    lda #1
+    sta hud_go
+    lda e_phase
+    cmp #6
+    bcs @after
+    lda #1
+    sta e_own
+    lda #<bg_chardata            ; the ending text is the resident FONT, not 4-3's
+    sta bgc                      ; Egyptian BG charset (get_tile_src reads bgc)
+    lda #>bg_chardata
+    sta bgc+1
+    stz ring_b
+    stz ring_b+1
+    jsr clear_vram               ; clears $4000-$5DFF (30 pages)
+    ldy #0                       ; + the ring tail $5E00-$5FFF that scrolling shows
+    tya
+:   sta $5E00,y
+    sta $5F00,y
+    iny
+    bne :-
+    lda #6
+    sta e_phase
+    stz e_ix
+    lda #4
+    sta e_tmr
+    rts
+@after:
+    cmp #7
+    bcs @phase7
+    dec e_tmr
+    bne @draw
+    lda #4
+    sta e_tmr
+    lda e_ix
+    cmp #35
+    bcs @typed
+    inc e_ix
+@draw:
+    ldx #0
+@gl:
+    cpx e_ix
+    bcs @rts
+    phx
+    lda e43g_y,x
+    sta dy
+    lda e43g_c,x
+    sta dcol
+    lda e43g_t,x
+    jsr get_tile_src
+    jsr set_dst
+    jsr blit_tile
+    plx
+    inx
+    bra @gl
+@typed:
+    lda #7
+    sta e_phase
+    lda #200
+    sta e_tmr
+@rts:
+    rts
+@phase7:
+    cmp #8
+    bcs @phase8
+    dec e_tmr
+    bne @rts
+    jsr clear_vram
+    lda #8
+    sta e_phase
+    rts
+@phase8:
+    cmp #9
+    bcs @rts
+    ldx #0
+@el:
+    cpx #6
+    bcs @edone
+    phx
+    lda e43e_y,x
+    sta dy
+    lda e43e_c,x
+    sta dcol
+    lda e43e_t,x
+    jsr get_tile_src
+    jsr set_dst
+    jsr blit_tile
+    plx
+    inx
+    bra @el
+@edone:
+    lda #9
+    sta e_phase
+    rts
+e43g_t: .byte $18,$11,$0D,$0A,$12,$1C,$22,$1D,$11,$0A,$17,$14,$22,$18,$1E,$16,$0A,$1B,$12,$18,$22,$18,$1E,$1B,$1A,$1E,$0E,$1C,$1D,$12,$1C,$18,$1F,$0E,$1B
+e43g_y: .byte $30,$30,$30,$30,$30,$30,$30,$48,$48,$48,$48,$48,$48,$48,$48,$48,$48,$48,$48,$48,$60,$60,$60,$60,$60,$60,$60,$60,$60,$60,$60,$60,$60,$60,$60
+e43g_c: .byte $0C,$0E,$12,$14,$16,$18,$1A,$04,$06,$08,$0A,$0C,$10,$12,$14,$18,$1A,$1C,$1E,$20,$02,$04,$06,$08,$0C,$0E,$10,$12,$14,$18,$1A,$1E,$20,$22,$24
+e43e_t: .byte $1D,$11,$0E,$0E,$17,$0D
+e43e_y: .byte $40,$40,$40,$40,$40,$40
+e43e_c: .byte $0C,$0E,$10,$14,$16,$18
+.endproc
 .segment "CODE"
 
 .segment "L13E"
@@ -9080,7 +9210,7 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     and #2                       ; ... and visible
     bne @p4go
 @p4skip:
-    jmp @p4n
+    bra @p4n
 @p4go:
     jsr p4_one
 @p4n:
@@ -9088,7 +9218,7 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     lda oi
     cmp #OBJ_MAX
     beq :+
-    jmp @p4
+    bra @p4
 :   lda m_dirty
     beq @out
     and #2                       ; ISOLATED (bit1 clear): erase him HERE, one blit

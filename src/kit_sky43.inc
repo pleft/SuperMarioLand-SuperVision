@@ -878,8 +878,8 @@ sq_t:  .byte SUB_T, SUB_T+1, SUB_T+2, SUB_T+3
     lda #240
     sta goal_tmr
     stz goal_top
-    ; (2-3 armed the rope rescue here -- 4-3's ending is the GAME ending:
-    ;  Tatanga dead -> Daisy; TODO derive from the GB, docs/45)
+    lda #3                        ; 4-3: the GAME ending (Daisy text overlay, l3e43,
+    sta ending13                 ; docs/46) follows the tally, via goal_phase 5
     lda #3
     sta mus_rate
     jsr mus_stop

@@ -36,3 +36,33 @@ Tile sources in the user's ROM: {'0x0': '0x8032', '0x20': '0x8232', '0x21': '0x8
 
 Frame log: build/gbend_log.json (t, state, c200..c203, c210..c213, c240..c242,
 ffa4, text cursor, fffb, dfe8, LCDC); contact sheets gbend_sheet0..5.png.
+
+## Built: the 4-3 text ending (2026-09-05)
+
+Stage 1 of the ending is implemented and gated. On Biokinton's ($60) defeat,
+kit_sky43 veh_clear sets ending13=3; the goal sequence runs the jingle + tally
+as usual, then goal_seq's phase-4 setup (main.s) branches on ending13==3 into a
+new flow: goal_phase=5, e_phase=5 (>=E_WIPE), e_own=1, and l3e_room_copy loads
+the L13E overlay. l3e_seq (unchanged) sees e_phase>=E_WIPE and jmp l3e_room,
+which now dispatches ending13==3 -> l3e43 (the new overlay routine).
+
+l3e43 (L13E overlay, so FIXED stays full): clears the framebuffer + the ring
+tail ($5E00-$5FFF), points bgc at the resident font (bg_chardata -- 4-3's own
+BG charset has scenery, not letters), pins the view to 0 and blanks the HUD
+shadow every frame (calc_view still runs under e_own and the NMI still flushes
+the HUD, so both are neutralised or they smear the score bar / clip the text /
+leave a garbage strip). It then TYPES "OH DAISY", "THANK YOU MARIO", "YOUR
+QUEST IS OVER" (resident font tiles, one glyph / 4 frames), holds, clears, and
+shows "THE END" (holds). Verified on the real core: the boss kill leads into
+the ending (no wrap to 1-1); text is centered and clean. svgold 9/9 identical
+(the shared goal_seq edits do not disturb the x-3 rescue), battery31 all pass.
+
+FIXED was full; the trigger's bytes came from: jsr clear_objects replacing the
+inline object-clear loop, clear_objects preserving A (so ending13 is tested
+without reload), the bonus @ring table's unused leading byte, and three local
+jmp->bra. E_BEAT1 etc. unchanged.
+
+REMAINING (stage 2+, docs/46 spec above): the animated Daisy/Mario/plane
+cutscene, the heart, the plane flight over clouds, and the scrolling credits
+roll. Those need the sprite tiles ($48-$51 Daisy, plane, heart, clouds)
+extracted and placed. The text ending makes the game completable now.
