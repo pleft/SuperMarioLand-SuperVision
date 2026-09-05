@@ -1,0 +1,24 @@
+drop6: baseline 6.2% over 690 frames, 7.39 objs; candidates [(2192, '0x36'), (2208, '0x36'), (2240, '0x36'), (2240, '0x36'), (2272, '0x36'), (2272, '0x36'), (2400, '0x49'), (2144, '0x38')]
+  drop  2192 0x36 y 32 (static): 6.2% (690 fr, 7.39 objs) -> revert
+  drop  2208 0x36 y 32 (static): 6.2% (690 fr, 7.39 objs) -> revert
+  drop  2240 0x36 y 32 (static): 5.2% (690 fr, 5.37 objs) -> KEEP
+  drop  2240 0x36 y 32 (static): 5.2% (690 fr, 5.37 objs) -> revert
+  drop  2272 0x36 y 40 (static): 5.5% (690 fr, 3.34 objs) -> revert
+  drop  2272 0x36 y 40 (static): 5.5% (690 fr, 3.34 objs) -> revert
+  drop  2400 0x49 y128 (static): 0.0% (690 fr, 3.57 objs) -> KEEP
+drop6: final 0.0% (was 6.2%); kept [(2240, '0x36'), (2400, '0x49')]
+trio1: baseline 39.6% over 690 frames, 7.40 objs; candidates [(2912, '0x49'), (2944, '0x49'), (2640, '0x4'), (2656, '0x56')]
+  drop  2912 0x49 y128 (static): 15.2% (690 fr, 5.54 objs) -> KEEP
+  drop  2944 0x49 y112 (static): 0.0% (690 fr, 3.72 objs) -> KEEP
+trio1: final 0.0% (was 39.6%); kept [(2912, '0x49'), (2944, '0x49')]
+trio2: baseline 49.3% over 690 frames, 7.99 objs; candidates [(3200, '0x36'), (3216, '0x36'), (3248, '0x49'), (3264, '0x49'), (3280, '0x49'), (3120, '0x56'), (3120, '0x56'), (3120, '0x56')]
+  drop  3200 0x36 y120 (static): 48.6% (690 fr, 7.02 objs) -> revert
+  drop  3216 0x36 y120 (static): 48.4% (690 fr, 7.02 objs) -> revert
+  drop  3248 0x49 y128 (static): 32.8% (690 fr, 6.40 objs) -> KEEP
+  drop  3264 0x49 y112 (static): 4.2% (690 fr, 4.54 objs) -> KEEP
+  drop  3280 0x49 y 88 (static): 0.0% (690 fr, 2.79 objs) -> KEEP
+trio2: final 0.0% (was 49.3%); kept [(3248, '0x49'), (3264, '0x49'), (3280, '0x49')]
+late: baseline 0.9% over 690 frames, 4.09 objs; candidates [(2096, '0x4'), (2128, '0x3f'), (2176, '0x4'), (2192, '0x54')]
+late: final 0.9% (was 0.9%); kept []
+end: baseline 0.0% over 690 frames, 3.03 objs; candidates [(2704, '0x55'), (2496, '0x4'), (2512, '0x54'), (2736, '0x3a')]
+end: final 0.0% (was 0.0%); kept []

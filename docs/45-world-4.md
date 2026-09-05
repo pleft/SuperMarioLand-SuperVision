@@ -638,3 +638,25 @@ TOP turn stays open: GB at obj y 57, port at 47 (the port turns when the
 sprite meets the ceiling tiles; the GB 10 px before). The ceiling probe ($2c21:
 ffad = ffc2 - 8(h-1), level row = (ffad - 32) >> 3) lands on a sky row there,
 so the GB's early turn is not that probe either -- still to find.
+
+### The second halves of 4-1 and 4-2 (2026-09-05, user: "areas with 3 cannons shooting missiles are unplayable")
+
+My survey never got past x ~2300: its runner dies there and the checkpoint
+warps end at 2240, so the cannon trios at x 3104-3168 and 3440-3472 were
+never measured. Standing scenes now cover them (`svthin stand()`: camera fixed
+on the stretch, Mario on real ground firing now and then, the spawner's index
+set so the stretch's entries fire; entries past the first 51 are reached by
+poking the index to 51 -- the window shifts itself). Two tooling bugs fixed on
+the way: placed scenes that mass-spawned the whole level (10 slots, Mario dead
+in 30 frames) accepted drops on noise -- reverted; and the scene's spawn index
+must be computed on the PACKED (thinned) list, or every drop shifts the scene
+by one entry. Results (static first):
+
+| stretch | before | after | dropped |
+|---|---|---|---|
+| 4-1 droppers + cannon (x 2384-2600) | 6.2% | 0% | dropper 2240, cannon 2400 |
+| 4-1 cannon trio 3104-3168 | 39.6% | 0% | cannons 2912, 2944 (2976 stays) |
+| 4-1 three Pionpi + cannon trio 3440-3472 | 49.3% | 0% | cannons 3248, 3264, 3280 |
+
+A cannon costs ~15-25 points on its own (its missile chain is a mover every
+frame); the Pionpi and the droppers were never worth a point.
