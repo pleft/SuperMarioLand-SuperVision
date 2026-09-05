@@ -660,3 +660,30 @@ by one entry. Results (static first):
 
 A cannon costs ~15-25 points on its own (its missile chain is a mover every
 frame); the Pionpi and the droppers were never worth a point.
+
+### Static candidates first (user, 2026-09-05), then the measurement
+
+User: "You don't need to dynamically compute the congested areas ... areas
+with more than one cannon are candidates, areas with 2-3 plants are also
+candidates." `tools/congest_static.py` slides a 320px window over each
+level's (thinned) spawn list and flags >1 cannon, >=2 plants, or a weighted
+load >= 12 (weights = the measured per-object costs). Its flags for Worlds 3
+and 4 were then measured with `svthin`'s new `region()` scenes: two fixed
+camera positions per stretch, Mario on real row-14 ground (the map decides),
+the spawner index recomputed on the packed list after every drop, and a drop
+is accepted only on >= 300 measured frames (two earlier short-scene results
+were reverted before shipping). Results:
+
+| stretch | before | after | dropped |
+|---|---|---|---|
+| 4-1 x 1056-1536 (cannon + 3 plants + Pionpi) | 13.9% | 2.2% | plants 1136, 1152; cannon 1168 |
+| 4-2 x 352-672 (two cannons) | 8.9% | 0% | cannon 304 |
+| 4-2 x 832-1152 (cannon + 6 hazards) | 38.8% | 3.0% | hazards 688, 736, 800, 848, 896; cannon 880 |
+| 3-1 x 1728-2048 (two cannons + lifts) | 8.6% | 0% | cannon 1744 |
+| 3-2 x 1024-1408 (cannon, Tokotokos, Nokobons) | 9.7% | 0.9% | Nokobons 688, 832; $35 752 |
+| 3-2 x 1952-2272 (cannon + ...) | 9.4% | 0% | cannon 1776 |
+| 3-1 x 288-608, 2016-2496; 3-2 x 192-960; 4-2 x 2304-2624; 3-3 | 0-3.6% | -- | nothing |
+
+Not measurable yet: 3-2's thirteen droppers at x 2240-2560 (no standing
+ground: the stretch is crossed on lifts). Two plants in one stretch did cost
+a point here (4-1 x 1136/1152, side by side on the same pipe row).

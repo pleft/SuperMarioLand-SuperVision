@@ -1,0 +1,143 @@
+   region 1056-1536: camera 960, Mario at 984
+mid: baseline 0.0% over 690 frames, 4.03 objs; candidates [(720, '0x4'), (736, '0x56'), (832, '0x56'), (848, '0x4'), (880, '0x4')]
+mid: final 0.0% (was 0.0%); kept []
+   region 352-672: camera 256, Mario at 280
+a: baseline 0.0% over 690 frames, 3.97 objs; candidates [(48, '0x4'), (144, '0x4'), (208, '0x4')]
+a: final 0.0% (was 0.0%); kept []
+   region 832-1152: camera 800, Mario at 928
+b: baseline 6.2% over 690 frames, 4.15 objs; candidates [(464, '0x49'), (640, '0x55'), (688, '0x55'), (736, '0x55'), (576, '0x3f'), (688, '0x4')]
+  drop   464 0x49 y120 (static): 5.5% (690 fr, 4.15 objs) -> revert
+  drop   640 0x55 y 96 (static): 0.1% (690 fr, 3.12 objs) -> KEEP
+b: final 0.1% (was 6.2%); kept [(640, '0x55')]
+   region 2304-2624: camera 2208, Mario at 2272
+c: baseline 0.9% over 690 frames, 2.31 objs; candidates [(1856, '0x54'), (2096, '0x4'), (2128, '0x3f'), (2176, '0x4')]
+c: final 0.9% (was 0.9%); kept []
+   region 288-608: camera 192, Mario at 232
+a: baseline 0.0% over 629 frames, 1.07 objs; candidates [(48, '0x3c'), (128, '0x4')]
+a: final 0.0% (was 0.0%); kept []
+   region 1728-2048: camera 1792, Mario at 1920
+b: baseline 8.6% over 690 frames, 4.73 objs; candidates [(1744, '0x49'), (1504, '0x4'), (1552, '0x3c'), (1632, '0x3a')]
+  drop  1744 0x49 y104 (static): 0.0% (690 fr, 3.01 objs) -> KEEP
+b: final 0.0% (was 8.6%); kept [(1744, '0x49')]
+   region 2016-2496: camera 1920, Mario at 1952
+c: baseline 1.4% over 690 frames, 2.35 objs; candidates [(1824, '0x49'), (1632, '0x3a')]
+c: final 1.4% (was 1.4%); kept []
+   region 1024-1408: camera 992, Mario at 1120
+b: baseline 9.7% over 690 frames, 4.86 objs; candidates [(688, '0x4'), (752, '0x35'), (832, '0x4'), (896, '0x25'), (912, '0xe'), (928, '0x25')]
+  drop   688 0x4 y112 (moving): 7.8% (690 fr, 4.83 objs) -> KEEP
+  drop   752 0x35 y 40 (moving): 6.4% (690 fr, 3.83 objs) -> KEEP
+  drop   832 0x4 y 88 (moving): 0.9% (690 fr, 2.84 objs) -> KEEP
+b: final 0.9% (was 9.7%); kept [(688, '0x4'), (752, '0x35'), (832, '0x4')]
+   region 1952-2272: camera 1856, Mario at 1920
+c: baseline 9.4% over 690 frames, 4.83 objs; candidates [(1776, '0x49'), (1648, '0x3'), (1792, '0x25'), (1824, '0xe')]
+  drop  1776 0x49 y112 (static): 0.0% (690 fr, 3.12 objs) -> KEEP
+c: final 0.0% (was 9.4%); kept [(1776, '0x49')]
+no standing ground near x 2240
+   region 1056-1536: camera 960, Mario at 984
+mid: baseline 0.0% over 690 frames, 4.03 objs; candidates [(1008, '0x2'), (1136, '0x2'), (1152, '0x2'), (1168, '0x49'), (1264, '0x2'), (1376, '0x2'), (720, '0x4'), (736, '0x56'), (832, '0x56'), (848, '0x4'), (880, '0x4'), (992, '0x56'), (1040, '0x56'), (1312, '0x56'), (1312, '0x4'), (1456, '0x39')]
+mid: final 0.0% (was 0.0%); kept []
+   region 352-672: camera 256, Mario at 280
+a: baseline 0.0% over 690 frames, 3.97 objs; candidates [(304, '0x49'), (464, '0x49'), (48, '0x4'), (144, '0x4'), (208, '0x4'), (240, '0x9'), (368, '0x4'), (432, '0x9'), (576, '0x3f')]
+a: final 0.0% (was 0.0%); kept []
+   region 288-608: camera 192, Mario at 232
+a: baseline 0.0% over 629 frames, 1.07 objs; candidates [(192, '0x36'), (192, '0x36'), (208, '0x36'), (208, '0x36'), (224, '0x36'), (224, '0x36'), (384, '0x49'), (48, '0x3c'), (128, '0x4'), (272, '0x4')]
+a: final 0.0% (was 0.0%); kept []
+   region 2016-2496: camera 1920, Mario at 1952
+c: baseline 1.4% over 690 frames, 2.35 objs; candidates [(1824, '0x49'), (1952, '0x2'), (2112, '0x49'), (1984, '0x31'), (2000, '0x31'), (2000, '0x3c'), (2016, '0x31'), (2080, '0x3c'), (2192, '0x31'), (2288, '0x3'), (2448, '0x3')]
+c: final 1.4% (was 1.4%); kept []
+no standing ground near x 2240
+   region 352-672: camera 256, Mario at 280, walking to 672
+   (warning: only 23 measured frames)
+a: baseline 0.0% over 23 frames, 3.00 objs; candidates [(304, '0x49'), (464, '0x49'), (48, '0x4'), (144, '0x4'), (208, '0x4'), (240, '0x9'), (368, '0x4'), (432, '0x9'), (576, '0x3f')]
+   (warning: only 23 measured frames)
+a: final 0.0% (was 0.0%); kept []
+   region 832-1152: camera 800, Mario at 928, walking to 1152
+b: baseline 38.8% over 632 frames, 7.16 objs; candidates [(688, '0x55'), (736, '0x55'), (800, '0x55'), (848, '0x55'), (880, '0x49'), (896, '0x55'), (576, '0x3f'), (688, '0x4'), (944, '0x4'), (960, '0x0'), (1040, '0x9')]
+  drop   688 0x55 y 96 (static): 36.5% (671 fr, 7.08 objs) -> KEEP
+  drop   736 0x55 y 88 (static): 34.5% (634 fr, 6.73 objs) -> KEEP
+  drop   800 0x55 y 96 (static): 26.9% (498 fr, 6.36 objs) -> KEEP
+  drop   848 0x55 y 96 (static): 16.6% (409 fr, 5.01 objs) -> KEEP
+  drop   880 0x49 y120 (static): 6.0% (447 fr, 3.77 objs) -> KEEP
+  drop   896 0x55 y 88 (static): 3.0% (370 fr, 3.09 objs) -> KEEP
+b: final 3.0% (was 38.8%); kept [(688, '0x55'), (736, '0x55'), (800, '0x55'), (848, '0x55'), (880, '0x49'), (896, '0x55')]
+   region 288-608: camera 192, Mario at 232, walking to 608
+a: baseline 0.3% over 309 frames, 5.01 objs; candidates [(192, '0x36'), (192, '0x36'), (208, '0x36'), (208, '0x36'), (224, '0x36'), (224, '0x36'), (384, '0x49'), (48, '0x3c'), (128, '0x4'), (272, '0x4')]
+a: final 0.3% (was 0.3%); kept []
+   region 2016-2496: camera 1920, Mario at 1952, walking to 2496
+   (warning: only 64 measured frames)
+c: baseline 21.9% over 64 frames, 0.23 objs; candidates [(1824, '0x49'), (1952, '0x2'), (2112, '0x49'), (1984, '0x31'), (2000, '0x31'), (2000, '0x3c'), (2016, '0x31'), (2080, '0x3c'), (2192, '0x31'), (2288, '0x3'), (2448, '0x3')]
+   (warning: only 64 measured frames)
+  drop  1824 0x49 y112 (static): 21.9% (64 fr, 0.00 objs) -> revert
+   (warning: only 64 measured frames)
+  drop  1952 0x2 y 72 (static): 21.9% (64 fr, 0.23 objs) -> revert
+   (warning: only 64 measured frames)
+  drop  2112 0x49 y 72 (static): 21.9% (64 fr, 0.23 objs) -> revert
+   (warning: only 64 measured frames)
+  drop  1984 0x31 y112 (moving): 21.9% (64 fr, 0.23 objs) -> revert
+   (warning: only 64 measured frames)
+  drop  2000 0x31 y112 (moving): 21.9% (64 fr, 0.23 objs) -> revert
+   (warning: only 64 measured frames)
+  drop  2000 0x3c y 48 (moving): 21.9% (64 fr, 0.23 objs) -> revert
+   (warning: only 64 measured frames)
+  drop  2016 0x31 y112 (moving): 21.9% (64 fr, 0.23 objs) -> revert
+   (warning: only 64 measured frames)
+  drop  2080 0x3c y112 (moving): 21.9% (64 fr, 0.23 objs) -> revert
+   (warning: only 64 measured frames)
+  drop  2192 0x31 y 80 (moving): 21.9% (64 fr, 0.23 objs) -> revert
+   (warning: only 64 measured frames)
+  drop  2288 0x3 y 32 (moving): 21.9% (64 fr, 0.23 objs) -> revert
+   (warning: only 64 measured frames)
+  drop  2448 0x3 y 32 (moving): 21.9% (64 fr, 0.23 objs) -> revert
+   (warning: only 64 measured frames)
+c: final 21.9% (was 21.9%); kept []
+   region 1056-1536: camera 960, Mario at 984, walking to 1536
+mid: baseline 19.1% over 797 frames, 6.12 objs; candidates [(1008, '0x2'), (1136, '0x2'), (1152, '0x2'), (1168, '0x49'), (1264, '0x2'), (1376, '0x2'), (720, '0x4'), (736, '0x56'), (832, '0x56'), (848, '0x4'), (880, '0x4'), (992, '0x56'), (1040, '0x56'), (1312, '0x56'), (1312, '0x4'), (1456, '0x39')]
+  drop  1008 0x2 y128 (static): 20.0% (439 fr, 6.87 objs) -> revert
+  drop  1136 0x2 y128 (static): 18.1% (797 fr, 5.62 objs) -> KEEP
+  drop  1152 0x2 y112 (static): 20.9% (635 fr, 7.28 objs) -> revert
+  drop  1168 0x49 y 96 (static): 17.1% (753 fr, 5.52 objs) -> revert
+  drop  1264 0x2 y104 (static): 17.9% (797 fr, 5.54 objs) -> revert
+  drop  1376 0x2 y 96 (static): 18.1% (797 fr, 5.62 objs) -> revert
+  drop   720 0x4 y104 (moving): 18.6% (478 fr, 5.89 objs) -> revert
+  drop   736 0x56 y104 (moving): 18.7% (797 fr, 5.99 objs) -> revert
+   (warning: only 163 measured frames)
+  drop   832 0x56 y104 (moving): 10.4% (163 fr, 6.25 objs) -> KEEP
+   (warning: only 160 measured frames)
+  drop   848 0x4 y104 (moving): 10.6% (160 fr, 5.26 objs) -> revert
+   (warning: only 160 measured frames)
+  drop   880 0x4 y104 (moving): 10.6% (160 fr, 5.26 objs) -> revert
+   (warning: only 155 measured frames)
+  drop   992 0x56 y112 (moving): 7.1% (155 fr, 5.63 objs) -> KEEP
+   (warning: only 153 measured frames)
+  drop  1040 0x56 y 80 (moving): 7.2% (153 fr, 5.48 objs) -> revert
+   (warning: only 155 measured frames)
+  drop  1312 0x56 y 72 (moving): 7.1% (155 fr, 5.63 objs) -> revert
+   (warning: only 155 measured frames)
+  drop  1312 0x4 y 72 (moving): 7.1% (155 fr, 5.63 objs) -> revert
+   (warning: only 155 measured frames)
+  drop  1456 0x39 y104 (moving): 7.1% (155 fr, 5.63 objs) -> revert
+   (warning: only 155 measured frames)
+mid: final 7.1% (was 19.1%); kept [(1136, '0x2'), (832, '0x56'), (992, '0x56')]
+no standing ground near x 2240
+   mid: standing scenes at camera [1016, 1336]
+mid: baseline 13.9% over 1380 frames, 5.93 objs; candidates [(1008, '0x2'), (1136, '0x2'), (1152, '0x2'), (1168, '0x49'), (1264, '0x2'), (1376, '0x2'), (720, '0x4'), (736, '0x56'), (832, '0x56'), (848, '0x4'), (880, '0x4'), (992, '0x56'), (1040, '0x56'), (1312, '0x56'), (1312, '0x4'), (1456, '0x39')]
+  drop  1008 0x2 y128 (static): 14.1% (1380 fr, 5.49 objs) -> revert
+  drop  1136 0x2 y128 (static): 12.8% (1380 fr, 5.45 objs) -> KEEP
+  drop  1152 0x2 y112 (static): 10.0% (1380 fr, 4.94 objs) -> KEEP
+  drop  1168 0x49 y 96 (static): 2.2% (1380 fr, 3.69 objs) -> KEEP
+mid: final 2.2% (was 13.9%); kept [(1136, '0x2'), (1152, '0x2'), (1168, '0x49')]
+   a: standing scenes at camera [312, 472]
+a: baseline 8.9% over 1380 frames, 6.36 objs; candidates [(304, '0x49'), (464, '0x49'), (48, '0x4'), (144, '0x4'), (208, '0x4'), (240, '0x9'), (368, '0x4'), (432, '0x9'), (576, '0x3f')]
+  drop   304 0x49 y120 (static): 0.0% (1380 fr, 4.30 objs) -> KEEP
+a: final 0.0% (was 8.9%); kept [(304, '0x49')]
+   c: standing scenes at camera [1976, 2296]
+c: baseline 3.6% over 1380 frames, 4.08 objs; candidates [(1824, '0x49'), (1952, '0x2'), (2112, '0x49'), (1984, '0x31'), (2000, '0x31'), (2000, '0x3c'), (2016, '0x31'), (2080, '0x3c'), (2192, '0x31'), (2288, '0x3'), (2448, '0x3')]
+c: final 3.6% (was 3.6%); kept []
+Traceback (most recent call last):
+  File "/Users/pleft/Dev/SuperMarioLand/tools/svthin.py", line 132, in <module>
+    main()
+  File "/Users/pleft/Dev/SuperMarioLand/tools/svthin.py", line 114, in main
+    scene, (clo, chi) = build_scene()
+  File "/Users/pleft/Dev/SuperMarioLand/tools/svthin.py", line 105, in build_scene
+    assert subs, f"no standing ground in {x0}-{x1}"
+AssertionError: no standing ground in 2240-2560

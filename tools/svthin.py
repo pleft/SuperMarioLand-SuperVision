@@ -26,6 +26,11 @@ def stand(cam, sprx, lo, hi):
     # first 51-entry window: index 51 -> the window shifts itself, then everything
     # up to the camera fires -- the stretch's objects plus a few behind Mario)
     return ("__STAND__", cam, sprx, lo, hi)
+def region(x0, x1):
+    # a stretch by WORLD x from the static scan (tools/congest_static.py): the
+    # standing scene is derived automatically -- camera x0-96, Mario on the nearest
+    # row-14 ground inside the screen (the map decides), firing now and then
+    return ("__REGION__", x0, x1)
 def fly(cam):   # 4-3 (autoscroll, no d-pad): camera poke, plane at its default, autofire
     return f"0xB4:{cam&255}@100,0xB5:{cam>>8}@100", ".100,A700", 160, cam, cam + 400
 SCENES = {  # (level, name): (pokes, script, first frame, cam lo, cam hi)
@@ -40,16 +45,24 @@ SCENES = {  # (level, name): (pokes, script, first frame, cam lo, cam hi)
     (9, "trio2"):   stand(3330, 70, 3330, 3331),    # three Pionpi (3312), droppers, cannon trio 3440-3472; Mario at 3400
     (10, "late"):   stand(2248, 40, 2248, 2249),    # 4-2 at 2288: orbiters + Gao + Nokobons
     (10, "end"):    stand(2840, 40, 2840, 2841),    # 4-2 at 2880: hazard, lift, five droppers
+    (6, "a"): region(288, 608), (6, "b"): region(1728, 2048), (6, "c"): region(2016, 2496),
+    (7, "b"): region(1024, 1408), (7, "c"): region(1952, 2272), (7, "d"): region(2240, 2560),
+    (9, "mid"): region(1056, 1536),
+    (10, "a"): region(352, 672), (10, "b"): region(832, 1152), (10, "c"): region(2304, 2624),
     (7, "start"):   ("0x53:1@40,0x50:1@40", ".40," + PLAY, 60, 100, 520),   # 3-2: Tokotokos + Nokobons + a plant
     (6, "start"):   ("0x53:1@40,0x50:1@40", ".40," + PLAY, 60, 100, 520),
     (10, "orbiters"): warp(1280) + (1280, 1700),
 }
+CAND = []          # candidate world-x range override (region scenes)
 STATIC = {0x02, 0x49, 0x55, 0x36, 0x0C, 0x1C}   # $1C = W3's static shooter
 LIFTS = {0x0A, 0x0B}
 lbl = {m.group(2): int(m.group(1), 16) for m in re.finditer(r'al 00([0-9A-F]{4}) \.(\w+)', open('build/rom.lbl').read())}
 ot, ts = lbl['o_type'], lbl['timer_sub']
 frz = [lbl[n] for n in ('mario_grow', 'mario_shrink', 'death_anim', 'goal_phase', 'bonus_phase', 'pipe_phase')]
 def measure(lvl, scene):
+    if isinstance(scene, list):
+        rs = [measure(lvl, sc) for sc in scene]; fr = sum(r[1] for r in rs)
+        return (sum(r[0] * r[1] for r in rs) / fr if fr else 0.0), fr, (sum(r[2] * r[1] for r in rs) / fr if fr else 0)
     pk, script, f0, lo, hi = scene; n = sum(int(s[1:]) for s in script.split(','))
     # invulnerable (hurt_inv topped up every 100 frames): the scene must SURVIVE long
     # enough to be measured -- a 127-frame baseline once accepted a drop on noise
@@ -75,32 +88,45 @@ def build():
     r = subprocess.run(['make'], capture_output=True, text=True); assert 'built' in r.stdout, r.stdout[-400:] + r.stderr[-400:]
 def main():
     lvl, name = int(sys.argv[1]), sys.argv[2]; thr = float(sys.argv[3]) if len(sys.argv) > 3 else 4.0
-    scene = SCENES[(lvl, name)]
-    if scene[0] == "__STAND__":
-        _, cam, sprx, lo, hi = scene
-        idx = sum(1 for e in entries(lvl, True) if e[0] <= cam - 300)   # index into the packed (thinned) list
-        idx = min(idx, 51)
-        pk = f"0xB4:{cam&255}@100,0xB5:{cam>>8}@100,0xA4:{sprx}@100,{lbl['spawn_idx']}:{idx}@100,0x1FF0:0@100,0x53:1@100,0x50:1@100"
-        scene = (pk, ".100,.10," + ",".join(["B2,.12"] * 50), 120, lo, hi)
-    if scene[0] == "__WALK__":
-        _, cam, sprx, lo, hi = scene
-        idx = sum(1 for e in entries(lvl, True) if e[0] <= cam - 300)
-        assert idx < 51, "walk scene past the spawn window's first 51 entries"
-        pk = f"0xB4:{cam&255}@100,0xB5:{cam>>8}@100,0xA4:{sprx}@100,{lbl['spawn_idx']}:{idx}@100,0x1FF0:0@100,0x53:1@100,0x50:1@100"
-        scene = (pk, ".100,.10," + PLAY, 120, lo, hi)
-    lo, hi = scene[3], scene[4]
+    raw = SCENES[(lvl, name)]
+    import json as _j
+    C = _j.load(open(f"build/levels/level_{lvl:02d}.json"))["columns"]
+    def ground(x): c = x // 8; return c + 1 < len(C) and C[c][14] >= 0x60 and C[c][13] < 0x60 and C[c][12] < 0x60 and C[c+1][14] >= 0x60 and C[c+1][13] < 0x60
+    def spawn_pokes(cam, sprx):   # spawner index into the PACKED list (recomputed after every drop)
+        idx = min(sum(1 for e in entries(lvl, True) if e[0] <= cam - 300), 51)
+        return f"0xB4:{cam&255}@100,0xB5:{cam>>8}@100,0xA4:{sprx}@100,{lbl['spawn_idx']}:{idx}@100,0x1FF0:0@100,0x53:1@100,0x50:1@100"
+    def build_scene():
+        if raw[0] == "__REGION__":
+            _, x0, x1 = raw; subs = []
+            for cam0 in (max(0, x0 - 40), max(0, x1 - 200)):   # two FIXED cameras cover a 320px stretch
+                for shift in range(0, 200, 8):
+                    cands = [x for x in range(cam0 + shift + 24, cam0 + shift + 136, 8) if ground(x)]
+                    if cands: subs.append((cam0 + shift, cands[0] - cam0 - shift)); break
+            assert subs, f"no standing ground in {x0}-{x1}"
+            return [(spawn_pokes(c, sx), ".100,.10," + ",".join(["B2,.12"] * 50), 120, c, c + 1) for c, sx in subs], (x0 - 160, x1 + 160)
+        if raw[0] == "__STAND__":
+            _, cam, sprx, lo, hi = raw
+            return (spawn_pokes(cam, sprx), ".100,.10," + ",".join(["B2,.12"] * 50), 120, lo, hi), (lo - 160, hi + 160)
+        if raw[0] == "__WALK__":
+            _, cam, sprx, lo, hi = raw
+            return (spawn_pokes(cam, sprx), ".100,.10," + PLAY, 120, lo, hi), (lo - 160, hi + 160)
+        return raw, (raw[3] - 160, raw[4] + 160)
+    scene, (clo, chi) = build_scene()
+    if isinstance(scene, list): print(f"   {name}: standing scenes at camera", [sc[3] for sc in scene])
     thin = json.load(open("tools/thin.json")); cur = [tuple(e) for e in thin.get(str(lvl), [])]
-    cands = [e for e in entries(lvl) if lo - 160 <= e[0] + 192 <= hi + 160 and e[1] not in LIFTS and e not in cur]
+    cands = [e for e in entries(lvl) if clo <= e[0] + 192 <= chi and e[1] not in LIFTS and e not in cur]
     cands.sort(key=lambda e: (0 if e[1] in STATIC else 1, e[0]))
     build(); base = measure(lvl, scene); print(f"{name}: baseline {base[0]:.1f}% over {base[1]} frames, {base[2]:.2f} objs; candidates {[(e[0], hex(e[1])) for e in cands]}")
+    if base[1] < 300: print(f"{name}: INVALID scene ({base[1]} frames) -- no drops accepted"); return
     best = base[0]; log = []
     for e in cands:
         if best <= thr: break
         thin[str(lvl)] = [list(x) for x in cur + [e]]; json.dump(thin, open("tools/thin.json", "w"), indent=1); build()
-        m = measure(lvl, scene); keep = m[0] <= best - 1.0
+        scene, _ = build_scene()
+        m = measure(lvl, scene); keep = m[0] <= best - 1.0 and m[1] >= 300
         print(f"  drop {e[0]:5d} {hex(e[1])} y{e[2]:3d} ({'static' if e[1] in STATIC else 'moving'}): {m[0]:.1f}% ({m[1]} fr, {m[2]:.2f} objs) -> {'KEEP' if keep else 'revert'}")
         log.append((e, m[0], keep))
         if keep: cur.append(e); best = m[0]
     thin[str(lvl)] = [list(x) for x in cur]; json.dump(thin, open("tools/thin.json", "w"), indent=1); build()
-    fin = measure(lvl, scene); print(f"{name}: final {fin[0]:.1f}% (was {base[0]:.1f}%); kept {[(e[0], hex(e[1])) for e, m, k in log if k]}")
+    scene, _ = build_scene(); fin = measure(lvl, scene); print(f"{name}: final {fin[0]:.1f}% (was {base[0]:.1f}%); kept {[(e[0], hex(e[1])) for e, m, k in log if k]}")
 main()
