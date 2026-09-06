@@ -9,6 +9,11 @@ Supervision's very different CPU and video hardware.
 Runs on real Watara Supervision hardware (via a flash cart) and in emulators
 (Potator, incl. the RetroArch Potator core).
 
+<p align="center">
+  <img src="docs/images/hardware.png" width="360" alt="Super Mario Land running on a real Watara Supervision">
+  <br><em>The port running on real Watara Supervision hardware.</em>
+</p>
+
 > **This repository contains no game ROM data.** All graphics, level maps,
 > tables, music and sound effects are **extracted from your own legally-owned
 > Game Boy Super Mario Land ROM at build time**. You must supply that ROM
@@ -24,6 +29,20 @@ and [`docs/`](docs/) for the per-subsystem reverse-engineering notes.
 
 One known cosmetic gap is documented: the 4-3 pipe fists draw in front of their
 pipe instead of behind it (a renderer limitation; see `docs/45`).
+
+## Screenshots
+
+All captured from the port (emulated Watara Supervision):
+
+| Title | World 1-1 | World 1-2 | World 1-3 |
+|:---:|:---:|:---:|:---:|
+| ![Title](docs/images/title.png) | ![1-1](docs/images/world-1-1.png) | ![1-2](docs/images/world-1-2.png) | ![1-3](docs/images/world-1-3.png) |
+| **World 2-1** | **World 2-2** | **World 2-3** (Marine Pop) | **World 3-1** |
+| ![2-1](docs/images/world-2-1.png) | ![2-2](docs/images/world-2-2.png) | ![2-3](docs/images/world-2-3.png) | ![3-1](docs/images/world-3-1.png) |
+| **World 3-2** | **World 3-3** | **World 4-1** | **World 4-2** |
+| ![3-2](docs/images/world-3-2.png) | ![3-3](docs/images/world-3-3.png) | ![4-1](docs/images/world-4-1.png) | ![4-2](docs/images/world-4-2.png) |
+| **World 4-3** (Sky Pop) | | | |
+| ![4-3](docs/images/world-4-3.png) | | | |
 
 ## Building
 
