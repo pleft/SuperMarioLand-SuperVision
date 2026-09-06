@@ -714,6 +714,9 @@ sq_alt: .byte 0, 0, 0, 1, 0, 3, 0, 2
 ; --- the lethal hit hides the hull (from kit_mar23, verbatim) ---------------
 .segment "SKYFAR"
 .proc sub_off                    ; the LETHAL hit despawns the hull AND wipes its
+.ifdef GODMODE                   ; TEST BUILDS (make GODMODE=1): the vehicle levels
+    rts                          ; (2-3/4-3) die through sub_off, not hurt_mario, so
+.endif                           ; guard it too -- the plane/sub becomes invincible.
                                  ; pixels: once death_anim is set the main loop
                                  ; runs only death_frame, so the object pipeline
                                  ; never gets another chance to erase it (user:
