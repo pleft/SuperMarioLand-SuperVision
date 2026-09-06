@@ -895,3 +895,21 @@ at its foot level (closer, or on the ball's way down). Not changed.
 sprite matches none of flower A/B, mushroom, heart, star or the old missile
 tile. Not reproduced; the block-hop sprite renders correctly. Needs the ROM
 build and the block (score/time) from the user.
+
+## "Most bonus items in 4-2 appear garbled" (2026-09-06) -- the slice page
+
+The item in the screenshots was the Superball Flower every time, and its
+tile data was right in the slice (slot $E0/$E5 = the GB's bytes, checked). What
+the port drew was rows of solid colour: the FIXED single-tile draw (draw_quad)
+reads band ids $A0..quad_top-1 through the header's slice base from WHATEVER
+PAGE IS MAPPED, and the slice lives in the pair's COLD page. Two faults:
+draw_16w3 and the squash-corpse draw mapped a literal bank 6 (World 3's cold
+page) for every level >= 6, so under World 4 they read page 6; and the flower
+draw mapped nothing at all, so it read the resident page's charset copy at
+$BD3C. FIXED helpers `cold_map` / `cold_unmap` (W3: 6, W4: cur_bank+1, nothing
+below level 6) replace both literals and wrap the flower draw; folding three
+`jsr draw_quad / rts` and one `lda #0 / sta` paid for them (FIXED now ends
+$EFE5). Verified: 4-2 flower frames pixel-identical to GB tiles $E0/$E5 in
+their 8-frame alternation; 1-1/1-2 untouched (no map below level 6). The star,
+mushroom, heart and coin never had the problem: their tiles are below $A0 or
+above the band and come from the FIXED sheet. Law E50.

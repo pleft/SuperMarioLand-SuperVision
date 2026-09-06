@@ -9571,11 +9571,8 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     lda #FLY_TL
     jmp draw_16w3
 @squash:
-    jsr @sqbank                  ; W3 + an overlay tile (the Kumo's $A8/$A9):
-    lda #6                       ; the slice is bank-6 data (see draw_16w3)
-    bcs :+
-    jsr bank_set
-:   lda spr_col
+    jsr cold_map                 ; W3/W4 + an overlay tile (the Kumo's $A8/$A9):
+    lda spr_col                  ; the slice is cold-page data (see draw_16w3)
     sta dcol
     ldx oi
     lda o_y,x
@@ -9602,24 +9599,7 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     tax
     jsr draw_quad
 @sqd:
-    jsr @sqbank
-    lda #1
-    bcs :+
-    jsr bank_set                 ; back to bank 1
-:   rts
-@sqbank:                         ; C=0 when the corpse needs bank 6 (W3 level,
-    lda cur_level                ; tile >= $A0)
-    cmp #6
-    bcc @sqno
-    ldx oi
-    lda o_vx,x
-    cmp #$A0
-    bcc @sqno
-    clc
-    rts
-@sqno:
-    sec
-    rts
+    jmp cold_unmap               ; back to the resident page
 @noko:
     ldx oi
     lda o_vx,x                   ; face the walk direction (the tiles face LEFT natively;
@@ -9671,8 +9651,7 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     plp
     beq :+
     ldx #BOMB_TB
-:   jsr draw_quad
-    rts
+:   jmp draw_quad
 @boom:
     lda spr_col
     sta dcol
@@ -9753,8 +9732,7 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     and #8
     beq :+
     ldx #STAR_TB
-:   jsr draw_quad
-    rts
+:   jmp draw_quad
 @shard:
     lda spr_col
     sta dcol
@@ -9778,6 +9756,7 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     jmp draw_quad
 ; (tail-called above)
 @flower:
+    jsr cold_map                 ; $E0/$E5 sit in the per-world slice (cold page)
     lda spr_col
     sta dcol
     ldx oi
@@ -9791,7 +9770,7 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     beq :+
     ldx #FLOWER_TB
 :   jsr draw_quad
-    rts
+    jmp cold_unmap
 @coin:
     lda spr_col
     sta dcol
@@ -10530,15 +10509,12 @@ wcyc: .byte 2, 5, 1              ; port pose ids for GB metasprites 1, 2, 3
 ; -- the W3 Fly IS the Kumo: same $0E engine object, W3 overlay tiles).
 .proc draw_16w3
     pha                          ; [id] rides the stack (every scratch byte is
-    lda cur_level                ; the blit's)
-    cmp #6
-    bcc :+
-    lda #6                       ; to bank 6 via a FIXED twin of set_bank: the
-    jsr bank_set                 ; real one lives in the LEVELS prefix and bank 6
-:   ldy #0                       ; carries no prefix -- calling it switched the
-                                 ; code out from under itself (hung 3-2 on the
-                                 ; first Kumo). quad 0..3: bit0 = right half,
-                                 ; bit1 = bottom row
+    jsr cold_map                 ; the blit's). The slice page (FIXED twin of
+    ldy #0                       ; set_bank: the real one lives in the LEVELS
+                                 ; prefix, which the cold page does not carry --
+                                 ; calling it switched the code out from under
+                                 ; itself, hung 3-2 on the first Kumo).
+                                 ; quad 0..3: bit0 = right half, bit1 = bottom row
 @lp:
     phy                          ; [id][y]
     ldx oi
@@ -10583,13 +10559,34 @@ wcyc: .byte 2, 5, 1              ; port pose ids for GB metasprites 1, 2, 3
     stz do_flip
     stz do_yflip
     pla
+    jmp cold_unmap               ; back to the resident page
+.endproc
+
+; cold_map / cold_unmap: the per-world SLICE lives in the COLD page of a W3/W4
+; pair (W3: bank 6; W4: cur_bank+1 = pages 10/12). FIXED draws of band ids
+; ($A0..quad_top-1: the Fly, the squash corpse, the Superball Flower) must map
+; it and restore the resident page; W1/W2 levels (cur_level < 6) need nothing.
+; A literal 6 here mapped World 3's cold page under World 4's sprites, and the
+; flower draw mapped nothing (user: "all bonus items garbled", 2026-09-06).
+.proc cold_unmap
     lda cur_level
     cmp #6
-    bcc @done
-    lda #1                       ; back to bank 1
-    jsr bank_set
-@done:
+    bcc done
+    lda cur_bank
+    jmp bank_set
+done:
     rts
+.endproc
+.proc cold_map
+    lda cur_level
+    cmp #6
+    bcc cold_unmap::done
+    lda cur_bank                 ; W3: 1 -> 6; W4: 9 -> 10, 11 -> 12
+    cmp #9
+    bcs :+
+    lda #5
+:   ina
+    jmp bank_set
 .endproc
 
 ; bank_set: A = MAGNUM page. set_bank's FIXED twin (shared by draw_16w3 and
@@ -11469,8 +11466,7 @@ HUD_SPLIT_LINE = 16              ; timer reload = split scanline (IPeriod=256 cy
 ; ---------------------------------------------------------------------------
 ; clear_vram: zero the 6400-byte framebuffer ($4000..$58FF).
 .proc clear_vram
-    lda #<VRAM
-    sta ptr
+    stz ptr                      ; <VRAM = 0
     lda #>VRAM
     sta ptr+1
     ldx #30                  ; 30 pages = 7680 bytes = full 160-line framebuffer (stride $30)

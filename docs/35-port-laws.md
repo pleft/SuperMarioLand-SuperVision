@@ -623,3 +623,12 @@ the script:
 
 Write the ten answers into the world's doc before the type is called done. A
 type with a line left blank does not ship.
+
+### E50. A FIXED draw of a band id must map the level's COLD page -- never a literal page number
+The per-world sprite slice ($A0..quad_top-1) lives in the pair's cold page
+(W3: 6, W4: 10/12). draw_quad reads it from the mapped page. Every FIXED draw
+of a band id goes through `cold_map` / `cold_unmap` (derived from cur_bank, no
+constants); the flower draw had no switch and the 16x16/squash draws said
+`lda #6`, so World 4's items read World 3's page or the resident charset. When
+a FIXED routine touches per-world data, ask which page holds it for EVERY
+world that reaches the routine, and test the routine in each.
