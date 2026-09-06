@@ -913,3 +913,31 @@ $EFE5). Verified: 4-2 flower frames pixel-identical to GB tiles $E0/$E5 in
 their 8-frame alternation; 1-1/1-2 untouched (no map below level 6). The star,
 mushroom, heart and coin never had the problem: their tiles are below $A0 or
 above the band and come from the FIXED sheet. Law E50.
+
+## 4-2 kit types through the E49 checklist (2026-09-06, user: "what are you waiting for?")
+
+Method: GB spawn warp (PyBoy, iddqd ROM: $D010/11 at the type's entry, $C0AB
+past its column, Mario placed by $C202) vs port svshot scenes from the same
+entries, 600 frames each, coordinates mapped GB = port + (4, 24). Static half:
+the port's w4data tables (stomp/side/ball/phys) equal the GB rows for $54 $55
+$49 $3F $40 $41 $23 $3A $38 $39 $09 $51 $4A $4B.
+
+| type | motion (GB vs port) | attack / children | death | despawn |
+|---|---|---|---|---|
+| $54 Roto Disc | orbit x 144..192, y 112..160, extrema at the SAME frames (103/247/391 top, 31/175/319 bottom; x 139/283 & 67/211) | none; tile $E2 (the same tile as the Nyololin's shot -- both are the ROM $8E52 fireball) | rows 00/00/FF/00/00: hurts, unkillable, both | cull identical |
+| $55 upside-down plant | y 120..136, same frames (31/231/431, 153/353/553) | none; tiles $92-$95 (4-2 VRAM == W1 sheet, checked) | not stompable, side hurts, 2 Superballs (HP 1) -> vanish, both tables | -- |
+| $49 spitter | y 144..128 emerge/retreat, same frames (154/355/556, 31/232/433); x fixed | spits $4B every 201 f (GB 109/310/511, port 110/311/512); $4B flies left 1 px/f, y 118, both; culled at the screen's left on both (GB gone by f320, port at cam-20) | rows all 00: body harmless, not killable, both; the $4B is the hazard (side FF) and stompable ($0D) | as $4B |
+| $3F Nyololin | sits at spawn (script velocity 00) | fires $23 at 92 f (GB) / 93 f (port), $23 homes on Mario | STOMP captured on the GB (snake moved onto a visible platform, Mario dropped on it): $3F -> $40 flat 48 f -> $0D flip corpse (rises 6, x away 1 px/f for ~24 f, then falls, gone ~66 f later), +800. Port: flat 45 f + 3 f of $41 = $0D at the same frame, same arc, +800. Superball: table 1 hit -> $41 (not captured) | -- |
+| $3A lift | y 64..124, 2 px/f, period 240 (tops 119/359, bottoms 239/479) identical | -- | -- | -- |
+
+Corrections to my own intermediate readings: (1) in the close-range GB runs
+the objects "walked toward Mario" at 1 px/f -- that was the GB scrolling its
+camera because Mario had been placed past the scroll pin and RIGHT was held;
+with no input SCX stays 0 and nothing moves (checked). $F0 is pure direction
+control (docs/12), neither type has a velocity byte. (2) $49 is not a pipe
+plant: it is a spitter whose body is harmless; its seed $4B is what hurts.
+
+Not captured on the GB: Superball kills of $3F/$55/$09 (the warp harness
+cannot launch a ball: Mario has to stand on-screen on the same floor as the
+target, and the visible start area offers no such spot). They follow the
+same table/HP code the stomp captures exercised.
