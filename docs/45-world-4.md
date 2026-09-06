@@ -941,3 +941,30 @@ Not captured on the GB: Superball kills of $3F/$55/$09 (the warp harness
 cannot launch a ball: Mario has to stand on-screen on the same floor as the
 target, and the visible start area offers no such spot). They follow the
 same table/HP code the stomp captures exercised.
+
+## 4-3 through the E49 checklist (2026-09-06)
+
+Static: every one of the 21 kit types in the 4-3 closure ($06 $27 $28 $29 $4D
+$4E $4F $50 $52 $53 $54 $59 $5A $5B-$5F $60 $61 $62) has stomp/side/
+projectile/physics rows equal to the GB's ($3186 / $3375). Dynamic, GB spawn
+warp (level 11: the plane level autoscrolls, so the capture follows ONE slot
+from a spawn at x >= 185) vs port scenes (camera + spawn index poked at frame
+100, indices into the PACKED, i.e. thinned, list -- the .bin index was wrong
+for 4-3 and spawned nothing), coordinates GB = port + (4, 24):
+
+| type | motion | attack | death (missiles) |
+|---|---|---|---|
+| $52 turret flyer | 1.5 px/f left, level, dive to y+22 at 80-100 f: 0 frames differ of 129 | one bullet at 94 f after spawn on both ($50 -> $5A the next frame), same path +1/+2 px | row: 1 hit -> $27 |
+| $53 diver | 1.5 px/f left 80 f, then the dive (+28 px over 60 f, FB-gated): same shape, y offset = different entries | none | 1 hit -> $27 cloud (port: $27 for 34 f, +400; GB: the tracked diver evaded, other divers paid +400 -- chain not captured on this type) |
+| $59 heavy flyer | 0.5 px/f left, y wobble +/-4, same pattern | none | HP 9: 10 missiles. GB: $59 -> $27 at the kill, $27 lives 32 f, +800. Port: +800, $27 (34 f) -- except when the 10-slot pool is full, when the score popup EVICTS the fresh corpse (the GB's popup is not an object). Known port-only artifact |
+| $06 bobbing hazard | 0.5 px/f left, y 80->95->80 period 120: 0 frames differ of 385 | -- | unkillable, side hurts, both |
+| $54 Roto Disc | as 4-2 | -- | -- |
+| $61 Tatanga + chain | rounds 3 (2026-09-05): 19 hits, $62 33 f, $5B 395 f, $60 24 hits -> ending. Open: the TOP turn (GB y 57, port 47) | | |
+
+Missile fire: both engines hold at most 3 live missiles; A held or re-pressed
+gives the same ramp (0,1,2,3 / 0,3,3..). Kill timing differences between the
+runs are plane-position, not rules.
+
+Still open in 4-3: Tatanga's top turn; the popup-evicts-corpse artifact under
+a full pool; the congestion thinning (29 of 63 entries, all moving flyers,
+E42-legal: nothing anchored) that the user has not yet seen in play.
