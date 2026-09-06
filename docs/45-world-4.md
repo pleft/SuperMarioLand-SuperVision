@@ -968,3 +968,58 @@ runs are plane-position, not rules.
 Still open in 4-3: Tatanga's top turn; the popup-evicts-corpse artifact under
 a full pool; the congestion thinning (29 of 63 entries, all moving flyers,
 E42-legal: nothing anchored) that the user has not yet seen in play.
+
+## 4-3 block items: the Sky Pop power-ups (2026-09-06)
+
+The 4-3 ?-blocks are shot open by the missiles, not bonked from below, and the
+GB spawns their content as a VM object in slot 9 ($D190) via $2097 -> $254D:
+the registered content byte becomes the object's TYPE, placed at the missile's
+row-aligned y ((ffc2 & $F8) + 7) and its x (ffc3). Only three contents are
+registered here -- $28 mushroom, $2A heart, $2C star -- and the GB never
+converts the mushroom to a flower or hops it out (that is the ground-item
+path). Verified with a PyBoy hook on $254D (spawn coords) and $2097.
+
+Item behaviour (PyBoy gbitems43): $28 rises and drifts toward the plane for
+~50 frames, then morphs to $29 which FALLS diagonally; $2A rises in place 50 f
+-> $2B falls; $2C shows 4 f -> $34 arcs -> $2E. The collect is by TYPE, not by
+touch alone: the GB's contact routine sends only slot 9 to $097C, which acts
+on the FALLING forms -- $29 (grow), $2B (1UP), $34 (star), $2E (flower). A
+RISING $28/$2A/$2C passes straight through the plane. So the player must dive
+onto the falling item.
+
+Port: torp_qblock (kit_sky43.inc) now spawns the content as an OBJ_W3 VM slot
+via w3_spawn_at + w3_morph (highest free slot = 9, as on the GB), at the
+missile's row-aligned y, with the $254D chime ($dfe0=$0B); the old
+spawn_walker/spawn_flower/spawn_star calls (ground items) are gone. w3_touch
+(kit_w3.inc, SKY43 only) calls the new sky_item BEFORE the enemy rules: for a
+touched item type $28..$34 it runs the GB $097C dispatch -- $29/$28-while-big
+-> +1000, small -> the 80-frame grow (mario_grow=$50); $2B -> 1UP; $34 ->
+star ($c0d3=$F8 + the star tune) +1000; $2E -> the superball flag when big,
+else the grow -- then the plane-anchored popup and frees the slot. A rising
+form falls through (sky_item returns C=0).
+
+Two GB rules the port had to match, both captured with PyBoy:
+- The grow does NOT freeze the world in 4-3. On the GB the scroll, the foes
+  and the plane's controls all keep running through ffa6 79..0 (the flash only
+  swaps the plane sprite). The engine's grow-freeze in the main loop is now
+  skipped for cur_level == 11.
+- The plane sprite grows with Mario. Small hull = $63 $64 / $65 $66|$67;
+  big hull (ff99 2, after the mushroom) = $68 $69|$6C / $6A $6B|$6D, TR and
+  BR blades swapping together every 4 frames (OAM offsets identical, only the
+  tiles change). The grow/shrink flash is Mario's own rule: big while the
+  timer's bit2 is set, small while clear (shrink is the mirror). draw_subv
+  selects the row and the blade swap from that.
+
+Verified on the real core (svshot): the first block's mushroom spawns at the
+missile position, rises + drifts, morphs to $29 and falls -- pixel-clean, no
+garble. Poking slot 9 onto the plane's box fires the collect: mario_grow runs
+80 -> 0, mario_big -> 1, the +1000 popup spawns, and the camera keeps
+scrolling the whole time. The big hull draws taller ($68/$69/$6A/$6B) at the
+same anchor. Gates: svgold byte-identical to the frozen baseline (levels 0-8),
+battery31 ALL PASS.
+
+Still open: the heart/star collect paths reuse the exact engine routines the
+mushroom path exercised (add_life_snd, mario_starT, add_score, spawn_popup)
+and the same sky_item dispatch, but were not driven onto the plane in a
+capture; the flower branch is only reachable through the star's own F3 chain
+and was never seen in the GB captures.

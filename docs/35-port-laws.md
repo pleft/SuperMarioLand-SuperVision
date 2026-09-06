@@ -632,3 +632,21 @@ constants); the flower draw had no switch and the 16x16/squash draws said
 `lda #6`, so World 4's items read World 3's page or the resident charset. When
 a FIXED routine touches per-world data, ask which page holds it for EVERY
 world that reaches the routine, and test the routine in each.
+
+### E51. A vehicle's block items are VM objects collected by TYPE, and its grow does not freeze the world
+The sky/underwater vehicles (2-3, 4-3) award a ?-block's content by writing
+the content byte as the TYPE of a VM object in slot 9 (GB $2097 -> $254D at the
+missile's row-aligned y, x). The item then runs its own script: it RISES first
+($28/$2A/$2C), and only the FALLING form ($29/$2B/$34, plus the flower $2E) is
+collectible -- the GB's contact routine sends only slot 9 to the by-type
+dispatch ($097C), and a rising item passes through the hull. Port items must be
+real pool objects (w3_spawn_at + w3_morph into the highest free slot), and the
+collect must run in the kit's touch path BEFORE the enemy rules, dispatching by
+type; do NOT reuse the ground-item spawners (spawn_walker/flower/star), which
+hop the item out and convert mushroom->flower. Two matching rules that bite:
+the mushroom's grow does NOT freeze the action in the vehicle level (the scroll,
+foes and controls keep running -- guard the engine's grow-freeze by cur_level),
+and the vehicle SPRITE grows with Mario (a second tile set for the big hull,
+same OAM offsets, selected on mario_big, flashing on the grow timer's bit2).
+Verify the spawn coords, the rise->fall morph, the collect (grow/1UP/star), and
+the big-hull draw against captures before shipping.

@@ -37,6 +37,7 @@ NEED = [
     # world state
     "cam_x", "spr_x", "spr_y", "mario_big", "frame_count", "oi",
     "hurt_inv", "mario_grow", "mario_shrink",   # sub_off must mirror hurt_mario's
+    "mario_duck", "star_flash", "mario_superball", "add_life_snd", "spawn_popup",  # 4-3's block items (sky_item)
                                                 # "this hit is thrown away" guard
     # drawing
     "draw_quad", "draw_tile_yflip", "dcol", "dy", "spr_subx", "do_flip",

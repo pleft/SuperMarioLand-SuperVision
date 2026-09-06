@@ -932,6 +932,10 @@ body:
     jsr l3_box
     ldx oi
     bcc @rts
+.ifdef SKY43
+    jsr sky_item                 ; 4-3's block items ($28..$34) are VM objects in the
+    bcs @rts                     ; pool: the GB keeps them out of the enemy rules
+.endif                           ; (slot 9 -> $097C) and collects by type; C=1 = item
     ldy w3_ti,x
     lda w3_stomp,y
     beq @side                    ; not stompable -> the SIDE column decides, and it

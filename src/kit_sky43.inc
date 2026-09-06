@@ -26,6 +26,11 @@ VGB_DOWN  = $80
 VAUTO_HI = >3680                 ; the autoscroll ceiling (map 3840 - 160, GB-measured)
 VAUTO_LO = <3680
 MUS_GOAL_ = 3
+MUS_STAR  = 2                    ; (build/audio/music.inc)
+POP_1000_L = $59                 ; the popup glyph pairs (main.s: "1000" = $59,$57;
+POP_1000_R = $57                 ;  "1UP" = $5E,$5F -- GB bank2 $5892)
+POP_1UP_L  = $5E
+POP_1UP_R  = $5F
 
 .segment "SKYFAR"
 ; 2-3 kept these as .byte in its RAM window; SKYFAR is ROM (page 11), so the
@@ -504,17 +509,33 @@ vstep   = $1FEC                  ; 1 = the camera stepped THIS frame (missiles r
 .endproc
 
 .segment "SKYFAR"
-.proc draw_subv                  ; the PLANE quad: $63 $64 / $65 $66|$67 (GB OAM,
-    stz do_flip                  ; 4-3 f5..f64): the BR quad is the propeller and
-    stz tmpL2                    ; alternates $66/$67 every 4 frames (captured
-                                 ; 6667777666677776666...). BIG form: not yet
-                                 ; captured on the GB (needs the level's mushroom);
-                                 ; drawn with the small tiles until it is (docs/45).
+.proc draw_subv                  ; the PLANE quad. Small: $63 $64 / $65 $66|$67 (GB
+    stz do_flip                  ; OAM 4-3 f5..f64), the BR quad is the propeller and
+    lda mario_grow               ; alternates $66/$67 every 4 frames. BIG (after the
+    beq @chks                    ; mushroom, OAM f1724..): $68 $69|$6C / $6A $6B|$6D,
+    and #4                       ; TR and BR swap together every 4 frames. The GROW
+    bne @big                     ; flash: big set while ffa6 bit2 is set (79, 71..),
+    bra @small                   ; small while clear; the SHRINK flash is the mirror:
+@chks:                           ; small while bit2 is set, big while clear (PyBoy,
+    lda mario_shrink             ; ff99 1 and 3, both sampled every 4 frames; docs/45).
+    beq @size
+    and #4
+    bne @small
+    bra @big
+@size:
+    lda mario_big
+    beq @small
+@big:
+    lda #4
+    bra :+
+@small:
+    lda #0
+:   sta tmpL2                    ; the table row: small 0..3, big 4..7
     lda frame_count
     and #4
     beq :+
     lda #1
-:   sta tmpH2
+:   sta tmpH2                    ; 1 = the blade-swap frame
     ldy #0
 @q: phy
     ldx oi
@@ -526,13 +547,15 @@ vstep   = $1FEC                  ; 1 = the camera stepped THIS frame (missiles r
     clc
     adc sq_dc,y
     sta dcol
-    lda sq_t,y
+    tya
     clc
     adc tmpL2
-    cpy #3
-    bne :+
+    tay
+    lda sq_t,y
+    ldx tmpH2
+    beq :+
     clc
-    adc tmpH2                    ; the blade swap (REPLACES the tile)
+    adc sq_alt,y                 ; the blade swap (REPLACES the tile)
 :   tax
     jsr draw_quad
     ply
@@ -540,9 +563,10 @@ vstep   = $1FEC                  ; 1 = the camera stepped THIS frame (missiles r
     cpy #4
     bne @q
     rts
-sq_dy: .byte 0,0,8,8
-sq_dc: .byte 0,2,0,2
-sq_t:  .byte SUB_T, SUB_T+1, SUB_T+2, SUB_T+3
+sq_dy:  .byte 0,0,8,8
+sq_dc:  .byte 0,2,0,2
+sq_t:   .byte SUB_T, SUB_T+1, SUB_T+2, SUB_T+3, $68, $69, $6A, $6B
+sq_alt: .byte 0, 0, 0, 1, 0, 3, 0, 2
 .endproc
 
 .segment "SKYFAR"
@@ -843,33 +867,100 @@ sq_t:  .byte SUB_T, SUB_T+1, SUB_T+2, SUB_T+3
 .endproc
 
 .segment "SKYFAR"
-.proc torp_qblock                ; GB $2097: award ONLY registered content,
-    jsr find_block               ; then shatter -- NO bonk-hop, NO coin default
-    bcc @shatter                 ; (hit_qblock is the BONK handler; using it
-    cmp #$28                     ; here gave the user a coin + a hopping block)
-    beq @pow
-    cmp #$2A
-    beq @heart
-    cmp #$2C
-    beq @star
-    bra @shatter                 ; multicoin/$F0/unknown: shatter only
-@pow:
-    lda mario_big                ; the SML size rule, same as the bonk path
-    bne @flower
-    lda #1                       ; OBJ_MUSH
-    jsr spawn_walker
-    bra @shatter
-@flower:
-    jsr spawn_flower
-    bra @shatter
-@heart:
-    lda #5                       ; OBJ_HEART
-    jsr spawn_walker
-    bra @shatter
-@star:
-    jsr spawn_star
+.proc torp_qblock                ; GB $2097 (state $0D): a REGISTERED content byte
+    jsr find_block               ; becomes that VM type in slot 9 ($254D), at the
+    bcc @shatter                 ; missile's own row-aligned y + 7 and its x -- the
+    cmp #$28                     ; hook on $254D shows ffc2/ffc3 = the missile entry
+    beq @item                    ; ($c001..). NOT the ground items: the GB never
+    cmp #$2A                     ; converts the mushroom to a flower here and never
+    beq @item                    ; hops it out; $28 rises and drifts to the plane,
+    cmp #$2C                     ; -> $29 falls; $2A/$2B the heart; $2C -> $34 the
+    bne @shatter                 ; star's arc (PyBoy gbitems43, docs/45). $F0/multi-
+@item:                           ; coin/unknown: shatter only.
+    sta tmpL3
+    ldx oi
+    jsr w3_spawn_at              ; the highest free slot, at the missile's position
+    bcc @got
+    lda #0                       ; none: the GB writes $D190 regardless -- evict 9
+    sta o_type+9
+    jsr w3_spawn_at
+    bcs @shatter
+@got:
+    lda o_y,x                    ; missile o_y = its GB entry y - 8 (draw law: visual
+    clc                          ; = o_y + 8 = the GB OAM row); the item's GB y is
+    adc #8                       ; (entry & $F8) + 7 and a VM slot carries GB y as is
+    and #$F8                     ; (the kit convention) -- pixel-checked against the
+    adc #7                       ; GB frame after the spawn (docs/45).
+    sta o_y,x
+    jsr w3_morph                 ; the type lookup + a fresh VM context (X = slot)
+    ldx oi
+    lda #SFX_DFE0_0B             ; $254D's item chime ($dfe0 = $0B)
+    jsr sfx_play
 @shatter:
+    ldx oi
     jmp break_brick              ; erase + repaint + debris + 50 (the GB shape)
+.endproc
+
+.proc sky_item                   ; X = oi = the touched slot. C=1 -> it is a block
+    ldy w3_ti,x                  ; item ($28..$34): handled here, the enemy rules are
+    lda w3_typetab,y             ; skipped; C=0 -> not an item. X = oi on return.
+    cmp #$28                     ; The GB's contact routine ($0868) sends SLOT 9 to
+    bcc @no                      ; $097C, which acts by TYPE: only the FALLING
+    cmp #$35                     ; mushroom ($29), the falling heart ($2B), the
+    bcs @no                      ; star's arc ($34) and the flower ($2E) do anything
+    cmp #$29                     ; -- a rising $28/$2A/$2C passes through the plane.
+    beq @mush
+    cmp #$2E
+    beq @flower
+    cmp #$2B
+    beq @heart
+    cmp #$34
+    bne @done
+    lda #248                     ; $09C4: $c0d3 = $F8 + the star tune, then +1000
+    sta mario_starT              ; (no $04 chime)
+    stz star_flash
+    lda #MUS_STAR
+    jsr mus_start
+    bra @k1000
+@flower:                         ; $097C: big -> $ffb5 = 2 (the superball flag: no
+    lda mario_big                ; effect on the plane) + chime + 1000; small ->
+    beq @grow                    ; the grow. (Only reachable through the star's
+    lda #1                       ; own F3 chain -- never seen in the captures.)
+    sta mario_superball
+    bra @snd
+@grow:
+    lda #$50                     ; $09BA: ff99 = 1, ffa6 = $50 (the 80-frame flash)
+    sta mario_grow
+    stz mario_duck
+@snd:
+    lda #SFX_DFE0_04             ; $0996
+    jsr sfx_play
+    bra @k1000
+@mush:
+    lda mario_big
+    beq @grow                    ; $09B4: big -> +1000 only (no chime, $099B)
+@k1000:
+    lda #$00
+    ldx #$10
+    jsr add_score
+    lda #POP_1000_L              ; $ffed = $10: the floating "1000"
+    ldy #POP_1000_R
+    bra @pop
+@heart:
+    jsr add_life_snd             ; $09D0: $dfe0 = $08, $c0a3 = 1, $ffed = $FF ("1UP")
+    lda #POP_1UP_L
+    ldy #POP_1UP_R
+@pop:
+    jsr spawn_popup              ; at the plane ($099F: c202 - 4, c201 - 16)
+    ldx oi
+    stz o_type,x                 ; $099F: the slot's type := $FF
+@done:
+    ldx oi
+    sec
+    rts
+@no:
+    clc
+    rts
 .endproc
 
 .proc veh_clear                  ; = goal_check's body: jingle freeze -> tally

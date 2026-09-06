@@ -51,7 +51,7 @@ SEEDS = {
     # arena), the boss $61 and its death chain $62 $5B $60 $5C..; sharing one W4
     # data set put every 4-3 type into 4-1/4-2's cold page, which had 4 bytes
     # left (the $06 alone pushed the script blob 16 B into the dlist pin).
-    43: [0x4D, 0x52, 0x53, 0x54, 0x59, 0x61, 0x06],
+    43: [0x4D, 0x52, 0x53, 0x54, 0x59, 0x61, 0x06, 0x28, 0x2A, 0x2C],   # + the block items: VM $28 mushroom (-> $29 falling), $2A heart (-> $2B), $2C star (-> $34 -> $2E)
 }
 
 

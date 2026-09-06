@@ -736,10 +736,18 @@ main_loop:
     lda #90
     sta hurt_inv
 @shf:
-    bra @play
+    jmp @play
 :   lda mario_grow               ; small->big grow running? freeze the action, just flash
-    bne @growing
-    lda mc_tmr                   ; multi-coin window ticks every frame ($c0ce)
+    beq :+
+    ldx cur_level                ; ...except in 4-3 (GB state $0D): the scroll, the foes
+    cpx #11                      ; and the plane's controls all run on through the grow,
+    beq @skygrow                 ; only the sprite flashes (PyBoy: ffa4/c0ab/objects
+    jmp @growing                 ; advance on every frame of ffa6 79..0; docs/45)
+@skygrow:
+    dec mario_grow
+    bne :+
+    inc mario_big
+:   lda mc_tmr                   ; multi-coin window ticks every frame ($c0ce)
     beq :+
     dec mc_tmr
 :   lda mario_starT              ; star: dec every 4th frame, toggling the flash ($c0d3/Call_1f03)
