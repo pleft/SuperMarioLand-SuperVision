@@ -12875,6 +12875,13 @@ b_erasetab: .byte $2D,$2C,$2C,$2D
 
 ; bonus_start: draw the whole bonus screen + place Mario. (RE: State_12/$13/$14.)
 .proc bonus_start
+    lda #<bg_chardata            ; the screen is drawn with the SHARED prefix charset
+    sta bgc                      ; (the GB reloads its own bonus tiles): a World 3/4
+    lda #>bg_chardata            ; level leaves bgc on its overlaid page copy, whose
+    sta bgc+1                    ; $31-$6F are that world's scenery -- after 4-2 the
+                                 ; ladders, text and prizes were Chai tiles (user,
+                                 ; 2026-09-06). load_level re-seeds bgc from the next
+                                 ; level's header.
     lda #MUS_BONUS               ; the bonus tune replaces the goal fanfare ($0F84
     jsr mus_start                ; writes $dfe8=$12 in the bonus-entry setup)
     stz scroll_s                 ; the level end leaves XSCROLL=32 (sub-shift): the bonus

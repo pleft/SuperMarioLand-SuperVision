@@ -854,3 +854,44 @@ every W3/W4 kit foe was spawned at a stale y (award_kill_at reads tmpH3 as the
 victim's y; nothing on the ball path set it -- the Pompon's "800" sat at o_y
 176, below the screen). w3_ballbox now stores the victim's o_y in tmpH3 on a
 hit. Port scene after: popup at o_y 95 over the flower.
+
+## Round 5 (2026-09-06): bonus screen, the shaft verdict, the Nyololin and the ball
+
+**Bonus game after 4-2 corrupted (user screenshot).** The L11CODE bonus screen
+blits its tiles through `bgc`, the level's BG charset base (header +22/23).
+World 1 levels leave it on the prefix's shared sheet, which is what the bonus
+art was drawn for; World 3/4 levels leave it on their overlaid page copy,
+whose $31-$6F are that world's scenery -- ladders, "BONUS GAME", the prize
+counts and the border all came out as Chai tiles. `bonus_start` now points
+`bgc` at `bg_chardata` (the GB reloads its own bonus tiles at this point);
+load_level re-seeds it for the next level. Scene: 4-2 top door -> readable
+title, floors, the single travelling ladder, prizes x02/x3/x1/x2; the same
+scene on the previous build reproduced the user's garble.
+
+**The shaft, second report ("dies even with RIGHT", then "it only works when
+Mario JUMPS into the shaft", "if this is gameboy accurate leave it").**
+Measured, not argued: (1) the walk-off fall is identical on both engines at
+4-2's first pit -- +3 px/frame down, +1 px/frame sideways, same frame count,
+same death (GB trace vs port trace, per frame); (2) the wave tiles ($5D) are
+a pit on the GB too (warp drop over column 8: falls through, dies; column 9
+lands only because the GB's floor probe reaches the col-10 platform);
+(3) the geometry at cam col 331: the wall top is row 11, the first pillar top
+(cols 335-336) is row 12 with 24 px of water between -- an 8 px drop lasts 3
+frames, so no walk-off with any steering reaches it on either machine. A jump
+is required on the GB as well. Left as is, per the user's rule. The earlier
+air-steer fix (momentum drain) still stands: it changes falls that last long
+enough to steer.
+
+**"Shooting fireballs at the snake does not kill it."** The port's ball box is
+the GB's own ($0AAF, docs/38 s12; verified on the 2-3 fish and 4-1's Pionpi):
+the ball must be within [-3, +15] px of the foe's FEET line and within
+[4-8W, 0] px of its x. Reproduced the user's geometry (Mario on the row-12
+pillar, feet 96; snake on the row-10 platform, feet 80, 48 px right): the
+Superball rises 2 px/frame and is 6-18 px ABOVE the snake's foot band by the
+time it is within x range -- a miss under the GB rule too. It dies to a ball
+at its foot level (closer, or on the ball's way down). Not changed.
+
+**Second "garbled item" screenshot (11:27, big Mario, 4-2 start area):** the
+sprite matches none of flower A/B, mushroom, heart, star or the old missile
+tile. Not reproduced; the block-hop sprite renders correctly. Needs the ROM
+build and the block (score/time) from the user.
