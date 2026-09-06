@@ -903,7 +903,9 @@ body:
     jsr w3_stand                 ; standable top? (GB phys1 bit7) -- landing on
     txa                          ; one beats every contact rule, exactly as it
     ina                          ; does on the GB ($33/$35/$47 hurt at the SIDES
-    bcs @setride                 ; but carry Mario on top). RIDE BOOKKEEPING:
+    bcc :+                       ; but carry Mario on top). RIDE BOOKKEEPING:
+    jmp @setride                 ; (trampoline: SKY43's no-stomp code pushed
+:                                ;  @setride out of bcs range)
     cmp ride                     ; without it, jump_player's tile probe found AIR
     bne :+                       ; under his feet every frame (the ledge is an
     stz ride                     ; OBJECT), flipped him airborne, and w3_stand
@@ -935,10 +937,12 @@ body:
 .ifdef SKY43
     jsr sky_item                 ; 4-3's block items ($28..$34) are VM objects in the
     bcs @rts                     ; pool: the GB keeps them out of the enemy rules
-.endif                           ; (slot 9 -> $097C) and collects by type; C=1 = item
-    ldy w3_ti,x
-    lda w3_stomp,y
-    beq @side                    ; not stompable -> the SIDE column decides, and it
+    ldy w3_ti,x                  ; (slot 9 -> $097C) and collects by type; C=1 = item
+    jmp @side                    ; VEHICLE LEVEL (law B1): the plane NEVER stomps --
+.endif                           ; any enemy contact goes to the side (hurt) column,
+    ldy w3_ti,x                  ; exactly like 2-3's sub. The GB has no stomp path in
+    lda w3_stomp,y               ; the vehicle levels; running it here let the plane
+    beq @side                    ; "stomp" a flyer and bounce (user-reported).
     sta tmpL2                    ; is NOT automatically "hurts"
     lda tmpH3                    ; stomp/side split at dy <= -2: the GB's $08C7
     sbc #5                       ; constant through the +2 anchor shift (C=1 from

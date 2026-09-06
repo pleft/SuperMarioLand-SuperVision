@@ -1,5 +1,5 @@
 .proc l3_hurt                    ; the $3186 touch column ($FF) hurts, but the GB
-.ifdef MAR23                     ; stomp-side path (+0 = 0) exits with NO effect:
+.if .defined(MAR23) .or .defined(SKY43)  ; stomp-side path (+0 = 0) exits with NO effect:
     jsr sub_off                  ; VEHICLE LEVEL (law B1): nothing is stompable
     jmp hurt_mario               ; here, so contact always hurts whatever the
 .else                            ; vertical relation -- and the hull dies with

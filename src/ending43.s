@@ -725,7 +725,8 @@ l_cloud:  .byte E43T_7C,0,8, E43T_7D,8,8, E43T_7E,16,8, E43T_61,8,0, E43T_6F,16,
     lda #1
 :   sta pose
     jsr draw_daisy
-    lda dxv
+    jsr draw_mario               ; redraw Mario: Daisy's erase overlaps him as she nears
+    lda dxv                      ; x50 (user: "half erased when Daisy comes close")
     cmp #50
     bne @rts
     stz pose
@@ -820,6 +821,8 @@ l_cloud:  .byte E43T_7C,0,8, E43T_7D,8,8, E43T_7E,16,8, E43T_61,8,0, E43T_6F,16,
     dec px
     dec px
     jsr draw_plane
+    jsr draw_mario               ; the taxiing plane's erase sweeps over Mario/Daisy;
+    jsr draw_daisy               ; redraw them so they are not half-erased
 @end:
     AT_FRAME 472, @rts
     jmp next_state
@@ -875,12 +878,9 @@ l_cloud:  .byte E43T_7C,0,8, E43T_7D,8,8, E43T_7E,16,8, E43T_61,8,0, E43T_6F,16,
     jsr tick
     lda #8
     jsr corridor_step
-    lda tt
-    and #3
-    bne :+
-    jsr erase_plane
-    jsr draw_plane
-:   jsr clouds_step
+    jsr erase_plane              ; erase-all-then-draw-all: the plane is erased and
+    jsr clouds_step              ; the clouds redrawn, THEN the plane is drawn LAST so
+    jsr draw_plane               ; a cloud's erase can never wipe it (user-reported)
     AT_FRAME 545, @rts
     stz room                     ; the corridor is gone: the credits roll from here
     ldy #2
@@ -903,12 +903,9 @@ l_cloud:  .byte E43T_7C,0,8, E43T_7D,8,8, E43T_7E,16,8, E43T_61,8,0, E43T_6F,16,
 .endproc
 .proc s_credits                  ; pairs: role row 15 col 2, name row 17 col 7 (one at a time), 400 f each; loops
     jsr tick
-    lda tt
-    and #3
-    bne :+
-    jsr erase_plane
+    jsr erase_plane              ; plane drawn LAST (after the clouds) every frame:
+    jsr clouds_step              ; overlap-safe, no half-erased plane in the credits
     jsr draw_plane
-:   jsr clouds_step
     lda crdt
     ora crdth
     bne @hold
