@@ -148,12 +148,16 @@ the GB's own start x is 50 in some frames (docs/46 top). Shipped as
 ~/Desktop/sml_0905j_ending.sv (md5 6e9463fc); svgold 9/9 identical to the
 0905d baseline (2fe4cc2 rebuilt, md5 305b94de), battery31 all pass.
 
-NOTE ON REBUILDING OLD COMMITS: a clean worktree of 2fe4cc2/4b787c4 does NOT
-build (pack_banks: "level 5 header ($A6C5) overlaps the far kit") -- TITLE0
-lands 7 bytes later than in the dev tree. The dev tree's build/ holds a stale
-generated input the Makefile never regenerates; rsync build/ (minus .o/.sv)
-into the worktree and it builds byte-identical (305b94de). Find that input
-before trusting any from-scratch build.
+NOTE ON THE FROM-SCRATCH BUILD (RESOLVED 2026-09-06): the clean build used to
+fail with "level 5 header ($A6C5) overlaps the far kit" because (a) main.o was
+missing prerequisites for several .incbin assets (moth/water_alt/sfx_aux/
+music2/music3/w1_bg), so a clean make assembled main.s before extraction, and
+(b) the fresh LEVELS prefix is ~7 B larger than the old byte-frozen size and
+the 2-3 bank (at capacity) had no room. Fixed: the Makefile now declares those
+assets, and the 2-3 far kit pin moved $A6C0 -> $A6C8 (cfg/w2code.cfg +
+pack_banks). `rm -rf build && make` now succeeds; all 9 shared-engine levels
+boot (svgold 0 FAILs). The 2-3 bank has ~2 B of slack -- if the shared prefix
+grows again, relocate the far kit out of bank 5.
 
 
 ## Ending music (2026-09-06)
