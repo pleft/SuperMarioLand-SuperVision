@@ -129,6 +129,20 @@ def main():
     types.sort()
     params = sorted(params)
 
+    # COVERAGE (law E48, 2026-09-06): every type the world's packed spawn lists
+    # name must be a native engine type or in this closure. The spawner consumes
+    # what it does not know without a fault -- 4-2's three Pompon Flowers ($09)
+    # were missing for weeks because $09 sat between "engine native" and "seeded".
+    NATIVE = {0x00, 0x02, 0x04, 0x08, 0x0A, 0x0B, 0x0C, 0x0E, 0x36, 0x42}   # spawn_check
+    WORLD_LEVELS = {3: (6, 7, 8), 4: (9, 10), 43: (11,)}[WORLD]
+    for lv in WORLD_LEVELS:
+        d = open(f"build/levels/level_{lv:02d}_spawns.bin", "rb").read()
+        named = sorted(set(d[i + 3] for i in range(0, len(d) - 4, 5)))
+        missing = [t for t in named if t not in NATIVE and t not in types]
+        assert not missing, (f"W{WORLD} level {lv}: spawn list names types "
+                             f"{[f'${t:02X}' for t in missing]} that neither the engine "
+                             f"nor the kit closure handles -- add them to SEEDS[{WORLD}]")
+
     blob = bytearray()
     offs = {}
     for t in types:

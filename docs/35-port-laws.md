@@ -584,3 +584,13 @@ Flower's $E0/$E5, the fireball's $E2/$E3 -- must keep their own slot with the
 base sheet's pixels; gen_w3data's parking treated $E0 as free and the flower
 drew as a missile piece in every W3/W4 level for months. When a world's band
 grows (W4: $EC), re-check which FIXED ids fall inside it.
+
+### E48. Every type a spawn list names must be handled, and the BUILD must prove it
+The spawner consumes a type it does not know without a fault, and the route
+differential only compares objects that exist on both sides -- an object the
+port never spawns leaves no row to disagree. 4-2's Pompon Flowers ($09) were
+missing for weeks that way: the World 4 seed list was typed by hand from the
+spawn table and $09 fell between "engine native" and "seeded". gen_w3data now
+asserts, per world, that every type in the packed spawn lists is an engine
+native or in the kit closure. When a new world is added, that assert is the
+first thing to satisfy, before any object is measured.
