@@ -7426,9 +7426,10 @@ fly_dy:                          ; one entry per TICK (16 ticks = 48 frames)
     stz o_st,x                   ; landed: back to sitting
     lda #FLY_SIT
     sta o_tmr,x
-@done:
-    jmp enemy_contact
-.endproc
+@done:                           ; falls straight into enemy_contact (the next proc):
+.endproc                         ; the `jmp` that stood here targeted its own next byte
+                                 ; -- its 3 bytes now hold W4's lvl_track_tab entries
+.assert * = enemy_contact, error, "upd_fly must fall into enemy_contact (prefix is byte-frozen)"
 
 
 
@@ -11919,6 +11920,13 @@ lvl_track_tab:  .byte MUS_LEVEL, MUS_LEVEL, MUS_T13   ; GB per-level table $07CE
                 .byte MUS_LEVEL, MUS_T13, MUS_T13      ; W3 (GB $07CE: 07 03 03;
                                                        ; bank 1 keeps the real $07)
                                                        ; theme (per-bank music patch)
+                .byte MUS_LEVEL, MUS_LEVEL, MUS_LEVEL  ; W4 (GB $07CE: 06 06 05): slot 0
+                                                       ; IS the page's theme -- pack_w4
+                                                       ; repoints it at $06 (page 9) /
+                                                       ; $05 (page 11). Before these
+                                                       ; three bytes existed, levels
+                                                       ; 9-11 read lvl_bank_tab (7,0,2)
+                                                       ; = the 1-3 / 1-1 / star tunes.
 ; level id -> ROM bank, as a plain bank number for set_bank (MAGNUM: the bank
 ; IS the $2021 page -- docs/37). This table lives in the byte-frozen prefix.
 lvl_bank_tab:   .byte 7, 0, 2, 3, 4, 5

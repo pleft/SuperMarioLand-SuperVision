@@ -708,13 +708,49 @@ overrun comes back, accepted under the user's "finish first, cap later"). Rule
 added to E42: an object whose anchor/pivot is a BG tile is never a drop
 candidate.
 
-**4-2 Nyololin ($3F).** User: "not shooting a star". Could not reproduce: the
-GB script is param $2A, face Mario, wait 90 ticks, param $2B, SFX 4, F1 spawn
-$23, wait 45, restart; $23 is the star metasprite ($45, the same as the Roto
-Disc's) with dir $C0 (homes on Mario) and `morph FF` after 165 ticks. On the
-port (real core): the x768 Nyololin along the recorded route fires 92 frames
-after spawning (GB: 90 ticks); the isolated scene fires at 305/500/725; the
-x2608 one under its natural crowd (7 slots busy) fires every ~168 frames
-(GB ~140). The x2320 one dies to Mario's Superball in the stand scene within
-23 frames -- a player firing balls ahead never sees it shoot, which may be what
-was observed. Open until the user says where.
+**4-2 Nyololin ($3F).** User: "not shooting a star" -- then, precisely: "shoots
+stars instead of fireballs". The shot itself was never wrong (GB script: param
+$2A, face Mario, wait 90 ticks, param $2B, SFX 4, F1 spawn $23, wait 45,
+restart; port fires 92 frames after spawning on the route, GB 90 ticks). The
+TILES were: $23's metasprite uses ids $E2/$E3, and the World 4 slice took them
+from w4_obj_8000.svt, whose $E2/$E3 hold a star + stripes. The GB's live VRAM
+in 4-1/4-2/4-3 has the FIREBALL/ring pair there, sourced from ROM 0x8E52 (the
+bank-3 fire sheet the OBJ loader copies over $8E20 at level start). New
+tools/extract_w4fire.py -> build/gfx/w4_fire_8E52.svt; pack_w4's `tile()`
+takes $E2/$E3 from it (both W4 slices, slots 66/67; decoded pixel-identical to
+the GB tiles). Lesson (E8 again): a sheet dump is not the running VRAM -- the
+OAM/VRAM capture is the reference for every sprite tile.
+
+## World 4 music (2026-09-06, user: "4-2 plays the 1-1 tune", "4-3 music is wrong")
+
+GB per-level table $07CE: 4-1/4-2 = track $06 (the Chai theme), 4-3 = $05 (the
+Marine Pop tune, 2-3's). The port played the 1-3 theme in 4-1, the 1-1 theme in
+4-2 and the STAR tune in 4-3, for two independent reasons:
+
+1. `lvl_track_tab` (LEVELS prefix, indexed by cur_level) had 9 entries. Levels
+   9-11 read straight past its end into `lvl_bank_tab` (7, 0, 2 = MUS_T13,
+   MUS_LEVEL, MUS_STAR). No assert, no crash -- three wrong tunes. Law E46.
+2. Pages 9 and 11 are copies of bank 1, so their slot 0 (MUS_LEVEL) is the
+   resident $07. Neither $06 nor $05 is resident; World 2 solved the same thing
+   with a per-bank theme patch (pack_banks.w2_bank_prefix: the donor blob over
+   the 511-byte $07 slot, slot 0's list table repointed).
+
+The fix. (a) The table grew to 12 entries (MUS_LEVEL x3) inside the byte-frozen
+prefix: the 3 bytes came from `upd_fly`'s trailing `jmp enemy_contact`, whose
+target was its own next byte (a `.assert * = enemy_contact` now pins the
+fall-through); LEVELS still ends at $A6A5, TITLE0/SKYFAR/W2FAR/level-5 header
+unmoved, prefix code between $986A and $9DFF shifted by -3 (svgold 9/9
+identical, battery31 all pass). (b) tools/extract_music.py W2_TRACKS gained
+$06 (550 B -- too big for the 511-byte theme slot). The sequencer resolves lt/
+l1..l4 against a per-track base (mus_base_lo/hi), so the blob can sit anywhere
+in the mapped page: pack_w4 `theme_patch` puts it right after SKYFAR (page 11:
+$05, 425 B at $ACCB) / at the TITLE0 address (page 9: $06 at $A6A6) and writes
+slot 0's base (= at - 512, the tables' bias), lt (512) and four list offsets
+(+512). That region held a DEAD copy of bank 1's L11CODE/L13E overlays (the
+bonus game / 1-3 ending): copy_overlay maps bank 1 explicitly before reading
+them, so pack_w4 now clears $A6A6-$B000 in both resident pages before laying
+SKYFAR + the theme. Verified on the real core: at level start in 9/10/11,
+mus_base = $A4A6/$A4A6/$AACB and the four phrase-list pointers walk the new
+blobs (RAM samples at f0/f100/f200). The GB-side reference is the same
+converter that produced the accepted $07/$08/$05 tracks; the tune itself
+awaits the user's ear.

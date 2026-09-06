@@ -27,8 +27,19 @@ W4X2 = 0x86F8                                   # the stash head follows the win
 # World 4 = two page PAIRS with the same layout: (9,10) for 4-1/4-2 with the W4
 # kit, (11,12) for 4-3 with the Sky Pop kit (w43code: the W4 kit + the vehicle
 # player in SKYFAR, resident at $A680 in page 11). docs/45.
-PAIRS = ((9, 10, (9, 10), "w4code", "w4stub", "w4"),
-         (11, 12, (11,), "w43code", "w43stub", "w43"))   # last = gen_w3data data-set tag
+PAIRS = ((9, 10, (9, 10), "w4code", "w4stub", "w4", "06"),
+         (11, 12, (11,), "w43code", "w43stub", "w43", "05"))   # gen_w3data data-set tag, level theme
+# World 4's level themes (GB per-level table $07CE: 4-1/4-2 = $06 Chai, 4-3 = $05
+# the Marine Pop tune): neither is resident, so each pair's page carries its own
+# blob (tools/extract_music.py W2_TRACKS -> build/audio/w2_tXX.bin) and the page's
+# copy of the sequencer tables gets slot 0 (MUS_LEVEL, which lvl_track_tab maps
+# levels 9-11 to) repointed at it -- the W2 scheme (pack_banks.w2_bank_prefix),
+# except the blob lives ABOVE the prefix (track $06 is 550 B, the theme slot 511):
+# right after SKYFAR (page 11) / at the TITLE0 address (page 9), a region that
+# otherwise holds a DEAD copy of bank 1's L11CODE/L13E overlays (copy_overlay
+# maps bank 1 explicitly before reading them). The player resolves lt/lists
+# against a per-track base, so the blob can sit anywhere in the mapped page.
+W4MUS_END = 0xB000                          # the per-type tables start here
 SKYFAR_AT = 0xA6A6                          # above statusbar_tiles ($A67E-$A6A5): the HUD template is read from the mapped page
 E43_PIN, E43_TILES, E43_DATA = 0x9900, 0xA000, 0xA300       # page 12: the ending blob + its sprite tiles (src/ending43.s, L13E stub)
 
@@ -51,11 +62,33 @@ def main():
     path = sys.argv[1]
     img = bytearray(open(path, "rb").read())
     assert len(img) == 0x80000, f"{path}: expected the 512K image (run after make_512k)"
-    for RES, COLD, LEVELS, KIT, STUB, TAG in PAIRS:
-        pack_pair(img, RES, COLD, LEVELS, KIT, STUB, TAG)
+    for RES, COLD, LEVELS, KIT, STUB, TAG, THEME in PAIRS:
+        pack_pair(img, RES, COLD, LEVELS, KIT, STUB, TAG, THEME)
     open(path, "wb").write(bytes(img))
 
-def pack_pair(img, RES, COLD, LEVELS, KIT, STUB, TAG):
+def theme_patch(res, sym, at, track):
+    """put track `track` ('06'/'05') at `at` in this resident page and point the
+    sequencer's slot 0 (MUS_LEVEL) at it: base = at - 512 (the tables carry the
+    -512/+512 bias: list sentinels are high-byte coded), lt/l1..l4 = blob-relative + 512."""
+    import json
+    blob = open(f"build/audio/w2_t{track}.bin", "rb").read()
+    meta = json.load(open("build/audio/w2music.json"))[track]
+    assert meta["lt"] == 512, "unexpected length-table offset"
+    assert at + len(blob) <= W4MUS_END, f"track ${track} ({len(blob)}B) at ${at:04X} runs into the tables"
+    assert all(b == 0xFF for b in res[at - BASE:at - BASE + len(blob)]), f"${at:04X} not free for track ${track}"
+    res[at - BASE:at - BASE + len(blob)] = blob
+    def put(name, v):
+        res[sym[name + "_lo"] - BASE] = v & 0xFF        # index 0 = slot 0 = MUS_LEVEL
+        res[sym[name + "_hi"] - BASE] = (v >> 8) & 0xFF
+    # sanity: slot 0 still points at the resident $07 (music_data+304) before we move it
+    assert res[sym["mus_base_lo"] - BASE] | (res[sym["mus_base_hi"] - BASE] << 8) == (sym["music_data"] + 304 - 512) & 0xFFFF
+    put("mus_base", at - 512)
+    put("mus_lt", meta["lt"])
+    for i, l in enumerate(meta["lists"]):
+        put(f"mus_l{i+1}", l + 512)
+    return len(blob)
+
+def pack_pair(img, RES, COLD, LEVELS, KIT, STUB, TAG, THEME):
 
     # ---- the kit image, split at its linked segment boundaries ----------
     full = open(f"build/{KIT}.bin", "rb").read()
@@ -132,9 +165,11 @@ def pack_pair(img, RES, COLD, LEVELS, KIT, STUB, TAG):
     obj = open("build/gfx/w4_obj_8000.svt", "rb").read()
     base = open("build/gfx/w1_obj_8000.svt", "rb").read()   # = the FIXED chardata sheet
     hi = open("build/gfx/w3_hi.svt", "rb").read()
+    fire = open("build/gfx/w4_fire_8E52.svt", "rb").read()   # $E2/$E3: the fireball (tools/extract_w4fire.py)
     HI = {0xF9: 0, 0xFA: 1, 0xFB: 2, 0xFE: 3}
     def tile(t):
         if t in HI: return hi[HI[t] * 16:(HI[t] + 1) * 16]
+        if t in (0xE2, 0xE3): return fire[(t - 0xE2) * 16:(t - 0xE2 + 1) * 16]   # w4_obj_8000.svt has a star there
         if 0xA0 <= t <= 0xDC: return ovl[(t - 0xA0) * 16:(t - 0xA0 + 1) * 16]
         if t >= 0xE4: return base[t * 16:(t + 1) * 16]   # "stays chardata" ids ($E6/$EE/$EF..):
         return obj[t * 16:(t + 1) * 16]                 # the engine draws them from the FIXED sheet
@@ -160,6 +195,10 @@ def pack_pair(img, RES, COLD, LEVELS, KIT, STUB, TAG):
         assert w3t_at + w3t_sz <= pb.W3BALL, f"W4 tables run into the ball pin by {w3t_at + w3t_sz - pb.W3BALL}"
         res[w3t_at - BASE:pb.W3BALL - BASE] = b"\xFF" * (pb.W3BALL - w3t_at)
         res[w3t_at - BASE:w3t_at - BASE + w3t_sz] = w3t
+    # $A6A6-$B000 in bank 1 = its L11CODE + L13E overlays (bonus game / x-3 ending),
+    # read via copy_overlay, which maps bank 1 first: a dead copy here. Clear it;
+    # SKYFAR (4-3) and the level theme (theme_patch) go there.
+    res[SKYFAR_AT - BASE:W4MUS_END - BASE] = b"\xFF" * (W4MUS_END - SKYFAR_AT)
     sf_at, sf_sz = seg(KITMAP, "SKYFAR")             # 4-3: the vehicle player, resident
     if sf_sz:                                            # (page 11 keeps no L11CODE/L13E)
         assert sf_at == SKYFAR_AT, "SKYFARM moved -- update pack_w4"
@@ -169,6 +208,11 @@ def pack_pair(img, RES, COLD, LEVELS, KIT, STUB, TAG):
         # after W3TAB in cfg/w43code.cfg, so slice it from the very end
         sky = full[len(full) - sf_sz:]
         res[sf_at - BASE:sf_at - BASE + sf_sz] = sky
+    lblmap = {m.group(2): int(m.group(1), 16) for m in
+              re.finditer(r'al 00([0-9A-F]{4}) \.(\w+)', open("build/rom.lbl").read())}
+    mus_at = SKYFAR_AT + sf_sz
+    mus_sz = theme_patch(res, lblmap, mus_at, THEME)
+    print(f"pack_w4: page {RES} level theme = track ${THEME} ({mus_sz}B at ${mus_at:04X})")
     # the engine finds a header at W3HDR + (level-6)*24, so slot 3 is level 9's:
     # reserve every slot UP TO the highest level here, or the pipes/blocks that
     # follow land inside the header region and the header write then clobbers
@@ -210,8 +254,6 @@ def pack_pair(img, RES, COLD, LEVELS, KIT, STUB, TAG):
     # copied, with World 4's overlay over $31-$6F -- exactly what pack_w3 does for
     # World 3. (Building it from w4_bg_9000.svt instead rendered the whole level
     # as dithered garbage: that dump has its own arrangement.)
-    lblmap = {m.group(2): int(m.group(1), 16) for m in
-              re.finditer(r'al 00([0-9A-F]{4}) \.(\w+)', open("build/rom.lbl").read())}
     bg_off = lblmap["bg_chardata"] - BASE
     # base = the SHARED sheet the prefix ships (== w1_bg_9000), with World 4's
     # $31-$6F overlay on top -- exactly what pack_w3 does. Verified against the

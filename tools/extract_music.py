@@ -49,7 +49,7 @@ TRACKS = [0x07, 0x04, 0x0C, 0x01, 0x09, 0x0A, 0x0D, 0x03, 0x0B, 0x0F, 0x12, 0x10
 # W2 tracks ride in the W2 banks' PREFIX copies, in the byte-space of tracks a
 # W2 bank never plays (the packer overwrites slot 0's table entries per bank):
 #   $08 = the Muda overworld theme (2-1/2-2), $05 = the Marine Pop theme (2-3).
-W2_TRACKS = [0x08, 0x05]
+W2_TRACKS = [0x08, 0x05, 0x06]
 NAMES  = ["MUS_LEVEL", "MUS_UNDER", "MUS_STAR", "MUS_GOAL", "MUS_BONUS", "MUS_BWALK", "MUS_BAWARD",
           "MUS_T03", "MUS_BOSS", "MUS_RESCUE", "MUS_REVEAL", "MUS_GOVER"]
 # Tracks whose data lives in FIXED (music2.bin) instead of the per-bank LEVELS

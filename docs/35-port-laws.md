@@ -564,3 +564,15 @@ through their labels -- from whichever page is mapped. A resident segment
 placed over them in a level page (SKYFARM at $A680 in page 11) garbles the HUD
 of that level only. Nothing goes below $A6A6 in any level page; the packers'
 "free" check must include these two blocks.
+
+### E46. Every cur_level-indexed table needs an entry per level -- and every new page needs its theme
+`lvl_track_tab` had 9 entries when World 4 arrived; levels 9-11 read past its
+end into `lvl_bank_tab` and played the 1-3, 1-1 and STAR tunes with no fault
+raised. When a world is added: (1) grep every `,x` lookup fed by cur_level
+(lvl_track_tab, lvl_bank_tab, quad_top branches, ...) and extend each; (2) a
+page cloned from bank 1 inherits bank 1's slot-0 theme ($07) -- the world's
+tune must be patched in per page (pack_banks.w2_bank_prefix / pack_w4.theme_patch;
+the sequencer's per-track base lets the blob live anywhere in the mapped page,
+so the 511-byte theme slot is not a size limit); (3) the prefix is byte-frozen
+in SIZE, not in every address: reclaim bytes inside it (dead code such as a
+`jmp` to its own next byte) and pin what must not move with `.assert`.
