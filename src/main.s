@@ -695,8 +695,16 @@ main_loop:
 @nopause:
     lda paused
     beq :+
-    jsr pause_dingdong           ; (the debug Select-size-toggle was reclaimed for
-    jmp main_loop                ;  4-3's pipe-fist behind-BG mask; use the god ROM)
+    lda pad_pressed              ; DEBUG (user request): Select while PAUSED
+    and #GB_SELECT               ; toggles small <-> big Mario for playtesting
+    beq @nosizet
+    lda mario_big
+    eor #1
+    sta mario_big
+    sta mario_superball          ; big brings the superball; small drops it (GB rule)
+@nosizet:
+    jsr pause_dingdong
+    jmp main_loop
 :   lda death_anim               ; the death hop owns the frame (everything else frozen)
     beq :+
     jsr death_frame
@@ -10406,12 +10414,6 @@ wcyc: .byte 2, 5, 1              ; port pose ids for GB metasprites 1, 2, 3
     cpx #$92
     bcc @rts
     cpx #$96
-    bcc @yes                     ; $92-$95 -> behind (the pipe plants)
-    cmp #11                      ; 4-3's PIPE FIST ($C2-$D9) hides in its pipe like the
-    bne @rts                     ; plants -- but W3 draws its MISSILE with those same
-    cpx #$C2                     ; ids (battery31: falling-stomp), so gate on 4-3 only.
-    bcc @rts                     ; A still = cur_level here (the cpx's leave it).
-    cpx #$DA
     bcs @rts
 @yes:
     lda #1
