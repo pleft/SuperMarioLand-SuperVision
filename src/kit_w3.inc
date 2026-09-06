@@ -84,8 +84,11 @@
     adc #2
     cmp tmpL3
     bcc @miss                    ; 8N+2 < dy+3
-    sec
-    rts
+    lda o_y,x                    ; hit: hand the victim's y to award_kill_at
+    sta tmpH3                    ; (its popup sits at tmpL2/H2/tmpH3; nothing on
+    sec                          ; the ball path set tmpH3, so every kit foe's
+    rts                          ; Superball "800" popped at a stale y -- off-screen
+                                 ; in the Pompon capture, o_y 176. 2026-09-06)
 @miss:
     clc
     rts
@@ -292,8 +295,9 @@ CXS_BOXOK  = $0153               ; 1 = CXA_* box computed this walk
 :
     lda o_vx,x
     and #$0F
-    beq @ystep
-    sta tmpH3
+    bne :+
+    jmp @ystep
+:   sta tmpH3
     lda o_vy,x
     and #$01
     bne @right
@@ -302,6 +306,14 @@ CXS_BOXOK  = $0153               ; 1 = CXA_* box computed this walk
                                  ; o_x for a VM object -- the $53 spawns at 192 on
                                  ; both; the GB's Tatanga turns 8px before the wall)
     bcs @xblocked
+    ldy w3_ti,x                  ; GB $2891: phys byte 0 bit0 = TURN AT A LEDGE. No
+    lda w3_phys0,y               ; floor under the leading edge (Call_000_2be4:
+    lsr                          ; ffc3+3, one row below the wall row) flips the
+    bcc @left                    ; direction outright (jr c,$28da), whatever bits
+    lda #<-5                     ; 2-3 say. The Pompon Flower ($07) patrols its
+    jsr w3_ledge                 ; platform on the GB (warp capture: dir flips at
+    bcs @left                    ; the pit edge); the port walked it into 4-2's
+    jmp @xflip                   ; pits (user: "committing suicide", 2026-09-06).
 @left:
     lda o_xl,x                   ; default direction is LEFT (GB: ffc3 -= vx)
     sec
@@ -326,6 +338,24 @@ CXS_BOXOK  = $0153               ; 1 = CXA_* box computed this walk
     sbc #8
     jsr w3_wall
     bcs @xblocked
+    ldy w3_ti,x                  ; the ledge probe, right side (Call_000_2bfe:
+    lda w3_phys0,y               ; ffc3 + 5 + W*8 - 8 -> W*8 - 11 in o_x terms)
+    lsr
+    bcc @rightgo
+    lda w3_ph1,x
+    lsr
+    lsr
+    lsr
+    lsr
+    and #7
+    asl
+    asl
+    asl
+    sec
+    sbc #11
+    jsr w3_ledge
+    bcs @rightgo
+    jmp @xflip
 @rightgo:
     lda o_xl,x
     clc
@@ -343,6 +373,7 @@ CXS_BOXOK  = $0153               ; 1 = CXA_* box computed this walk
     beq @xthrough                ; missing: every VM walker went through walls.
     cmp #$04
     bne @xrestart
+@xflip:
     lda o_vy,x
     eor #$01
     sta o_vy,x
@@ -355,7 +386,7 @@ CXS_BOXOK  = $0153               ; 1 = CXA_* box computed this walk
     lda o_vy,x
     and #$01
     bne @rightgo
-    bra @left
+    jmp @left
 @ystep:
     lda o_vx,x
     lsr
@@ -530,6 +561,8 @@ CXS_BOXOK  = $0153               ; 1 = CXA_* box computed this walk
     rts
 .endproc
 .proc w3_wall
+    ldy #8
+body:
     pha                          ; A = SIGNED x offset (-8, or W*8-8)
     clc
     adc o_xl,x
@@ -546,10 +579,10 @@ CXS_BOXOK  = $0153               ; 1 = CXA_* box computed this walk
     ror feet_col
     lsr feet_col+1
     ror feet_col
-    lda o_y,x                    ; GB row = (ffc2 - $10) >> 3 with ffc2 = o_y + 24;
+    tya                          ; GB row = (ffc2 - $10) >> 3 with ffc2 = o_y + 24;
     clc                          ; the port's map rows exclude the 16px HUD (mrow =
-    adc #8                       ; screen y/8 - 2, as w3_probe does)
-    lsr
+    adc o_y,x                    ; screen y/8 - 2, as w3_probe does); Y = 8 (wall) or
+    lsr                          ; 16 (ledge: one row lower)
     lsr
     lsr
     sec
@@ -568,6 +601,10 @@ CXS_BOXOK  = $0153               ; 1 = CXA_* box computed this walk
 @open:
     clc
     rts
+.endproc
+.proc w3_ledge                   ; A = x offset: the tile one row BELOW w3_wall's row
+    ldy #16                      ; (GB Call_000_2be4/2bfe probe ffc2 + 8)
+    bne w3_wall::body            ; (Y is never 0 here)
 .endproc
 
 ; --- pure VM logic moved out of the $1500 window (full to the byte): these run

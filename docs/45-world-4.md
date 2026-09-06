@@ -801,3 +801,56 @@ tiles, and the resident/cold pages still fit. Port scene: the flower walks
 toward Mario at 1/4 px per frame, pauses ~40 f, fires the pollen (rises ~50 px,
 falls off the bottom), repeats. GB-side timing comparison pending on the
 re-recorded 4-2 route (gbauto).
+
+## Pompon Flower ($09) through the E49 checklist (2026-09-06, user: "no corpse", "suicide", "no plants")
+
+GB side by a SPAWN WARP (new, tools-free: PyBoy, point the spawner's list
+pointer $D010/11 at the $09 entry and set the streaming column $C0AB past its
+fire column; the object appears at the right edge of the start screen, Mario
+is moved onto the col-20 floor with $C202). Port side by svshot scenes.
+
+1. Spawns: three in 4-2 (fire 240/432/1040), all normal-mode. Port: same.
+2. Motion: walks 1/4 px per frame (GB 21 px in 90 f, port 20 px in 80 f),
+   pauses ~75 f (GB) / 60-80 f (port) to shoot, params $56/$57 alternate for
+   the walk. TURNS AT LEDGES: GB direction flag flips at x 164 with its left
+   probe over the pit (phys byte 0 bit0: after the wall probe, Call_000_2be4/
+   2bfe probe one row BELOW the leading edge, ffc3+3 / ffc3+5+W*8-8; no floor
+   -> jr c,$28da = flip, whatever bits 2-3 say). The kit had no ledge probe at
+   all -- every bit0 walker fell off (the user's "committing suicide"). Added
+   w3_ledge (w3_wall one row lower, Y = 8/16) and the bit0 test in w3_move for
+   both directions; port scene: flips at x 324 at the 4-2 pit (304-319). No W3
+   type has bit0, so World 3 is unchanged; W4's $16 also has it.
+3. Sprite: params $56/$57, tiles from the W4 slice (dlists $2FE2/$30B4).
+4. Attack: child $51 pollen, spawns 9 px above, rises 2 px/f (GB 127->91 in 18 f;
+   port 6 px / 3 f), then falls off the bottom; script $3B57.
+5. Contact: side $FF = hurts (row $3186+$2D). Top: stompable.
+6. STOMP: the GB row is FF FF FF FF FF. The contact routines write the result
+   INTO the type byte (Call_000_2a01: `ld [hl],a` then the phys re-init), and
+   $FF is the free-slot marker -- the object VANISHES on the contact frame.
+   Captured: slot empty on f+27, score +800 on f+30, no OAM sprite left, Mario
+   bounces. The port does the same (w3_morph $FF): no corpse exists on the GB
+   for this enemy. (The user expected one; the capture says otherwise.)
+7. SUPERBALL: same routine family (Call_000_2a68: HP = obj+$0C & $3F = 1 ->
+   first ball absorbed, `dec`; second ball -> result $FF -> vanish). Port
+   scene: ball 1 absorbed, ball 2 kills, +800, popup. GB-side capture NOT
+   obtained: the warp harness could not launch a Superball ($FF99=2/$FFB5=1
+   left an OAM entry with y 0 and no $FFA9 slot) -- inferred from code + the
+   stomp capture of the same $FF mechanism. Open.
+8. Star: columns +3/+4 = $FF -> vanish (inferred, same routine).
+9. Points: 800 (phys byte 2 = $81, class 2) -- GB and port.
+10. Despawn: GB culled it ~150 f after it paused off-screen right (x 188
+    OAM = visual 173); the port's cull is the kit's 168/232 window.
+
+**Plants ("why no plants spawn from these pipes"):** they were my congestion
+thinning (tools/thin.json level 10: six $55 upside-down plants + two $49 pipe
+plants; level 9: eight $49 + four $55). E42 already says an object anchored to
+a BG tile is never a drop candidate -- a pipe IS the anchor. All $49/$55 drops
+removed from both levels; 4-1 keeps its three unanchored drops (a stone, two
+Suu). The pillar-stretch congestion this reintroduces is the reason the
+global enemy cap is next on the list.
+
+**Found by the checklist, not reported:** the Superball-kill score popup of
+every W3/W4 kit foe was spawned at a stale y (award_kill_at reads tmpH3 as the
+victim's y; nothing on the ball path set it -- the Pompon's "800" sat at o_y
+176, below the screen). w3_ballbox now stores the victim's o_y in tmpH3 on a
+hit. Port scene after: popup at o_y 95 over the flower.
