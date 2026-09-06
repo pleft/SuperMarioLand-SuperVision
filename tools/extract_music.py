@@ -255,6 +255,21 @@ for tr in TRACKS:
 # W2 tracks: converted the same way, emitted as standalone blobs. The packer
 # writes each into a donor track's byte-space inside the W2 banks' prefix copy
 # and repoints slot 0's table entries (mus_base/mus_l1..l4) at it per bank.
+# END_TRACKS: the 4-3 ending credits/flight theme ($11). Emitted standalone;
+# pack_w4 lays it into a FREE run in the ending's resident page (bank 1) and
+# repoints a slot the bonus game/endings never touch (MUS_BOSS) at it.
+END_TRACKS = [0x11]
+end_json = {}
+for tr in END_TRACKS:
+    tout, L, ltab_off, nphr = convert_track(tr)
+    with open(os.path.join(OUT, f"end_t{tr:02X}.bin"), "wb") as f:
+        f.write(bytes(tout))
+    end_json[f"{tr:02X}"] = {"size": len(tout), "lists": L, "lt": ltab_off + BIAS}
+    print(f"track ${tr:02X} (ending): {len(tout)}B lists@{L} ({nphr} phrases)")
+import json as _j
+with open(os.path.join(OUT, "end_music.json"), "w") as f:
+    _j.dump(end_json, f)
+
 w2json = {}
 for tr in W2_TRACKS:
     tout, L, ltab_off, nphr = convert_track(tr)

@@ -16,6 +16,10 @@
 TILES   = $1D00                  ; E43T_xx * 16 + TILES = the SV tile bytes
 TXTBUF  = $1C40                  ; 6 rows x 20 cells, rows 4..9 (0 = blank); $1C40-$1CB7 (free + the dead composer stash)
 TXR0    = 4
+MUS_RESCUE = 9                   ; the ending room theme (GB track $0F, in music2/FIXED);
+                                 ; same track the x-3 rescue endings start (build/audio/music.inc)
+MUS_CREDITS = 8                  ; GB track $11 (flight/credits): pack_w4 repoints
+                                 ; bank-1 slot MUS_BOSS at it -- dead on bank 1 (docs/46)
 st      = $1C00
 tt      = $1C01
 tth     = $1C02
@@ -686,6 +690,8 @@ l_cloud:  .byte E43T_7C,0,8, E43T_7D,8,8, E43T_7E,16,8, E43T_61,8,0, E43T_6F,16,
     ldx #>txt1
     ldy #5
     jsr type_start
+    lda #MUS_RESCUE              ; GB $29: music $0F starts as the room appears (docs/46).
+    jsr mus_start                ; one-shot (~1670 f): it scores the room..takeoff scenes.
     jmp next_state
 .endproc
 .proc s_text1                    ; GB $2A: "OH! DAISY"/"DAISY" typed, then 18 f
@@ -850,19 +856,18 @@ l_cloud:  .byte E43T_7C,0,8, E43T_7D,8,8, E43T_7E,16,8, E43T_61,8,0, E43T_6F,16,
     lda py
     cmp #66
     bne @rts
-    lda #160
-    sta cx0
-    lda #26
-    sta cy0
-    lda #224
-    sta cx1
-    lda #6
-    sta cy1
-    lda #192
-    sta cx2
-    lda #50
-    sta cy2
+    ldx #2                       ; seed the 3 clouds from tables (was 6 inline
+:   lda @cxt,x                    ; stores -- reclaimed a byte for the music start)
+    sta cx0,x
+    lda @cyt,x
+    sta cy0,x
+    dex
+    bpl :-
+    lda #MUS_CREDITS             ; GB $31: the credits/flight theme begins as the
+    jsr mus_start                ; corridor starts ($0F has ended by now); it loops
     jmp next_state
+@cxt: .byte 160, 224, 192
+@cyt: .byte 26, 6, 50
 @rts:
     rts
 .endproc

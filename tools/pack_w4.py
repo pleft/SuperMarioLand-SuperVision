@@ -213,6 +213,31 @@ def pack_pair(img, RES, COLD, LEVELS, KIT, STUB, TAG, THEME):
     mus_at = SKYFAR_AT + sf_sz
     mus_sz = theme_patch(res, lblmap, mus_at, THEME)
     print(f"pack_w4: page {RES} level theme = track ${THEME} ({mus_sz}B at ${mus_at:04X})")
+    if LEVELS == (11,):
+        # the 4-3 ending flight/credits theme (track $11, docs/46): laid into a
+        # free run in BANK 1 (mapped all through the game ending -- the boot stub
+        # and fetch_txt keep page 1 resident), and slot MUS_BOSS repointed at it.
+        # Bank 1 hosts only the bonus game and the endings; neither plays the boss
+        # track, and 4-3's own Tatanga runs on page 11, so slot 8 is dead here.
+        import json as _mj
+        ejson = _mj.load(open("build/audio/end_music.json"))["11"]
+        eblob = open("build/audio/end_t11.bin", "rb").read()
+        assert len(eblob) == ejson["size"]
+        MUS_BOSS = 8
+        E11_AT = 0xB36E                          # a free run in bank 1 (page-1 scan)
+        b1 = 1 * STRIDE
+        off = E11_AT - BASE
+        assert all(img[b1 + off + i] == 0xFF for i in range(len(eblob))), \
+            f"bank 1 ${E11_AT:04X} not free for track $11 ({len(eblob)}B)"
+        img[b1 + off:b1 + off + len(eblob)] = eblob
+        def put_boss(name, v):
+            img[b1 + lblmap[name + "_lo"] - BASE + MUS_BOSS] = v & 0xFF
+            img[b1 + lblmap[name + "_hi"] - BASE + MUS_BOSS] = (v >> 8) & 0xFF
+        put_boss("mus_base", E11_AT - 512)
+        put_boss("mus_lt", ejson["lt"])
+        for i, l in enumerate(ejson["lists"]):
+            put_boss(f"mus_l{i+1}", l + 512)
+        print(f"pack_w4: 4-3 ending track $11 ({len(eblob)}B at ${E11_AT:04X} bank 1) -> slot MUS_BOSS")
     # the engine finds a header at W3HDR + (level-6)*24, so slot 3 is level 9's:
     # reserve every slot UP TO the highest level here, or the pipes/blocks that
     # follow land inside the header region and the header write then clobbers

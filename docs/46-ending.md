@@ -141,7 +141,7 @@ and a sprite piece at x >= 184 wraps into the NEXT scanline (stride 48 B =
 192 px, columns 40-47 are the hidden ring) -- the taxiing plane at px 232
 painted a stripe over Mario at x 24 until `draw_id` clipped pieces at x >= 160.
 
-OPEN: no ending music ($0F/$11 never implemented; the engine is silent here);
+OPEN (now CLOSED for music -- see below): the HUD rows are blank;
 the HUD rows are blank during the ending (the shadow holds the tiles); the
 heart rises 180 f vs the GB's 163; Mario's walk starts at 41 (GB OAM) while
 the GB's own start x is 50 in some frames (docs/46 top). Shipped as
@@ -154,3 +154,36 @@ lands 7 bytes later than in the dev tree. The dev tree's build/ holds a stale
 generated input the Makefile never regenerates; rsync build/ (minus .o/.sv)
 into the worktree and it builds byte-identical (305b94de). Find that input
 before trusting any from-scratch build.
+
+
+## Ending music (2026-09-06)
+
+The GB ending is NOT silent: forcing the state machine from $29 (PyBoy, boss-
+dead entry) and watching $dfe8/$dfe9 shows track $0F plays from the room ($29)
+and is ONE-SHOT (~1670 f), ending right as the flight begins; then track $11
+starts at state $31 (the flight) "when $dfe9 is clear" and LOOPS through the
+credits ($33-$36) forever. (Mashing every button through five credit cycles on
+the GB changed nothing -- the credits are input-dead, a hard reset is how you
+leave them; the harder second quest is a separate mode, not reached from here.)
+
+Port: the ending blob (src/ending43.s) runs with BANK 1 mapped the whole time
+(the boot stub and fetch_txt keep page 1 resident), and the note table lives in
+that page's prefix, so the player reads music correctly. s_init starts the room
+theme -- MUS_RESCUE, GB track $0F, already in music2/FIXED and shared with the
+x-3 rescue endings. s_takeoff, on the transition to the flight (state $31),
+starts the credits theme. That track ($11) had no home: FIXED, the resident RAM
+code and the E43 blob are all full, and the prefix is byte-frozen, so it could
+not become a 13th shared slot. Instead extract_music.py emits it standalone
+(end_t11.bin) and pack_w4 lays it into a free run in BANK 1 ($B36E, 434 B free)
+and repoints that page's slot MUS_BOSS at it (base/lt/l1..l4, exactly as
+theme_patch repoints slot 0): bank 1 hosts only the bonus game and the endings,
+neither plays the boss track, and 4-3's own Tatanga runs on page 11 -- so slot 8
+is dead on bank 1 and safe to reuse. The two E43 code bytes came from turning
+s_takeoff's six inline cloud stores into a table loop.
+
+Verified on the real core (svshot, ending forced via ending13=3/goal_phase=4):
+mus_on stays 1 unbroken across the room, takeoff, flight and the looping credits
+-- $0F for st 1-7, $11 from st 8 on, no silent gap; the credits still render
+(role row 15, name row 17). Gates: svgold byte-identical, battery31 all pass.
+Shipped sml_0906g_endmusic.sv. Still open (cosmetic): the blank HUD rows during
+the ending, and the heart rise 180 f vs the GB 163.
