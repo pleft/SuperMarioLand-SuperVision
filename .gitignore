@@ -39,3 +39,10 @@ snap/
 *.ss[0-9]
 *.sgm
 level select and invincible.cheats
+
+# Rule 5 (belt-and-suspenders): cheat codes, save RAM, savestates are ROM-adjacent
+*.cheats
+*.ram
+*.gb.ram
+*.ss[0-9]
+*.ss
