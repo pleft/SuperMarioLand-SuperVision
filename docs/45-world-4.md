@@ -1023,3 +1023,33 @@ mushroom path exercised (add_life_snd, mario_starT, add_score, spawn_popup)
 and the same sky_item dispatch, but were not driven onto the plane in a
 capture; the flower branch is only reachable through the star's own F3 chain
 and was never seen in the GB captures.
+
+## 4-3 pipe fist: behind-BG blocked by the sub-pixel blit path (2026-09-06, DEFERRED)
+
+User: the pipe fists (last screen before the boss) draw IN FRONT of the pipe;
+on the GB they hide inside it, like the pipe plants. Verified from a RetroArch
+savestate (Potator, rzip -> WRAM at +8208): the fist is the $06 object (NOT $50;
+$50 is a separate hand elsewhere -- my first several captures chased the wrong
+type). Two $06 sit under the twin pipe at screen x 101 and 117, o_y 71/56
+(one extended, one retracted), cam 3483.
+
+Why the plant fix does NOT carry over:
+- The plants hide via per-pixel OBJ-behind-BG (bmerge, w3_behind on tiles
+  $92-$95). That mask lives ONLY on the blit's byte-ALIGNED fast path. Every W3
+  behind object is spawned 4px-aligned and never moves in x, so it always takes
+  that path (docs above).
+- 4-3 AUTOSCROLLS, and the fist's screen x is 101/117 -> sub-byte offset 1, not
+  0. So it draws on the sub-pixel blit path (sprite_blit_subpx), which has NO
+  behind case. Behind-BG never runs for it, at any tile.
+- Its tiles ($DF/$EF, from the $06 dlists $20/$22) are shared filler used by
+  nearly every 4-3 type, so a tile-keyed w3_behind entry can't target it either;
+  a type-keyed entry (w3_ti==0 in 4-3) is clean but still dead on the sub-pixel
+  path. (Both were tried and reverted -- commit 3cda021.)
+
+What a real fix needs: add per-pixel behind-BG to the sub-pixel blitter, plus
+reclaim FIXED space (CODE is flush against CHARS). That is a renderer change,
+not an edit. DEFERRED. The fist draws in front on the last pre-boss screen;
+everything else in 4-3 is done. Note: the GB's own OAM shows no priority bit in
+any 4-3 frame I reached -- but I never reached these $06 fists under their pipe
+on the GB (warp camera doesn't autoscroll there), so the GB mechanism for THESE
+is unconfirmed; assume behind-BG (the visual match) when the task is picked up.
