@@ -40,7 +40,7 @@ PAIRS = ((9, 10, (9, 10), "w4code", "w4stub", "w4", "06"),
 # maps bank 1 explicitly before reading them). The player resolves lt/lists
 # against a per-track base, so the blob can sit anywhere in the mapped page.
 W4MUS_END = 0xB000                          # the per-type tables start here
-SKYFAR_AT = 0xA6A6                          # above statusbar_tiles ($A67E-$A6A5): the HUD template is read from the mapped page
+SKYFAR_AT = 0xA6B0                          # above statusbar_tiles: the HUD template is read from the mapped page, so SKYFAR/theme must not overwrite it
 E43_PIN, E43_TILES, E43_DATA = 0x9900, 0xA000, 0xA300       # page 12: the ending blob + its sprite tiles (src/ending43.s, L13E stub)
 
 def seg(mapfile, name):
@@ -210,6 +210,10 @@ def pack_pair(img, RES, COLD, LEVELS, KIT, STUB, TAG, THEME):
         res[sf_at - BASE:sf_at - BASE + sf_sz] = sky
     lblmap = {m.group(2): int(m.group(1), 16) for m in
               re.finditer(r'al 00([0-9A-F]{4}) \.(\w+)', open("build/rom.lbl").read())}
+    sb = lblmap["statusbar_tiles"]
+    assert sb + 40 <= SKYFAR_AT, \
+        f"statusbar_tiles (${sb:04X}+40=${sb+40:04X}) runs into SKYFAR_AT (${SKYFAR_AT:04X}) -- "\
+        f"the shared prefix grew; bump SKYFAR_AT (+ cfg/w43code.cfg SKYFARM) and shrink its size"
     mus_at = SKYFAR_AT + sf_sz
     mus_sz = theme_patch(res, lblmap, mus_at, THEME)
     print(f"pack_w4: page {RES} level theme = track ${THEME} ({mus_sz}B at ${mus_at:04X})")
