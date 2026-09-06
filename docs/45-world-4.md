@@ -754,3 +754,50 @@ mus_base = $A4A6/$A4A6/$AACB and the four phrase-list pointers walk the new
 blobs (RAM samples at f0/f100/f200). The GB-side reference is the same
 converter that produced the accepted $07/$08/$05 tracks; the tune itself
 awaits the user's ear.
+
+## 4-2 round 3 (2026-09-06, user: star block, shaft, no Pompon Flower)
+
+Three reports, three different causes, each measured on both engines.
+
+**"Stomped a block where a star should spawn, got a garbled graphic; picking it
+up did nothing."** Not the star block (col 205 row 10, $2C): on the port it
+pops a proper star (draw_quad $86/$85 from chardata) and picking it up starts
+the star tune + timer (scene capture). It was a POWER-UP block hit as big
+Mario: the Superball Flower is drawn from ids $E0/$E5 through the sprite band,
+and gen_w3data's slot PARKING had put a missile tile (FB in W4, FA in W3) into
+slot $E0 -- the flower flashed between a dark bar and a flower, and big Mario
+gains no visible change from it. `FIXED_BAND_IDS = {$E0, $E5}` are now never
+parking slots (W3's FA moved to $E1, W4's FB to $E1, FE to $E4) and pack_w4
+takes $E0 from the base sheet like $E4+ (GB 4-2 VRAM at $8E00/$8E50 is
+byte-identical to 1-1's -- checked live). This was wrong in every World 3 and
+4 level since the slice existed; nobody had picked up a flower there. Law E47.
+
+**"Mario should fall down the shaft and continue if RIGHT is pressed; in the
+port he falls straight into the water."** The air steering was slower than the
+GB's when the jump had started with no direction held. GB capture ($c20c/$c20e
+per frame, 1-1): a standing jump seeds $c20c=$30 and the NEXT frame it reads
+00 -- the $1D52 neutral path decrements and re-dispatches with $c20d as the
+input, and with $c20d=0 it falls straight back into itself, draining $c20c to
+zero in one frame. RIGHT pressed in the air then ramps 0->6 and bumps to walk
+speed after 6 frames. The port decayed the $30 one per frame, so after a
+standing jump (or a plain fall) Mario stayed at 0.5 px/f for the whole descent
+-- half the GB's drift, into the water. move_player's neutral path now clears
+move_t when mdir is 0 (one byte shorter). Re-measured: port dx pattern
+identical to the GB's for RIGHT pressed mid-air after a tap jump, after a full
+jump, and during the rise. Residual (documented, not fixed): the port's first
+slow step lands one frame after the GB's (sub-pixel toggle phase), so the
+whole ramp is 1 px behind; and the GB's ceiling probe is TWO points at
+visual-left+5 and +9 (Player_CeilingCheck: $ffae = scroll+$c202+2, then -4)
+where the port probes the centre (+8) once -- the GB bonks a block from 12 px
+of positions, the port from 8. FIXED is at 0 bytes free (CODE ends $EFF8,
+CHARS follows), so the two-probe rule waits for a byte hunt.
+
+**"There is no Pompon Flower."** GB type $09 (script $360B: walk with params
+$56/$57 alternating, stop, SFX 4, spawn child $51 = the pollen: up then down,
+loop) was in neither the W4 SEEDS nor the native handlers, so the spawner
+skipped its three 4-2 entries (fire_cam 240/432/1040) silently. Added $09 to
+SEEDS[4]; the closure now has 26 scripts / 31 params, the slice still 76
+tiles, and the resident/cold pages still fit. Port scene: the flower walks
+toward Mario at 1/4 px per frame, pauses ~40 f, fires the pollen (rises ~50 px,
+falls off the bottom), repeats. GB-side timing comparison pending on the
+re-recorded 4-2 route (gbauto).

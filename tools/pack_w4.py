@@ -171,7 +171,7 @@ def pack_pair(img, RES, COLD, LEVELS, KIT, STUB, TAG, THEME):
         if t in HI: return hi[HI[t] * 16:(HI[t] + 1) * 16]
         if t in (0xE2, 0xE3): return fire[(t - 0xE2) * 16:(t - 0xE2 + 1) * 16]   # w4_obj_8000.svt has a star there
         if 0xA0 <= t <= 0xDC: return ovl[(t - 0xA0) * 16:(t - 0xA0 + 1) * 16]
-        if t >= 0xE4: return base[t * 16:(t + 1) * 16]   # "stays chardata" ids ($E6/$EE/$EF..):
+        if t >= 0xE4 or t == 0xE0: return base[t * 16:(t + 1) * 16]   # "stays chardata" ids ($E6/$EE/$EF..; $E0 = flower frame A):
         return obj[t * 16:(t + 1) * 16]                 # the engine draws them from the FIXED sheet
     slice_ = b"".join(tile(t) for t in order)
     assert W4SLICE + len(slice_) <= W4X, f"W4 tile slice ({len(slice_)}B) runs into the walk pin at ${W4X:04X}"

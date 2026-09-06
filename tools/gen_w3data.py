@@ -45,7 +45,7 @@ SEEDS = {
     # EAS3 build compiles out the native $3F handler), $54. The 24-type closure
     # fits the $1500 window with ~79 B to spare (docs/45); 4-3's types ($4D $52
     # $53 $59 $61) push it over and force the table relocation, added with 4-3.
-    4: [0x38, 0x39, 0x49, 0x55, 0x56, 0x3A, 0x3F, 0x54],   # 4-1 + 4-2 only (pages 9/10)
+    4: [0x38, 0x39, 0x49, 0x55, 0x56, 0x3A, 0x3F, 0x54, 0x09],   # 4-1 + 4-2 only (pages 9/10); $09 = the Pompon Flower (4-2), child $51 pollen
     # "World 43" = 4-3 alone (its own page pair 11/12 and kit w43code): $53 $52
     # (spawns $50 -> $5A), $59, $54, $4D, $06 (two bobbing hazards before the
     # arena), the boss $61 and its death chain $62 $5B $60 $5C..; sharing one W4
@@ -222,7 +222,13 @@ def main():
         # nothing at $BB80-$BBFF, so it parks 15 ($DD-$EB) -- 4-3's 43-type closure
         # needs 8 (the W3 count was measured 8 vs 7 for it, docs/45). The slice then
         # ends exactly at $BC00 (the W3X walk pin).
-        free = [i for i in range(0xDD, PARK_END) if i not in used] + \
+        # ids the FIXED engine draws THROUGH the band from the base sheet: the
+        # Superball Flower's two frames ($E0/$E5, upd_flower). Parking over them
+        # drew the flower as a missile piece in every W3/W4 level (user, 4-2:
+        # "a garbled graphic that when I picked it up nothing happened" -- big
+        # Mario's flower gives no visible change). Never a parking slot.
+        FIXED_BAND_IDS = {0xE0, 0xE5}
+        free = [i for i in range(0xDD, PARK_END) if i not in used and i not in FIXED_BAND_IDS] + \
                [i for i in range(0xA0, 0xDD) if i not in used and i not in ENGINE_IDS]
         assert len(extra) <= len(free), f"W{WORLD}: {len(extra)} out-of-range tile ids, {len(free)} free slots"
         remap = {b: free[k] for k, b in enumerate(extra)}

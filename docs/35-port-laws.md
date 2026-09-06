@@ -576,3 +576,11 @@ the sequencer's per-track base lets the blob live anywhere in the mapped page,
 so the 511-byte theme slot is not a size limit); (3) the prefix is byte-frozen
 in SIZE, not in every address: reclaim bytes inside it (dead code such as a
 `jmp` to its own next byte) and pin what must not move with `.assert`.
+
+### E47. Slot parking must skip every id the FIXED engine draws through the band
+The sprite slice ($A0..quad_top-1) is what draw_quad reads for ANY id in that
+range, not only the kit's. FIXED objects with ids in the band -- the Superball
+Flower's $E0/$E5, the fireball's $E2/$E3 -- must keep their own slot with the
+base sheet's pixels; gen_w3data's parking treated $E0 as free and the flower
+drew as a missile piece in every W3/W4 level for months. When a world's band
+grows (W4: $EC), re-check which FIXED ids fall inside it.

@@ -5116,17 +5116,16 @@ PIN_X   = 64
 :   stz h_idx                    ; neutral: speed collapses to slow ($c20e=0, $1d5e)
     lda move_t                   ; momentum decays, and while it lasts Mario GLIDES
     beq @mclr                    ; on in the remembered direction (the $1d5e
-    dec move_t                   ; re-dispatch; capture: 6f at 0.5px/f = ~3px)
-    lda mdir
-    cmp #1
-    bne :+
-    bra @rmove
-:   cmp #2
-    bne :+
-    jmp @lmove
-:   rts
-@mclr:
-    stz mdir
+    lda mdir                     ; re-dispatch; capture: 6f at 0.5px/f = ~3px).
+    beq @mclr                    ; NO remembered direction ($c20d=0): the $1d52
+    dec move_t                   ; re-dispatch loops back into the neutral path and
+    cmp #1                       ; drains $c20c to 0 in ONE frame -- a standing
+    bne :+                       ; jump's $30 seed is gone the next frame (GB
+    bra @rmove                   ; capture: c20c 30 -> 00), so RIGHT pressed in the
+:   jmp @lmove                   ; air ramps 0->6 and bumps to walk speed after 6f.
+@mclr:                           ; The old one-per-frame decay kept Mario at 0.5px/f
+    stz move_t                   ; for the whole fall (4-2 shaft: "falls into the
+    stz mdir                     ; water", user 2026-09-06).
     rts
 @brake:                          ; opposite direction pressed while moving: the GB
     lda #8                       ; brake ($1e48): $c20c=8 -> 8 input-ignored frames,

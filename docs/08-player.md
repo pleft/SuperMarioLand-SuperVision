@@ -219,6 +219,22 @@ air ramp + bump at 6, air-release drift, 8-frame skid at dpad-roll gaps 0–6, n
 at 7+. Capture pitfalls hit: the first pipe wall pins x at 81; the first goomba
 kills a >100-frame rightward run — fresh boot per trial.
 
+**Neutral with NO remembered direction drains `$c20c` in ONE frame (2026-09-06).**
+The $1D52 neutral path is `dec $c20c; re-dispatch with $c20d as the pad`; when
+`$c20d` is 0 the re-dispatch has no direction bit set and lands in the same
+neutral path again, so the loop runs until `$c20c` is 0 within the frame.
+Capture (1-1, per-frame `$c20c`): standing jump -> `30` on the jump frame, `00`
+the next; RIGHT pressed mid-air then ramps `01..06` and bumps `$c20e` to 2 on
+the 7th frame -- the same 6-frame ramp as on the ground. The port's neutral
+path decayed the seed one per frame (`$2F, $2E, ...`) so the bump never came
+before landing: 0.5 px/f for the whole fall after a standing jump or a
+walk-off (4-2 shaft, user report). `move_player` now clears `move_t` when
+`mdir` is 0. Known residual: the GB's first slow step is on the press frame
+(sub-pixel toggle starts on 1), the port's on the frame after -- the ramp is
+1 px behind throughout. Also known: the GB's ceiling probe is two points
+(Player_CeilingCheck: `$ffae = scroll + $c202 + 2`, then `-4`; OAM x 43 for
+`$c202` 50 puts them at visual-left +9 and +5), the port probes the centre once.
+
 ## ✅ The RUN jump is 41px, the walk jump 33 (ported 2026-08-28)
 
 The line above -- "indices 0-1 = vel 4 are reachable for a higher/running jump
