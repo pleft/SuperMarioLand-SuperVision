@@ -82,11 +82,11 @@ $(ROM): $(OBJS) $(CFG) tools/pack_banks.py tools/pack_w4.py tools/thin.json tool
 # (build/w{3,4}ball.bin, emitted by the gen runs inside the ROM recipe) pasted
 # at the $B520 pin of its own resident bank by pack_banks/pack_w4.
 
-$(OBJDIR)/main.o: src/main.s src/supervision.inc build/levels/title_map.bin build/gfx/title_tiles.svt build/audio/sfx.bin build/audio/sfx.inc build/audio/music.bin build/audio/music.inc
+$(OBJDIR)/main.o: src/main.s src/supervision.inc build/levels/title_map.bin build/gfx/title_tiles.svt build/gfx/moth.svt build/gfx/water_alt.svt build/audio/sfx.bin build/audio/sfx.inc build/audio/sfx_aux.bin build/audio/music.bin build/audio/music.inc build/audio/music2.bin build/audio/music3.bin
 	@mkdir -p $(OBJDIR)
 	$(AS) $(ASFLAGS) src/main.s -o $@
 
-$(OBJDIR)/gfxdata.o: src/gfxdata.s $(SVT)
+$(OBJDIR)/gfxdata.o: src/gfxdata.s $(SVT) build/gfx/w1_bg_9000.svt
 	@mkdir -p $(OBJDIR)
 	$(AS) $(ASFLAGS) src/gfxdata.s -o $@
 
@@ -102,7 +102,7 @@ $(OBJDIR)/datatables.o: src/datatables.s $(TABLES)
 	$(AS) $(ASFLAGS) src/datatables.s -o $@
 
 # Extract + convert assets from the user's ROM.
-$(SVT) $(W2GFX): tools/extract_gfx.py $(ROM_IN)
+$(SVT) $(W2GFX) build/gfx/w1_bg_9000.svt build/gfx/moth.svt build/gfx/water_alt.svt: tools/extract_gfx.py $(ROM_IN)
 	python3 tools/extract_gfx.py
 $(LVL): tools/extract_levels.py $(ROM_IN)
 	python3 tools/extract_levels.py
@@ -110,9 +110,9 @@ $(TABLES): tools/extract_tables.py $(ROM_IN)
 	python3 tools/extract_tables.py
 build/levels/title_map.bin build/gfx/title_tiles.svt: tools/extract_title.py $(ROM_IN)
 	python3 tools/extract_title.py
-build/audio/sfx.bin build/audio/sfx.inc: tools/extract_sfx.py $(ROM_IN)
+build/audio/sfx.bin build/audio/sfx.inc build/audio/sfx_aux.bin: tools/extract_sfx.py $(ROM_IN)
 	python3 tools/extract_sfx.py
-build/audio/music.bin build/audio/music.inc: tools/extract_music.py $(ROM_IN)
+build/audio/music.bin build/audio/music.inc build/audio/music2.bin build/audio/music3.bin: tools/extract_music.py $(ROM_IN)
 	python3 tools/extract_music.py
 
 clean:
