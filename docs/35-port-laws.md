@@ -594,3 +594,32 @@ spawn table and $09 fell between "engine native" and "seeded". gen_w3data now
 asserts, per world, that every type in the packed spawn lists is an engine
 native or in the kit closure. When a new world is added, that assert is the
 first thing to satisfy, before any object is measured.
+
+### E49. A new enemy is not "implemented" until every line of this list is measured
+User rule (2026-09-06, after the Pompon Flower shipped with no death): "when you
+add a new enemy, there should be a list of things you check and its death is
+one of them". The list, in order; each line is a GB capture (PyBoy trace or
+OAM/VRAM dump) matched by a port capture on the real core, not a reading of
+the script:
+
+1. **Spawns** -- fire column, spawn x/y, facing, count per level (spawn list
+   vs the port's object table; law E48's build assert is the floor, not the
+   proof).
+2. **Motion** -- speed, turns (walls/edges/timers), pauses, per-frame x/y over
+   at least one full cycle.
+3. **Sprite** -- tiles per frame from the GB's live OAM/VRAM (law E8), both
+   facings, animation period.
+4. **Attack** -- projectile type, spawn offset, arc/speed, cadence, its own
+   sprite and its own death (a child is an enemy too: go through this list).
+5. **Contact with Mario** -- side/top/bottom: hurts, stands, passes (contact
+   table row + capture).
+6. **Stomp** -- result type, corpse tiles, corpse motion and duration, sound,
+   score popup. An all-$FF contact row means "handled elsewhere", never
+   "nothing happens": find the handler.
+7. **Superball hit** -- same fields as the stomp.
+8. **Star hit** -- same fields.
+9. **Points** -- the score written for each kill.
+10. **Despawn** -- off-screen cull rule, and whether it respawns.
+
+Write the ten answers into the world's doc before the type is called done. A
+type with a line left blank does not ship.
