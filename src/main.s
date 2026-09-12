@@ -7931,7 +7931,26 @@ death_curve:                     ; ROM $0C19 verbatim (signed y deltas + $7F end
 ; (PyBoy boots the user's ROM and captures the rendered tilemap + tiles). 18 GB rows
 ; centered on the SV's 20 (rows 1-18). Static; exits on Start.
 .segment "TITLE0"               ; the title runs ONLY with bank 0 mapped (code + data)
+
 .proc title_screen
+    stz tmpL3                    ; the author tag "ELEFAS" on the free bottom row (18),
+@tag:                            ; drawn BEFORE the map loop so the map loop leaves the
+    lda tmpL3                    ; scratch exactly as before (level init reads some of it)
+    asl
+    clc
+    adc #14                      ; centre: 6 tiles at cols 7..12 -> dcol 14..24
+    sta dcol
+    lda #144                     ; row 18 (the title map is rows 0-17)
+    sta dy
+    jsr set_dst
+    ldx tmpL3
+    lda title_letters,x
+    jsr get_tile_src
+    jsr blit_tile
+    inc tmpL3
+    lda tmpL3
+    cmp #6
+    bne @tag
     lda #<title_map              ; 16-bit walk over the 360-byte map (row*20+col
     sta feet_col                 ; overflowed 8 bits past row 12 -> doubled image)
     lda #>title_map
@@ -7980,13 +7999,43 @@ death_curve:                     ; ROM $0C19 verbatim (signed y deltas + $7F end
     lda tmpL3
     cmp #18
     bne @row
+    stz b_i                      ; boot-jingle frame counter (rising C-E-G-C on sq1)
     stz cur_level                ; default = 1-1; Select cycles (level-select debug)
     jsr title_lvl_show
 @wait:
     lda frame_flag               ; hold until Start is pressed
     beq @wait
     stz frame_flag
-    jsr sfx_tick                 ; the sound test needs the player running
+    jsr sfx_tick                 ; keep the audio player running
+    lda b_i                      ; --- boot jingle: one note every 16 frames, then cut
+    cmp #80
+    beq @joff
+    bcs @jdone
+    inc b_i
+    lda b_i
+    and #15
+    bne @jdone                   ; only on multiples of 16 (frames 16/32/48/64)
+    lda b_i
+    lsr
+    lsr
+    lsr
+    lsr
+    sec
+    sbc #1                       ; note index 0..3
+    tax
+    lda title_note,x
+    sta CH1_FLO
+    stz CH1_FHI
+    lda #$FF
+    sta CH1_LEN
+    lda #$6E                     ; enable | duty 2 | vol 14
+    sta CH1_VOLDUTY
+    bra @jdone
+@joff:
+    inc b_i                      ; past the last note -> silence square 1
+    lda #$40
+    sta CH1_VOLDUTY
+@jdone:
     jsr read_input
     lda pad_pressed              ; LEVEL SELECT (debug): Select cycles the start level;
     and #GB_SELECT               ; the "1-1"-style pick shows at the top right.
@@ -7999,50 +8048,16 @@ death_curve:                     ; ROM $0C19 verbatim (signed y deltas + $7F end
 @lsel:
     sta cur_level
     jsr title_lvl_show
-:   lda pad_pressed              ; SOUND TEST: B cycles the SFX id, A replays it.
-    and #GB_B                    ; The id shows as two digits in the top-left corner.
-    beq :+
-    inc b_i
-    lda b_i
-    cmp #SFX_COUNT
-    bcc @playid
-    stz b_i
-    bra @playid
-:   lda pad_pressed
-    and #GB_A
-    beq :+
-@playid:
-    lda b_i                      ; show the id (tens/ones font tiles at row 0)
-    ldy #0
-@tens:
-    cmp #10
-    bcc @ones
-    sbc #10
-    iny
-    bra @tens
-@ones:
-    pha
-    stz dcol
-    stz dy
-    phy
-    jsr set_dst
-    ply
-    tya
-    jsr get_tile_src
-    jsr blit_tile
-    lda #2
-    sta dcol
-    stz dy
-    jsr set_dst
-    pla
-    jsr get_tile_src
-    jsr blit_tile
-    lda b_i
-    jsr sfx_play
-:   lda pad_pressed
-    and #GB_START
-    beq @wait
+:   lda pad_pressed              ; (the in-ROM debug SOUND TEST was retired here to
+    and #GB_START                ;  make room for the ELEFAS boot tag + jingle; the
+    beq @wait                    ;  tools/ audio harness covers SFX auditioning)
+    stz CH1_FLO                  ; leaving the title: return square 1 to its boot state
+    stz CH1_LEN                  ; (FLO/LEN/VOLDUTY = 0) so the level starts exactly as
+    stz CH1_VOLDUTY              ; before the jingle existed -- keeps svgold identical
+    stz b_i                      ; the jingle counter shares b_i -- restore it to 0 too
     rts
+title_letters: .byte $0E,$15,$0E,$0F,$0A,$1C   ; E L E F A S (HUD font tiles)
+title_note:    .byte 235,186,157,117           ; C5 E5 G5 C6 (period ~122900/Hz)
 .endproc
 
 ; title_lvl_show: draw the level-select pick ("1-1".."1-3") at the title's
