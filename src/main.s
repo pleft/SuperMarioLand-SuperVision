@@ -660,7 +660,12 @@ main_loop:
     beq :+
     stz hud_dirty
     jsr draw_hud                 ; digits -> the HUD shadow (sets hud_rp)
-:   jsr hud_check                ; repaint verdict for the NMI + the seam echo
+:
+.ifndef SMOOTH
+    jsr hud_check                ; repaint verdict for the NMI + the seam echo
+.endif                           ; flavor (b): dead -- the NMI whole-screen-scrolls and
+                                 ; never reads hud_go/the seam; pause_strip flushes the
+                                 ; HUD shadow directly. Frees ~450 cyc EVERY frame.
 
 @skiprender:
     lda pipe_phase              ; pipe sink/rise animation running? -> just animate
@@ -7029,8 +7034,7 @@ ovl_width:  jmp (ovl_vec+10)     ; A = erase width for kit types
     sta tmpL3
     lda o_xh,x
     adc #0
-    sta tmpH3
-    lda tmpH3
+    sta tmpH3                     ; A already = tmpH3 -> cmp directly (no reload)
     cmp cam_x+1
     bcc @cull
     bne @alive
@@ -7346,8 +7350,7 @@ ovl_width:  jmp (ovl_vec+10)     ; A = erase width for kit types
     sta tmpL3
     lda o_xh,x
     adc #0
-    sta tmpH3
-    lda tmpH3
+    sta tmpH3                     ; A already = tmpH3 -> cmp directly (no reload)
     cmp cam_x+1
     bcc @cull
     bne :+
