@@ -60,6 +60,7 @@ NEED = [
     "map_transform", "map_offmap",
     "wcol", "redraw_one", "award_coin", "hit_qblock", "break_brick",
     "restore_bg", "rb_vx", "rb_y", "rb_cols", "rb_rows",
+    "frame_flag", "blit_blank", "bank_set", "title_screen",   # ELEFAS boot splash (src/intro.s, docs/48)
     "cur_bank", "read_map_tile", "add_score", "calc_feet_col", "fb_col0", "mario_vx", "scroll_s", "bud_base", "find_block", "spawn_walker", "spawn_flower", "spawn_star",
     # kit constants live in code, not symbols -- redefined in w2code.s
 ]

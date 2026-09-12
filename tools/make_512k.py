@@ -39,6 +39,15 @@ if os.path.exists(aux):
     blob = open(aux, "rb").read()
     assert len(blob) <= 0x0B80, "w3aux blob exceeds the AUX window ($A9C0-$B53F)"
     big[P8 + 0x29C0:P8 + 0x29C0 + len(blob)] = blob
+# PAGE 13 = the ELEFAS boot splash blob (docs/48): stored at page 13's $8000,
+# reset copies it into the $1500 window and runs it before the title. Pages
+# 9-12 are World 4's (pack_w4); 13-14 are free.
+intro = "build/intro.bin"
+if os.path.exists(intro):
+    ib = open(intro, "rb").read()
+    assert len(ib) <= 0x0800, "intro blob exceeds the $1500 window (0x800)"
+    P13 = 13 * 0x8000
+    big[P13:P13 + len(ib)] = ib
 assert len(big) == 0x80000
 open(out, "wb").write(bytes(big))
 print(f"wrote {out} (512K; page 8 = aux [bank-1 prefix + {os.path.getsize(aux) if os.path.exists(aux) else 0}B blob], 9-14 free)")

@@ -448,8 +448,16 @@ probe_stripes:                   ; the full proven liturgy + stripes, FIXED-ROM
     bne @m2f
 @m2: bra @m2
 .endif
-    jsr clear_vram
-    jsr title_screen             ; the SML title; waits for Start (Select = level select)
+    ; --- ELEFAS boot splash (docs/48): map free page 13 and run the blob at its
+    ;     $8000; the blob relocates ITSELF to the $1500 RAM window, maps bank 0
+    ;     back (the HUD font + title live there), draws, and returns. Kept to two
+    ;     instructions so it fits FIXED; the copier lives in the free page.
+    lda #13
+    jsr bank_set                 ; map page 13 (bank_set = the FIXED twin: survives
+                                 ; mapping to a page with no prefix copy)
+    jsr $8000                    ; the splash self-relocates, plays, then clears the
+                                 ; screen and runs the title itself (waits for Start),
+                                 ; and returns -- keeping clear_vram+title off FIXED
     jsr clear_vram
     jsr load_level               ; map the bank + bind level pointers/limits to its header
     jsr ovl_bind                 ; window vectors for this level's overlay
@@ -1081,8 +1089,7 @@ himod = $1C00                    ; windowed broken/used overlay for cols >= 360 
 
 .proc mod_test                   ; A = bit value (0 = unmodified) for (feet_col, mrow)
     jsr mod_ptr
-    ldy #0
-    lda (map_ptr),y
+    lda (map_ptr)                ; 65C02 zp-indirect (was ldy #0 / lda (),y)
     and tmpL
     rts
 .endproc

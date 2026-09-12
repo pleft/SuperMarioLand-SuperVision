@@ -27,6 +27,10 @@ levels, the full 7-track music engine + sound effects, and the animated ending
 with credits and music. See [`PROGRESS.md`](PROGRESS.md) for the detailed log
 and [`docs/`](docs/) for the per-subsystem reverse-engineering notes.
 
+The boot sequence opens with an original pre-title splash — the porter's tag
+"ELEFAS" rising to a small chime, in the spirit of the Supervision/Travellmate
+boot logo (see `docs/48`) — then the faithful SML title.
+
 One known cosmetic gap is documented: the 4-3 pipe fists draw in front of their
 pipe instead of behind it (a renderer limitation; see `docs/45`).
 
