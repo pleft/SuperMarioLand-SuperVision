@@ -2276,8 +2276,8 @@ no:
     jsr clear_objects            ; the object engine stops (A = ending13 preserved)
     ldx #5
     stx goal_phase               ; goal_phase = 5 (X kept = 5 for @e43's e_phase)
-    cmp #3                       ; 4-3 (==3): the game-ending text overlay (l3e43)
-    beq @e43
+    cmp #4                       ; 4-3 (==4): the game-ending text overlay (l3e43).
+    beq @e43                     ; 3-3 is ending13=3 -> the normal x-3 rescue below
     lda #1                       ; E_BEAT1 (x-3 rescue)
     sta e_phase
     lda #71
@@ -2652,7 +2652,7 @@ quad_rows: .byte 0, 0, 8, 8
 .segment "L13E"
 .proc l3e_room
     lda ending13
-    cmp #3
+    cmp #4                       ; 4-3 (==4) only; 3-3 (==3) runs the x-3 rescue room
     bne :+
     jmp e43_boot                 ; 4-3's game ending: pull the E43 blob (page 12) over this overlay
 :

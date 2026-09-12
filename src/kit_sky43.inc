@@ -972,8 +972,10 @@ sq_alt: .byte 0, 0, 0, 1, 0, 3, 0, 2
     lda #240
     sta goal_tmr
     stz goal_top
-    lda #3                        ; 4-3: the GAME ending (Daisy text overlay, l3e43,
-    sta ending13                 ; docs/46) follows the tally, via goal_phase 5
+    lda #4                        ; 4-3: the GAME ending (Daisy text overlay, l3e43,
+    sta ending13                 ; docs/46) follows the tally, via goal_phase 5.
+                                 ; MUST differ from 3-3's ending13=3 (same value made
+                                 ; clearing 3-3's sphere trigger the game ending -- user)
     lda #3
     sta mus_rate
     jsr mus_stop
