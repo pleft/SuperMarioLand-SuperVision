@@ -45,24 +45,28 @@ run:
     jsr clear_vram               ; white screen for the splash
     lda #TOP_BOTTOM
     sta tmpL2                    ; tmpL2 = the word's current top scanline
-    jsr draw_word                ; initial draw at the bottom
-    stz tmpH3                    ; jingle/frame counter
+    jsr draw_word                ; appear at the bottom
 @rise:
-    jsr wait1                    ; slow, deliberate climb: 1 px/frame
-    jsr jingle                   ; the fast chime plays as it rises
+    jsr wait1                    ; slow, deliberate climb: 1 px every 3 frames --
+    jsr wait1                    ; the rise plays in silence, like the original
+    jsr wait1
     lda tmpL2
     cmp #TOP_CENTRE
-    beq @hold                    ; reached the centre -> hold
+    beq @settled                 ; reached the centre
     jsr blank_word               ; erase the old position (8 rows)
-    dec tmpL2                    ; 1 px/frame up (top 1 px new, bottom 1 px cleared)
+    dec tmpL2                    ; 1 px up (top 1 px new, bottom 1 px cleared)
     jsr draw_word
     bra @rise
+@settled:
+    stz tmpH3                    ; NOW that it has settled, play the chime, then hold
+    ldx #64                      ; hold the settled logo while the chime rings out
 @hold:
-    ldx #48                      ; hold the settled logo
-@hloop:
     jsr wait1
+    phx                          ; jingle clobbers X (note index) -- keep the hold count
+    jsr jingle
+    plx
     dex
-    bne @hloop
+    bne @hold
     stz CH1_FLO                  ; return square 1 to its boot state (FLO/LEN/VOLDUTY
     stz CH1_LEN                  ; = 0) so the level starts exactly as before the splash
     stz CH1_VOLDUTY              ; existed -- a leftover CH1 state nudges a W3 object's
