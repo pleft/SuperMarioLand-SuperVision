@@ -48,23 +48,19 @@ run:
     jsr draw_word                ; initial draw at the bottom
     stz tmpH3                    ; jingle/frame counter
 @rise:
-    jsr wait1                    ; advance one displayed frame
-    jsr jingle
+    jsr wait1                    ; slow, deliberate climb: 1 px/frame
+    jsr jingle                   ; the fast chime plays as it rises
     lda tmpL2
     cmp #TOP_CENTRE
     beq @hold                    ; reached the centre -> hold
     jsr blank_word               ; erase the old position (8 rows)
-    lda tmpL2
-    sec
-    sbc #2                       ; 2 px/frame up
-    sta tmpL2
-    jsr draw_word                ; redraw 2 px higher (top 2 px new, bottom 2 cleared)
+    dec tmpL2                    ; 1 px/frame up (top 1 px new, bottom 1 px cleared)
+    jsr draw_word
     bra @rise
 @hold:
-    ldx #80                      ; hold the settled logo while the chime finishes
+    ldx #48                      ; hold the settled logo
 @hloop:
     jsr wait1
-    jsr jingle
     dex
     bne @hloop
     stz CH1_FLO                  ; return square 1 to its boot state (FLO/LEN/VOLDUTY
@@ -127,20 +123,23 @@ run:
 ; --- one rising note every 8 frames (C-E-G-C), sustained into the next ---
 .proc jingle
     lda tmpH3
-    cmp #96
+    cmp #24
     bcs @done
     inc tmpH3
     lda tmpH3
-    and #7
-    bne @done                    ; only on multiples of 8 (frames 8/16/24/32)
+    and #3
+    bne @done                    ; only on multiples of 4 (frames 4/8/12/16)
     lda tmpH3
     lsr
-    lsr
-    lsr                          ; /8 -> 1..
+    lsr                          ; /4 -> 1,2,3,4,5
     sec
     sbc #1                       ; note index 0..
     cmp #4
-    bcs @done                    ; only the first four
+    bcc @play                    ; 0..3 -> play a note
+    lda #$40                     ; index 4 (frame 20) -> silence, crisp end
+    sta CH1_VOLDUTY
+    rts
+@play:
     tax
     lda notes,x
     sta CH1_FLO
