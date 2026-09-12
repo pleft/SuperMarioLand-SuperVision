@@ -742,7 +742,7 @@ main_loop:
     ldx cur_level                ; ...except in 4-3 (GB state $0D): the scroll, the foes
     cpx #11                      ; and the plane's controls all run on through the grow,
     beq @skygrow                 ; only the sprite flashes (PyBoy: ffa4/c0ab/objects
-    jmp @growing                 ; advance on every frame of ffa6 79..0; docs/45)
+    bra @growing                 ; advance on every frame of ffa6 79..0; docs/45)
 @skygrow:
     dec mario_grow
     bne :+
@@ -1855,6 +1855,11 @@ no:
     beq @unsup                    ; slipped off the platform's edge -> fall
     jsr feet_probe                ; GB: tile collision keeps running while RIDING --
     beq @keep                     ; when the ride sinks to real ground the FLOOR wins
+    ldx oi2                       ; ...but a RISING lift (OBJ_GIFT, 1-3) carries Mario
+    lda o_type,x                  ; UP through the one-way ceiling stones ($59/$5b);
+                                  ; feet_probe reads those as "floor" and would peel
+    cmp #OBJ_GIFT                 ; him off (6fd729d over-applied floor-wins to an
+    beq @keep                     ; ascending ride). Only a sinking ride clears ride.
     stz ride                      ; (Mario lands flush, the stone sinks on beneath
 @keep:                            ; him); without this a door stone carried Mario
     jmp @done                     ; THROUGH the 2-2 floor to a pit death (user)
@@ -4186,8 +4191,15 @@ music_data:
     lda b_i
     cmp #9
     bne @loop
+.ifdef SMOOTH
+    jmp nmi_hud_copy             ; flavor (b): flush the HUD shadow pinned at screen top
+.else
     rts
+.endif
 @clear:
+.ifdef SMOOTH
+    jsr smooth_hide_hud          ; flavor (b): blank the HUD rows back to sky
+.endif
     lda scroll_s                 ; unpause: restore the map band under the strip
     clc
     adc #88
@@ -4201,6 +4213,34 @@ music_data:
     jmp restore_bg
 @txt: .byte $2C,$84,$19,$0A,$1E,$1C,$0E,$84,$2C   ; the exact $079C bytes
 .endproc
+
+.ifdef SMOOTH
+; flavor (b) HUD-on-pause: the shadow is kept current by render_status_bar/draw_hud
+; during play but never flushed, so nothing shows while playing. On pause we flush
+; it pinned to screen rows 0-1 (scroll-anchored via the view), and on unpause blank
+; those 16 scanlines back to sky.
+.proc smooth_hide_hud            ; blank screen rows 0-1 (16 scanlines, FULL 48-byte
+    ldx vyp                      ; ring line so any XSCROLL shows sky) -> used on unpause
+    lda #16                      ; and at level setup so the ex-HUD area stays blank
+    sta hf_row
+@row:
+    lda row48_lo,x
+    sta tmpL2
+    lda row48_hi,x
+    clc
+    adc #$40
+    sta tmpH2
+    ldy #47
+    lda #0
+:   sta (tmpL2),y
+    dey
+    bpl :-
+    inx
+    dec hf_row
+    bne @row
+    rts
+.endproc
+.endif
 
 ; game_over: blank screen + "GAME OVER" text, hold ~4s, then a full machine restart
 ; (the original shows GAME OVER then returns to the title; the port has no title yet).
@@ -4689,11 +4729,22 @@ W3HDR = $B540                    ; W3 headers: PINNED bank-1 tail (pack_banks
     adc #0
     sta feet_col+1
     lda map_row
+.ifdef SMOOTH
+    cmp #18                      ; flavor (b): VRAM rows 0-1 are above the level (map_row
+    bcc @inband                  ; $FE/$FF) -- blank them so Mario's erase clears the top
+    lda #$2C                     ; strip he now draws into (no HUD to hide behind)
+    bra @havetile
+@inband:
+.endif
     cmp #18                      ; rows 0..17 restorable; $FE/$FF (the HUD rows) skip too --
     bcs @skip                    ; nothing is drawn there while Mario occludes behind the HUD
     cmp #16
     bcc @maptile
+.ifdef SMOOTH
+    lda #$2C                     ; flavor (b): the 2 extra rows are blank sky (-> @blank)
+.else
     lda #$61                     ; dirt band (rows 16,17): solid fill, same as draw_column --
+.endif
     bra @havetile                ; previously SKIPPED, so sprites falling through the ground
 @maptile:                        ; (brick shards) left permanent imprints in the dirt
     sta mrow
@@ -4752,7 +4803,11 @@ W3HDR = $B540                    ; W3 headers: PINNED bank-1 tail (pack_banks
     jsr read_map_tile            ; effective tile number
     bra @havetile
 @dirt:
+.ifdef SMOOTH
+    lda #$2C                     ; flavor (b): blank the SV's 2 extra rows (sky), like the top
+.else
     lda #$61                     ; solid dirt fill tile
+.endif
 @havetile:
     jsr get_tile_src             ; -> src_ptr
     lda dbcol
@@ -4804,6 +4859,9 @@ W3HDR = $B540                    ; W3 headers: PINNED bank-1 tail (pack_banks
 ; offset 0. The NMI/IRQ raster split renders these HUD rows at XSCROLL=0, so the bar is
 ; pinned at screen X 0 with no per-frame compensation. Drawn once (boot) + on transitions.
 .proc render_status_bar
+    ; flavor (b): this still fills the HUD SHADOW, but the shadow is never flushed
+    ; during play (the NMI's nmi_hud_copy is skipped under SMOOTH), so no HUD shows
+    ; while playing; pause_strip flushes it pinned on pause.
     stz bg_row
 @rowloop:
     stz bg_col
@@ -4838,8 +4896,10 @@ W3HDR = $B540                    ; W3 headers: PINNED bank-1 tail (pack_banks
     lda bg_row
     cmp #2
     bne @rowloop
+.ifndef SMOOTH
     lda #1
     sta hud_rp                   ; shadow changed -> hud_flush repaints
+.endif
     rts
 .endproc
 
@@ -5291,9 +5351,8 @@ PIN_X   = 64
     sta tmpL
     lda cam_x+1
     sbc tmpH
-    sta tmpH
-    lda tmpH                     ; offset >= 256 -> definitely need a shift
-    bne @needshift
+    sta tmpH                     ; sbc already set Z on the new tmpH (sta keeps flags)
+    bne @needshift               ; offset >= 256 -> definitely need a shift
     lda tmpL
     cmp #32                      ; offset < 32 -> within margin, no shift
     bcc @setscroll
@@ -5504,9 +5563,12 @@ PIN_X   = 64
     lda spr_y                    ; Mario draws OVER the HUD (GB sprites sit above the BG
     cmp #153                     ; status bar); his erase restores the template. Only clip
     bcs @bottom                  ; the bottom: dy>152 would spill past line 160
+.ifndef SMOOTH
     cmp #16                      ; quads in the HUD band: OCCLUDE (Mario passes behind the
     bcc @bottom                  ; HUD) until the row-split renderer lands -- the two scroll
-    lda spr_col                  ; TL   domains otherwise tear his halves apart
+.endif                           ; domains otherwise tear his halves apart. Flavor (b) has
+                                 ; NO HUD band -> draw him there (lift-top visibility, user).
+    lda spr_col                  ; TL
     sta dcol
     lda spr_y
     sta dy
@@ -5527,9 +5589,11 @@ PIN_X   = 64
     cmp #153
     bcc :+
     rts
+.ifndef SMOOTH
 :   cmp #16                      ; bottom pair in the HUD band? occlude it too
     bcs :+
     rts
+.endif
 :   lda spr_col                  ; BL (y+8)
     sta dcol
     lda spr_y
@@ -5583,8 +5647,10 @@ PIN_X   = 64
     adc #8
     cmp #153
     bcs @ddone
+.ifndef SMOOTH
     cmp #16
     bcc @ddone
+.endif
     lda mario_vx
     and #3
     sta spr_subx
@@ -5878,7 +5944,7 @@ STAR_ARC_N = 42
     sec
     sbc #4
     sta o_y,x
-    jmp @consume
+    bra @consume
 @bounce:
     lda o_y,x                    ; RE (phys $34 = $0C: NO floor-response bits): the star
     cmp #160                     ; NEVER collides with terrain -- the arc is pure script,
@@ -7200,7 +7266,7 @@ ovl_width:  jmp (ovl_vec+10)     ; A = erase width for kit types
     sec
     sbc #8
     sta o_y,x
-    jmp @combat
+    bra @combat
 @clear:
     ldx oi
     lda o_vx,x
@@ -8988,7 +9054,7 @@ corpse_dy:                       ; the star-kill capture, verbatim (23 signed de
     stz o_nfl,x
     lda o_type,x
     bne :+                       ; dead slot: not visible (erase leftovers via dirty)
-    jmp @p1vis0
+    bra @p1vis0
 :   sec                          ; screen x = o_x - cam + scroll_s
     lda o_xl,x
     sbc cam_x
@@ -11400,6 +11466,16 @@ HUD_SPLIT_LINE = 16              ; timer reload = split scanline (IPeriod=256 cy
     inc frame_count
     lda #1
     sta frame_flag
+.ifdef SMOOTH
+    ; FLAVOR (b) "gameplay-accurate": no fixed HUD -> no raster split. The whole
+    ; screen uses the playfield's 1px-true scroll (Kabi-Island model). No timer
+    ; IRQ is armed and no HUD shadow is flushed, so the split's real-HW wobble
+    ; cannot happen. The HUD is shown on PAUSE instead (pause_strip).
+    lda vyp
+    sta YSCROLL
+    lda vxp
+    sta XSCROLL
+.else
     ldx #0                       ; X = repaint verdict
     lda hud_go                   ; view-byte crossing? latch the new HUD view and
     beq @stable                  ; repaint IN THIS HANDLER: on the per-scanline core
@@ -11420,6 +11496,7 @@ HUD_SPLIT_LINE = 16              ; timer reload = split scanline (IPeriod=256 cy
     beq @out
     jsr nmi_hud_copy             ; saves/restores Y + the scratch pairs itself
 @out:
+.endif
     plx
     pla
     rti
@@ -11430,6 +11507,9 @@ HUD_SPLIT_LINE = 16              ; timer reload = split scanline (IPeriod=256 cy
 ; NMI isn't LCD-synced, so this line wanders — worst case a <=3px shear, v2 =
 ; the SYS_CTRL restart trick pins it.)
 .proc irq
+.ifdef SMOOTH
+    rti                          ; flavor (b): timer IRQ is never armed (no raster split)
+.else
     pha
     lda vyp                      ; the playfield's LIVE view (may lead the HUD's
     sta YSCROLL                  ; latched one by a byte for a frame)
@@ -11438,6 +11518,7 @@ HUD_SPLIT_LINE = 16              ; timer reload = split scanline (IPeriod=256 cy
     lda IRQ_TIMER_RST            ; read clears the timer IRQ
     pla
     rti
+.endif
 .endproc
 
 ; ---------------------------------------------------------------------------
@@ -11824,11 +11905,16 @@ mus3_data:                       ; the game-over tune ($10): FIXED is full, so
     sta tmpL3
     lda #>HUDSHADOW
     sta tmpH3
+.ifdef SMOOTH
+    lda vxph                     ; flavor (b): no NMI latch; use the live view
+    ldx vyp
+.else
     lda vxph_ap
+    ldx vyp_ap                   ; ring line of screen row 0
+.endif
     lsr
     lsr
     sta hf_col                   ; view byte col 0..47
-    ldx vyp_ap                   ; ring line of screen row 0
     lda #16
     sta hf_row
 @row:

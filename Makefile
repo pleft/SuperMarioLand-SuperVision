@@ -13,6 +13,12 @@ ASFLAGS = --cpu 65C02 -g -I src
 ifdef GODMODE
 ASFLAGS += -D GODMODE
 endif
+# make SMOOTH=1 -> flavor (b) "gameplay-accurate": no fixed HUD, no raster split
+# (Kabi-Island whole-screen scroll, no HW wobble); HUD shown on pause. Isolated
+# artifacts like GODMODE so the two flavors can never relink each other's objects.
+ifdef SMOOTH
+ASFLAGS += -D SMOOTH
+endif
 CFG     = cfg/supervision.cfg
 ROM_IN  = super-mario-land-gb.gb
 SVT     = build/gfx/w1_obj_8000.svt
@@ -28,15 +34,19 @@ TABLES  = build/data/jumparc.bin build/data/speedtab.bin build/data/mario_poses.
 # whole play session was spent wondering why invincibility did nothing. So the
 # two settings share NOTHING: their own object dir, their own ROM name. Both
 # stay incremental and neither can ever be the other.
-OBJDIR  = build$(if $(GODMODE),/god)
+OBJDIR  = build$(if $(GODMODE),/god)$(if $(SMOOTH),/smooth)
 OBJS    = $(OBJDIR)/main.o $(OBJDIR)/gfxdata.o $(OBJDIR)/datatables.o $(OBJDIR)/leveldata.o
-ROM     = build/super-mario-land$(if $(GODMODE),-god).sv
+ROM     = build/super-mario-land$(if $(GODMODE),-god)$(if $(SMOOTH),-smooth).sv
 
 all: $(ROM)
 
 .PHONY: godmode
 godmode:                         # the TEST ROM -> build/super-mario-land-god.sv
 	$(MAKE) GODMODE=1
+
+.PHONY: smooth
+smooth:                          # flavor (b) -> build/super-mario-land-smooth.sv
+	$(MAKE) SMOOTH=1
 
 $(ROM): $(OBJS) $(CFG) tools/pack_banks.py tools/pack_w4.py tools/thin.json tools/thin.py tools/make_512k.py tools/gen_w2abi.py src/w2code.s src/kit_mar23.inc src/kit_w3.inc $(wildcard src/kit_sh*.inc) src/w2stub.s src/w3stub.s tools/gen_w3data.py src/w3aux.s cfg/w3aux.cfg tools/make_512k.py cfg/w2code.cfg cfg/w2stub.cfg cfg/w3stub.cfg cfg/w3code.cfg cfg/w4code.cfg cfg/w43code.cfg src/kit_sky43.inc src/ending43.s cfg/e43.cfg tools/extract_ending.py tools/extract_w4fire.py $(W2GFX) build/gfx/w3_ovl_9310.svt
 	$(LD) -C $(CFG) $(OBJS) -o $@ -m build/rom.map -Ln build/rom.lbl --dbgfile build/rel.dbg
