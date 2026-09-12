@@ -4,6 +4,7 @@
 #
 #   ./build.sh            # install what's missing, then build
 #   ./build.sh --god      # also build the invincibility test ROM
+#   ./build.sh --smooth   # also build the "gameplay-accurate" smooth flavor
 #   ./build.sh --deps     # only install/verify the toolchain, don't build
 #
 # LEGAL / RULE 5: this repo contains NO ROM data. Every graphic, level, table
@@ -15,12 +16,14 @@ set -euo pipefail
 ROM="super-mario-land-gb.gb"
 EXPECT_SHA1="418203621b887caa090215d97e3f509b79affd3e"
 BUILD_GOD=0
+BUILD_SMOOTH=0
 DEPS_ONLY=0
 for a in "$@"; do
   case "$a" in
     --god) BUILD_GOD=1 ;;
+    --smooth) BUILD_SMOOTH=1 ;;
     --deps) DEPS_ONLY=1 ;;
-    -h|--help) sed -n '2,12p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,13p' "$0"; exit 0 ;;
     *) echo "unknown option: $a" >&2; exit 2 ;;
   esac
 done
@@ -98,6 +101,7 @@ fi
 # ------------------------------------------------------------------- build
 say "Building the Supervision ROM ..."
 make
+[ "$BUILD_SMOOTH" = 1 ] && { say "Building the smooth (gameplay-accurate) flavor ..."; make smooth; }
 [ "$BUILD_GOD" = 1 ] && { say "Building the GODMODE (invincibility) test ROM ..."; make godmode; }
 
 echo

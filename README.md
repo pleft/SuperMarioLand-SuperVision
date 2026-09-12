@@ -67,14 +67,32 @@ RetroArch Potator core.
 Options:
 
 ```sh
+./build.sh --smooth  # also build build/super-mario-land-smooth.sv (the
+                     # "gameplay-accurate" smooth flavor — see below)
 ./build.sh --god     # also build build/super-mario-land-god.sv (invincible, for
                      # watching a whole level/ending without dying)
 ./build.sh --deps    # only install/verify the toolchain
 ```
 
 If you prefer to drive it yourself, the build is a plain `Makefile`
-(`make`, `make godmode`); its only requirements are `ca65`/`ld65` (cc65),
-`python3`, and the `pypng` module.
+(`make`, `make smooth`, `make godmode`); its only requirements are `ca65`/`ld65`
+(cc65), `python3`, and the `pypng` module.
+
+### Two flavors
+
+The port builds in two flavors from the same source (all differences are
+`.ifdef SMOOTH`-guarded, so the default build is unaffected):
+
+| | Default — `make` | Smooth — `make smooth` |
+|---|---|---|
+| Output | `build/super-mario-land.sv` | `build/super-mario-land-smooth.sv` |
+| Goal | **near-100% original-accurate** | **near-100% gameplay-accurate** |
+| HUD | fixed status bar at the top, always visible (as on the Game Boy), via a mid-frame raster split | hidden during play, shown **on pause**; top and bottom 16-row strips are blanked |
+| Trade-off | 1:1 with the original, but the raster split costs CPU every frame and can wobble a few pixels on real hardware | no split → whole-screen smooth scroll, the freed budget cuts flicker/slowdown (~40% fewer dropped-frame sprite blanks in crowded scenes), at the cost of the always-on HUD |
+
+The default flavor is the faithful reference; the smooth flavor is for players
+who prefer maximum smoothness and don't mind the HUD moving to the pause screen.
+See [`docs/`](docs/) for the raster-split and rendering notes.
 
 ### Toolchain
 

@@ -28,6 +28,22 @@ Newest entries at the top. Every entry should be traceable to ROM bytes/code.
 rendering/perf rounds, blocks/powerups, enemies, goal+bonus game, death/title,
 audio phase. See docs/22 + docs/23 and the memory index.)
 
+## 2026-09-12 SMOOTH FLAVOR + fixes (1-3 lift, 3-3 ending, strip artifacts)
+
+Second build flavor shipped: `make smooth` → `super-mario-land-smooth.sv`, the
+"gameplay-accurate" flavor (docs/47). No fixed HUD during play → no raster split
+→ one whole-screen scroll; HUD shows on pause; top/bottom 16-row strips blanked.
+All `.ifdef SMOOTH`; the default flavor stays byte-identical (svgold). Freed
+budget + gating the now-dead `hud_check` cut crowd flicker ~40% (3-1 tokotoko
+12.1%→7.3%, logic-complete 79.3%→85.5%). Investigated pushing further: Mario is
+already atomic-interleaved, the erase path is already per-column-cached +
+batch-banked, W3 sprites are already composited — so stopped at the −40%.
+Fixes this session: the 1-3 secret lift no longer peels Mario at the ceiling
+stones (law E52); beating the 3-3 boss no longer jumps to the 4-3 game ending
+(an `ending13` value collision); flavor-b ex-HUD strips are cleared on every
+level entry (leftover artifacts); Mario is visible when a lift carries him into
+the old HUD band in the smooth flavor.
+
 ## 2026-07-25 (3) AI-VM SEMANTICS COMPLETE: states are countdowns, F0 is direction
 
 $2676 RE'd to the bottom: $FFC8 ("movement state") = a TICK COUNTDOWN paced by
