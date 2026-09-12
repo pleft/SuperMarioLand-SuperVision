@@ -4224,9 +4224,8 @@ music_data:
 ; during play but never flushed, so nothing shows while playing. On pause we flush
 ; it pinned to screen rows 0-1 (scroll-anchored via the view), and on unpause blank
 ; those 16 scanlines back to sky.
-.proc smooth_hide_hud            ; blank screen rows 0-1 (16 scanlines, FULL 48-byte
-    ldx vyp                      ; ring line so any XSCROLL shows sky) -> used on unpause
-    lda #16                      ; and at level setup so the ex-HUD area stays blank
+.proc smooth_blank16             ; blank 16 scanlines from X (each a FULL 48-byte ring
+    lda #16                      ; line so any XSCROLL shows sky)
     sta hf_row
 @row:
     lda row48_lo,x
@@ -4244,6 +4243,20 @@ music_data:
     dec hf_row
     bne @row
     rts
+.endproc
+.proc smooth_hide_hud            ; unpause: re-blank the ex-HUD (top 16 scanlines)
+    ldx vyp
+    jmp smooth_blank16
+.endproc
+; smooth_clear_strips: level/scene entry -> blank BOTH ex-HUD zones. draw_column
+; redraws scanlines 16-159 (so the lower strip is re-blanked by render_background)
+; but NEVER the top 16, so a prior level/ending's leftovers persisted there until
+; something happened to overwrite them (user: 2-1 after 1-3 showed artifacts).
+.proc smooth_clear_strips
+    ldx #0                       ; top ex-HUD strip (scanlines 0-15)
+    jsr smooth_blank16
+    ldx #144                     ; lower strip (scanlines 144-159) -- belt & braces
+    jmp smooth_blank16
 .endproc
 .endif
 
@@ -4856,6 +4869,9 @@ W3HDR = $B540                    ; W3 headers: PINNED bank-1 tail (pack_banks
     inx
     cpx #24
     bne @col
+.ifdef SMOOTH
+    jsr smooth_clear_strips      ; flavor (b): the ex-HUD strips draw_column skips must
+.endif                           ; be blanked on every entry (else prior-level leftovers)
     rts
 .endproc
 
