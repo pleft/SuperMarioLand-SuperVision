@@ -81,5 +81,9 @@ displayed lines, leaving the ring's slack lines 160–169 with the last level's
 columns, which the title's last row read through its spill (a 40 px sliver at
 the bottom right) — `clear_vram` now clears the whole 8K (`ldx #32`, a
 size-neutral constant). Gate: a game over at scroll 0 and one after 400 frames
-of running now give pixel-identical title frames in both flavors. Current
-level-8 gate value: `cb928e255c93`.
+of running now give pixel-identical title frames in both flavors. (3) The
+level-select digits draw through `bgc`, the variable BG-charset base, which the
+last level had pointed at its own charset (W3: a patched RAM copy) — garbled
+"1-1"; `go_title` now re-seeds `bgc = bg_chardata` first. Gate: the game-over
+title reached from 1-1 and from 3-3 differ by 0 px. Current level-8 gate value:
+`cf7932be41df` (the 3-3 gate ends on that title).
