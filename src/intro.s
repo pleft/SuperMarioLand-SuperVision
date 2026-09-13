@@ -1,7 +1,7 @@
 ; ---------------------------------------------------------------------------
 ; INTRO -- the port's own pre-title boot splash (docs/48), in the spirit of the
 ; Watara Supervision / Travellmate boot logo but ORIGINAL: the author tag
-; "ELEFAS" rises smoothly from the bottom of a white screen to the centre while
+; "ELEFAS-RETRODEV" rises smoothly from the bottom of a white screen to the centre while
 ; a rising C-E-G-C major arpeggio chimes on square 1; it holds, then returns to
 ; the boot flow (reset then clears + draws the title).
 ;
@@ -25,7 +25,8 @@ CH1_LEN     = $2013
 
 TOP_BOTTOM  = 136               ; word starts here (row 17) ...
 TOP_CENTRE  = 72                ; ... and rises to here (row 9)
-CENTER_DCOL = 14                ; 6 tiles centred in 20 cols -> cols 7..12
+CENTER_DCOL = 4                 ; 15 tiles centred in 20 cols -> cols 2..16
+NLETTERS    = 15
 
 .segment "INTRO"                ; page 13 $8000 (run there first), then $1500
 
@@ -73,7 +74,7 @@ run:
     jsr clear_vram               ; phase (E-gate). Then clear + run the SML title (waits
     jmp title_screen             ; for Start, sets cur_level) and return to reset
 
-; --- draw the 6 "ELEFAS" tiles at the current top scanline (tmpL2) ---
+; --- draw the 15 "ELEFAS-RETRODEV" tiles at the current top scanline (tmpL2) ---
 .proc draw_word
     stz tmpL                     ; letter index (X is clobbered by set_dst's ldx dy)
 @l:
@@ -91,12 +92,12 @@ run:
     jsr blit_tile
     inc tmpL
     lda tmpL
-    cmp #6
+    cmp #NLETTERS
     bne @l
     rts
 .endproc
 
-; --- white-fill the 6-tile band at the current top scanline ---
+; --- white-fill the 15-tile band at the current top scanline ---
 .proc blank_word
     stz tmpL
 @l:
@@ -111,7 +112,7 @@ run:
     jsr blit_blank
     inc tmpL
     lda tmpL
-    cmp #6
+    cmp #NLETTERS
     bne @l
     rts
 .endproc
@@ -156,5 +157,6 @@ run:
     rts
 .endproc
 
-letters: .byte $0E,$15,$0E,$0F,$0A,$1C   ; E L E F A S (HUD font, A=$0A..Z=$23)
+letters: .byte $0E,$15,$0E,$0F,$0A,$1C,$29,$1B,$0E,$1D,$1B,$18,$0D,$0E,$1F
+         ; E L E F A S - R E T R O D E V (HUD font, A=$0A..Z=$23, '-'=$29)
 notes:   .byte 235,186,157,117           ; C5 E5 G5 C6 (period ~122900/Hz)

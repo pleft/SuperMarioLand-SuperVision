@@ -3,7 +3,7 @@
 An original pre-title boot splash, in the spirit of the Watara Supervision /
 Travellmate boot logo (studied from the TOSEC set: "TRAVELL" slides up-left and
 "MATE™" slides in from the right, black-on-white, then the game title). Ours:
-the author tag **ELEFAS** rises smoothly from the bottom of a white screen to
+the author tag **ELEFAS-RETRODEV** rises smoothly from the bottom of a white screen to
 the centre while a rising **C‑E‑G‑C** major arpeggio chimes on square 1; it
 holds, then the screen clears and the normal SML title runs. Nothing is copied —
 original layout, original jingle, the porter's nickname.
@@ -32,7 +32,7 @@ always reachable with bank 0 mapped. The solution mirrors `boot6`/`w3aux`:
   maps bank 0, clears, animates, and — to keep `clear_vram`+`title_screen` off
   the FIXED bank — clears and tail-calls the title itself before returning to the
   boot flow. The blob must stay ≤ 256 bytes (the stub copies one page); it is
-  currently 210.
+  currently 228 (15 tiles, cols 2–16; the HUD font's `-` is `$29`).
 
 ## Gameplay-neutral
 
