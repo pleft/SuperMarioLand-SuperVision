@@ -4381,14 +4381,15 @@ W3HDR = $B540                    ; W3 headers: PINNED bank-1 tail (pack_banks
                                  ; asserts 1-1's region ends below, and lays
                                  ; the W3 far/stub/bg-charset after)
 .proc next_level
-    stz goal_phase
-    stz room_mode
     lda cur_level
     inc a
     cmp #NUM_LEVELS
     bcc :+
     lda #0                       ; past the last shipped level: wrap to 1-1
 :   sta cur_level
+start:                           ; go_title enters HERE (cur_level already chosen by the
+    stz goal_phase               ; title): the same clean level init minus the increment
+    stz room_mode
     jsr load_level               ; map the new bank + rebind the level pointers
     jsr ovl_bind                 ; window vectors for this level's overlay
     lda surf_map
@@ -8095,6 +8096,10 @@ death_curve:                     ; ROM $0C19 verbatim (signed y deltas + $7F end
     jsr apply_view               ; but XSCROLL still held the level's scroll_s -> the title
                                  ; appeared shifted left by it (user). Re-derive the view
                                  ; from the ring with scroll_s=0 and make it live now.
+    lda #<bg_chardata            ; the level-select digits draw through bgc, which the
+    sta bgc                      ; last level pointed at ITS charset (W3: a patched RAM
+    lda #>bg_chardata            ; copy; docs/33) -> garbled "1-1" (user). Re-seed it to
+    sta bgc+1                    ; bank 0's font, as reset does before the boot title.
     jsr clear_vram               ; wipe the frozen level under the GAME OVER text
     jsr title_screen             ; waits for Start, sets cur_level
     stz score                    ; a NEW game: score/coins to 0, lives back to 2 (next_level
@@ -8103,9 +8108,8 @@ death_curve:                     ; ROM $0C19 verbatim (signed y deltas + $7F end
     stz coins
     lda #2
     sta lives
-    dec cur_level                ; next_level RE-increments -- so it starts the level the
-    jmp next_level               ; title chose, with a full clean init (clears objects, cam,
-.endproc                         ; tile-mods, mario, hud, music; the state game_start assumes)
+    jmp next_level::start        ; the full clean level init (objects, tile-mods, cam, mario,
+.endproc                         ; hud, music -- the state game_start assumes), minus the increment
 
 ; title_lvl_show: draw the level-select pick ("1-1".."1-3") at the title's
 ; BOTTOM right (user request: keep the top clean).
