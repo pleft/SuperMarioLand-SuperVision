@@ -29,8 +29,8 @@ and [`docs/`](docs/) for the per-subsystem reverse-engineering notes.
 
 The boot sequence opens with an original pre-title splash — the porter's tag
 "ELEFAS-" and "RETRODEV" sliding in from either side to meet mid-screen, then a
-small chime, in the spirit of the Supervision/Travellmate boot logo (see `docs/48`) — then the faithful SML title. The splash plays on
-power-on only; a game over returns to the title, as on the Game Boy.
+small chime, in the spirit of the Supervision/Travellmate boot logo (see `docs/48`) — then the faithful SML title. It plays on power-on
+and after a game over (the game restarts from scratch).
 
 One known cosmetic gap is documented: the 4-3 pipe fists draw in front of their
 pipe instead of behind it (a renderer limitation; see `docs/45`).

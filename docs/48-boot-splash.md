@@ -50,40 +50,22 @@ leaks into the level — svgold levels 0–8 are byte-identical to the pre-splas
 build and battery31 passes. It runs in both flavors (each rebuilds its own blob
 against its own ABI). The title screen (level-select, sound test) is unchanged.
 
-## Game over returns to the title, not the splash
+## Game over restarts from the splash (decision)
 
-The splash is a power-on thing. `game_over` used to end in `jmp reset`, which
-replayed the ELEFAS rise on every game over (user report). It now maps bank 0
-and jumps to `go_title` (bank 0, next to `title_screen`): `clear_vram`,
-`title_screen` (waits for Start, sets `cur_level`), zero score/coins, lives = 2,
-then `dec cur_level` and `jmp next_level` — `next_level` re-increments and does
-the full clean level init (objects, tile-mods, camera, Mario, HUD, music) that
-`reset`'s ZP/WRAM clear used to provide. Verified with a forced 0-lives death:
-death → GAME OVER strip → SML title; the original's flow.
-
-The five FIXED bytes for the tail (`lda #0`/`jsr bank_set`/`jmp go_title` vs
-`jmp reset`) are paid inside `game_over` itself (its glyph loop inlined, a
-provably redundant `clc` dropped), so `game_over`'s size — and every address
-after it — is unchanged. That matters: 3-3 sits on the frame-overrun cliff, and
-any shift there relands a sprite a frame later (docs/36, docs/47).
+`game_over` ends in `jmp reset`: a game over restarts the ROM from the boot
+splash, exactly like power-on. A title-only re-entry was built and shipped for a
+day (`go_title`: clear + title + score/lives reset + `next_level`'s init) and each
+round of testing found another piece of state the boot path had been clearing
+for free — the level's `scroll_s` still in `XSCROLL` (title shifted left), ring
+lines 160–169 never cleared (a sliver on the title's last row), `bgc` still
+pointing at the last level's charset (garbled level-select digits) — until the
+user called it: the boot path re-initialises stack, ZP, WRAM, ring and VRAM in one
+place, so it cannot carry anything over, and the splash replaying on a game over
+is the cheaper price. Two side fixes from that work stay because they are correct
+on their own: `clear_vram` clears the whole 8K (the ring's slack lines 160–169
+included), and `next_level` is unchanged in behaviour.
 
 **svgold note:** level 8's R900 hold runs blind into 3-3's opening and loses all
-three lives by ~f400, so the gate's frame 900 is *after* game over. Its hash
-therefore legitimately changed from "mid-splash/reboot" to "title screen";
-levels 0–7 are unchanged. Re-baseline level 8 to the new value; it is the only
-level whose gate reaches game over.
-
-Two follow-ups the first cut missed (user reports): (1) the title is drawn
-through the ring (`set_dst` adds `ring_b`) but `XSCROLL` still carried the
-level's `scroll_s`, so the title sat shifted left by it — `go_title` now zeroes
-`scroll_s` and `jsr apply_view` first; (2) `clear_vram` cleared only the 160
-displayed lines, leaving the ring's slack lines 160–169 with the last level's
-columns, which the title's last row read through its spill (a 40 px sliver at
-the bottom right) — `clear_vram` now clears the whole 8K (`ldx #32`, a
-size-neutral constant). Gate: a game over at scroll 0 and one after 400 frames
-of running now give pixel-identical title frames in both flavors. (3) The
-level-select digits draw through `bgc`, the variable BG-charset base, which the
-last level had pointed at its own charset (W3: a patched RAM copy) — garbled
-"1-1"; `go_title` now re-seeds `bgc = bg_chardata` first. Gate: the game-over
-title reached from 1-1 and from 3-3 differ by 0 px. Current level-8 gate value:
-`cf7932be41df` (the 3-3 gate ends on that title).
+three lives by ~f400, so its gate frame (900) is after the game over — i.e. in
+the reboot, mid-splash/title. Its hash therefore moves with any splash change;
+levels 0–7 are the real regression gate. Current level-8 value: `08272978eb98`.

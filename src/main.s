@@ -4358,9 +4358,11 @@ music_data:
     jsr @wait1
     dec b_gap
     bne @hold
-    lda #0                       ; GAME OVER -> the title screen (NOT the ELEFAS boot
-    jsr bank_set                 ; splash, which plays on power-on only). Map bank 0 (font
-    jmp go_title                 ; +title) then run the bank-0 clear+title+restart tail
+    jmp reset                    ; GAME OVER -> full restart from the boot splash (user's
+                                 ; call: a title-only re-entry must re-derive by hand every
+                                 ; piece of state the boot clears -- scroll, ring, bgc, VRAM
+                                 ; slack, stack -- and each one missed was a bug; reset
+                                 ; re-initialises all of it, exactly like power-on)
 @wait1:
     lda frame_flag
     beq @wait1
@@ -4387,8 +4389,7 @@ W3HDR = $B540                    ; W3 headers: PINNED bank-1 tail (pack_banks
     bcc :+
     lda #0                       ; past the last shipped level: wrap to 1-1
 :   sta cur_level
-start:                           ; go_title enters HERE (cur_level already chosen by the
-    stz goal_phase               ; title): the same clean level init minus the increment
+    stz goal_phase
     stz room_mode
     jsr load_level               ; map the new bank + rebind the level pointers
     jsr ovl_bind                 ; window vectors for this level's overlay
@@ -8088,28 +8089,7 @@ death_curve:                     ; ROM $0C19 verbatim (signed y deltas + $7F end
     rts
 .endproc
 
-; go_title: GAME OVER re-entry. Kept in bank 0 (TITLE0) with title_screen -- game_over
-; already maps bank 0 to reach it -- so the clear+title+restart tail costs FIXED only a
-; jmp, not the whole sequence. (FIXED is full; the ELEFAS splash plays on power-on only.)
-.proc go_title
-    stz scroll_s                 ; the title is drawn through the ring (set_dst adds ring_b)
-    jsr apply_view               ; but XSCROLL still held the level's scroll_s -> the title
-                                 ; appeared shifted left by it (user). Re-derive the view
-                                 ; from the ring with scroll_s=0 and make it live now.
-    lda #<bg_chardata            ; the level-select digits draw through bgc, which the
-    sta bgc                      ; last level pointed at ITS charset (W3: a patched RAM
-    lda #>bg_chardata            ; copy; docs/33) -> garbled "1-1" (user). Re-seed it to
-    sta bgc+1                    ; bank 0's font, as reset does before the boot title.
-    jsr clear_vram               ; wipe the frozen level under the GAME OVER text
-    jsr title_screen             ; waits for Start, sets cur_level
-    stz score                    ; a NEW game: score/coins to 0, lives back to 2 (next_level
-    stz score+1                  ; preserves them for level-to-level, so reset them here)
-    stz score+2
-    stz coins
-    lda #2
-    sta lives
-    jmp next_level::start        ; the full clean level init (objects, tile-mods, cam, mario,
-.endproc                         ; hud, music -- the state game_start assumes), minus the increment
+                         ; hud, music -- the state game_start assumes), minus the increment
 
 ; title_lvl_show: draw the level-select pick ("1-1".."1-3") at the title's
 ; BOTTOM right (user request: keep the top clean).
