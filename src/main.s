@@ -8091,6 +8091,10 @@ death_curve:                     ; ROM $0C19 verbatim (signed y deltas + $7F end
 ; already maps bank 0 to reach it -- so the clear+title+restart tail costs FIXED only a
 ; jmp, not the whole sequence. (FIXED is full; the ELEFAS splash plays on power-on only.)
 .proc go_title
+    stz scroll_s                 ; the title is drawn through the ring (set_dst adds ring_b)
+    jsr apply_view               ; but XSCROLL still held the level's scroll_s -> the title
+                                 ; appeared shifted left by it (user). Re-derive the view
+                                 ; from the ring with scroll_s=0 and make it live now.
     jsr clear_vram               ; wipe the frozen level under the GAME OVER text
     jsr title_screen             ; waits for Start, sets cur_level
     stz score                    ; a NEW game: score/coins to 0, lives back to 2 (next_level
@@ -11646,12 +11650,15 @@ HUD_SPLIT_LINE = 16              ; timer reload = split scanline (IPeriod=256 cy
 .endproc
 
 ; ---------------------------------------------------------------------------
-; clear_vram: zero the 6400-byte framebuffer ($4000..$58FF).
+; clear_vram: zero the whole 8K of VRAM ($4000..$5FFF): the 160 displayed lines
+; PLUS the ring's slack lines 160-169 and the $5FE0 seam mirror. Clearing only the
+; 160 lines left ring lines 160+ holding the last level's columns, and a GAME OVER
+; -> title (ring not at origin) showed them as a spill on the title's last row.
 .proc clear_vram
     stz ptr                      ; <VRAM = 0
     lda #>VRAM
     sta ptr+1
-    ldx #30                  ; 30 pages = 7680 bytes = full 160-line framebuffer (stride $30)
+    ldx #32                  ; 32 pages = 8192 bytes: 170 ring lines (stride $30) + mirror
     lda #0
 @page:
     ldy #0

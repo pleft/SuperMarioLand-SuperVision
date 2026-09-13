@@ -63,6 +63,17 @@ any shift there relands a sprite a frame later (docs/36, docs/47).
 
 **svgold note:** level 8's R900 hold runs blind into 3-3's opening and loses all
 three lives by ~f400, so the gate's frame 900 is *after* game over. Its hash
-therefore legitimately changed from "mid-splash/reboot" to "title screen"
-(`36977d829a47` → `be6beae3ad44`); levels 0–7 are unchanged. Re-baseline
-level 8 to the new value; it is the only level whose gate reaches game over.
+therefore legitimately changed from "mid-splash/reboot" to "title screen";
+levels 0–7 are unchanged. Re-baseline level 8 to the new value; it is the only
+level whose gate reaches game over.
+
+Two follow-ups the first cut missed (user reports): (1) the title is drawn
+through the ring (`set_dst` adds `ring_b`) but `XSCROLL` still carried the
+level's `scroll_s`, so the title sat shifted left by it — `go_title` now zeroes
+`scroll_s` and `jsr apply_view` first; (2) `clear_vram` cleared only the 160
+displayed lines, leaving the ring's slack lines 160–169 with the last level's
+columns, which the title's last row read through its spill (a 40 px sliver at
+the bottom right) — `clear_vram` now clears the whole 8K (`ldx #32`, a
+size-neutral constant). Gate: a game over at scroll 0 and one after 400 frames
+of running now give pixel-identical title frames in both flavors. Current
+level-8 gate value: `cb928e255c93`.
