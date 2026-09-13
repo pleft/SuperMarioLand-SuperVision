@@ -675,20 +675,22 @@ main_loop:
     lda vxp
     lsr
     lsr                          ; X = XSCROLL byte 0..47
-    beq @noedge                  ; byte-aligned at 0: nothing spills
-    tay                          ; Y = X (bytes to blank: [0..X-1])
-    ldx vyp                      ; row48[vyp+16] direct (display reads PHYSICAL lines via
-    lda row48_lo+16,x            ; vyp/vxp; ring_b is already folded in -- NOT set_dst,
+    clc
+    adc #48                      ; Y = 48+X: line 16's byte X, indexed from LINE 15's start
+    tay
+    ldx vyp                      ; row48[vyp+15] direct (display reads PHYSICAL lines via
+    lda row48_lo+15,x            ; vyp/vxp; ring_b is already folded in -- NOT set_dst,
     sta tmpL2                    ; whose ring map would hit the visible bytes). +$4000
-    lda row48_hi+16,x            ; via ora (row48_hi < $20, no carry)
+    lda row48_hi+15,x            ; via ora (row48_hi < $20, no carry)
     ora #$40
     sta tmpH2
     lda #0
-@ledge: dey                      ; blank [X-1 .. 0]; byte X (scanline 16's first) is kept
-    sta (tmpL2),y
-    bne @ledge
-@noedge:
-.endif
+@ledge: dey                      ; blank line16[X-1 .. 0] (byte X, scanline 16's first, is
+    sta (tmpL2),y                ; kept), then ONE more: line15[47]. That byte is the
+    cpy #48                      ; playfield's left column while X=47 and never in [0..X-1],
+    bcs @ledge                   ; so when the ring's row ticks (vyp+1) and that line becomes
+.endif                           ; the seam, it showed as a 4px tab (user). X=0 is safe: the
+                                 ; loop runs once, on line15[47], and exits.
     lda hud_dirty
     beq :+
     stz hud_dirty

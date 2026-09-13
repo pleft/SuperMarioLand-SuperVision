@@ -92,7 +92,11 @@ bytes `[0..X-1]` (X = `vxp>>2`), which only scanline 15 reads (scanline 16 reads
 physical line), NOT `set_dst`, whose ring mapping lands on the visible bytes and
 erases the playfield (measured: scanline 16 dropped to 0). Result on the ship
 build (1-1, 240 frames of run+jump): scanline 15 160 px → **0 px**, scanline 16
-intact, bottom band clean. Smooth-only; ~30 bytes.
+intact, bottom band clean. Smooth-only; ~30 bytes. One follow-up: the blank is
+indexed from line `vyp+15` with `Y = 48+X` and loops while `Y >= 48`, so its last
+pass also clears the seam line's byte 47 -- that byte is the playfield's left
+column while X=47 (never inside `[0..X-1]`), and once the ring's row counter
+ticks it became the seam and showed as a single 4 px tab (user report).
 
 ### Paying for it: the flavor-a cycle law
 
