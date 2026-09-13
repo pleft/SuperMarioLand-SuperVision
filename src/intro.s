@@ -1,18 +1,18 @@
 ; ---------------------------------------------------------------------------
 ; INTRO -- the port's own pre-title boot splash (docs/48), in the spirit of the
-; Watara Supervision / Travellmate boot logo but ORIGINAL: the author tag
-; "ELEFAS-RETRODEV" rises smoothly from the bottom of a white screen to the centre while
-; a rising C-E-G-C major arpeggio chimes on square 1; it holds, then returns to
-; the boot flow (reset then clears + draws the title).
+; Watara Supervision / Travellmate boot logo but ORIGINAL: on a white screen,
+; "ELEFAS-" slides in from the left and "RETRODEV" from the right, both on the
+; screen's middle row, and meet in the centre; then a rising C-E-G-C major
+; arpeggio chimes on square 1; it holds, then the title runs.
 ;
 ; It is stored in a free 512K page (13). reset maps that page and JSRs its
 ; $8000; the stub below (running there) copies the whole blob into the $1500 RAM
 ; overlay window, jumps into that copy, maps bank 0 back (so the HUD font at
 ; bg_chardata is readable and the title is reachable) and runs. It calls the
-; always-mapped FIXED primitives (set_dst/blit_tile/get_tile_src/blit_blank/
+; always-mapped FIXED primitives (set_dst/get_tile_src/blit_tile/blit_blank/
 ; bank_set) via the engine ABI, exactly like the W2/W3/E43 overlays. Keeping the
 ; relocation here (not in reset) keeps the FIXED bank within budget. The blob
-; must stay <= 256 bytes (the stub copies one page).
+; must stay <= 256 bytes (the stub copies one page) -- asserted at the end.
 ; ---------------------------------------------------------------------------
 .setcpu "65C02"
 .include "w2abi.inc"             ; engine addresses (dcol, dy, set_dst, blit_tile,
@@ -23,10 +23,17 @@ CH1_FHI     = $2011              ; then silences it before returning
 CH1_VOLDUTY = $2012              ; bit6 enable | bits5:4 duty | bits3:0 volume
 CH1_LEN     = $2013
 
-TOP_BOTTOM  = 136               ; word starts here (row 17) ...
-TOP_CENTRE  = 72                ; ... and rises to here (row 9)
-CENTER_DCOL = 4                 ; 15 tiles centred in 20 cols -> cols 2..16
-NLETTERS    = 15
+ROW_Y       = 72                ; the words' scanline (screen middle: row 9)
+NLETTERS    = 15                ; "ELEFAS-" (7) + "RETRODEV" (8)
+NLEFT       = 7
+LEFT_END    = 4                 ; final dcol of the left word  (cols 2..8)
+RIGHT_END   = 18                ; final dcol of the right word (cols 9..16)
+STEPS       = 30                ; both words travel 30 dcol (4 px) steps
+LEFT_START  = <(LEFT_END - STEPS)   ; 230: entirely off the left edge (wraps in)
+RIGHT_START = RIGHT_END + STEPS     ; 48:  entirely in / past the off-screen margin
+
+; zero-page scratch (engine ABI): tmpL = letter index, tmpH = op (0 draw / 1 blank),
+; tmpL2 = left word dcol, tmpH2 = right word dcol, tmpH3 = jingle counter.
 
 .segment "INTRO"                ; page 13 $8000 (run there first), then $1500
 
@@ -44,23 +51,25 @@ run:
     lda #0
     jsr bank_set                 ; map bank 0: the HUD font + title live there
     jsr clear_vram               ; white screen for the splash
-    lda #TOP_BOTTOM
-    sta tmpL2                    ; tmpL2 = the word's current top scanline
-    jsr draw_word                ; appear at the bottom
-@rise:
-    jsr wait1                    ; slow, deliberate climb: 1 px every 3 frames --
-    jsr wait1                    ; the rise plays in silence, like the original
+    lda #LEFT_START
+    sta tmpL2
+    lda #RIGHT_START
+    sta tmpH2
+@slide:
+    jsr wait1                    ; one 4 px step every 2 frames: ~1.2 s for the slide
     jsr wait1
+    lda #1
+    sta tmpH
+    jsr words                    ; erase both words at their old positions
+    inc tmpL2                    ; left word moves right, right word moves left
+    dec tmpH2
+    stz tmpH
+    jsr words                    ; draw both at the new positions
     lda tmpL2
-    cmp #TOP_CENTRE
-    beq @settled                 ; reached the centre
-    jsr blank_word               ; erase the old position (8 rows)
-    dec tmpL2                    ; 1 px up (top 1 px new, bottom 1 px cleared)
-    jsr draw_word
-    bra @rise
-@settled:
-    stz tmpH3                    ; NOW that it has settled, play the chime, then hold
-    ldx #64                      ; hold the settled logo while the chime rings out
+    cmp #LEFT_END
+    bne @slide                   ; (the right word arrives the same step)
+    stz tmpH3                    ; NOW that they have met, play the chime, then hold
+    ldx #64                      ; hold the settled tag while the chime rings out
 @hold:
     jsr wait1
     phx                          ; jingle clobbers X (note index) -- keep the hold count
@@ -74,42 +83,40 @@ run:
     jsr clear_vram               ; phase (E-gate). Then clear + run the SML title (waits
     jmp title_screen             ; for Start, sets cur_level) and return to reset
 
-; --- draw the 15 "ELEFAS-RETRODEV" tiles at the current top scanline (tmpL2) ---
-.proc draw_word
-    stz tmpL                     ; letter index (X is clobbered by set_dst's ldx dy)
+; --- words: draw (tmpH=0) or white-fill (tmpH=1) all 15 tiles at their current
+;     positions. Tile i < NLEFT sits at tmpL2 + 2i, the rest at tmpH2 + 2(i-7).
+;     A tile whose dcol is >= 47 (off the left edge, wrapped, or past the ring
+;     margin) is skipped: it would land on another line. ---
+.proc words
+    stz tmpL
 @l:
     lda tmpL
-    asl
-    clc
-    adc #CENTER_DCOL
+    cmp #NLEFT
+    bcc @left
+    sbc #NLEFT                   ; C set: i - 7
+    asl                          ; (<= 14, C clear)
+    adc tmpH2
+    bra @have
+@left:
+    asl                          ; (<= 12, C clear)
+    adc tmpL2
+@have:
+    cmp #47                      ; a tile is 2 bytes: dcol 47 would wrap its 2nd byte
+    bcs @skip                    ; onto the NEXT line's byte 0 (a 4 px ghost at x=0)
     sta dcol
-    lda tmpL2
+    lda #ROW_Y
     sta dy
     jsr set_dst
+    lda tmpH
+    bne @blank
     ldx tmpL
     lda letters,x
     jsr get_tile_src
     jsr blit_tile
-    inc tmpL
-    lda tmpL
-    cmp #NLETTERS
-    bne @l
-    rts
-.endproc
-
-; --- white-fill the 15-tile band at the current top scanline ---
-.proc blank_word
-    stz tmpL
-@l:
-    lda tmpL
-    asl
-    clc
-    adc #CENTER_DCOL
-    sta dcol
-    lda tmpL2
-    sta dy
-    jsr set_dst
+    bra @skip
+@blank:
     jsr blit_blank
+@skip:
     inc tmpL
     lda tmpL
     cmp #NLETTERS
@@ -125,7 +132,7 @@ run:
     rts
 .endproc
 
-; --- one rising note every 8 frames (C-E-G-C), sustained into the next ---
+; --- one rising note every 4 frames (C-E-G-C), sustained into the next ---
 .proc jingle
     lda tmpH3
     cmp #24
@@ -160,3 +167,5 @@ run:
 letters: .byte $0E,$15,$0E,$0F,$0A,$1C,$29,$1B,$0E,$1D,$1B,$18,$0D,$0E,$1F
          ; E L E F A S - R E T R O D E V (HUD font, A=$0A..Z=$23, '-'=$29)
 notes:   .byte 235,186,157,117           ; C5 E5 G5 C6 (period ~122900/Hz)
+
+.assert * - $1500 <= 256, error, "intro blob exceeds the 256-byte page the stub copies"

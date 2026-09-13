@@ -3,9 +3,13 @@
 An original pre-title boot splash, in the spirit of the Watara Supervision /
 Travellmate boot logo (studied from the TOSEC set: "TRAVELL" slides up-left and
 "MATE™" slides in from the right, black-on-white, then the game title). Ours:
-the author tag **ELEFAS-RETRODEV** rises smoothly from the bottom of a white screen to
-the centre while a rising **C‑E‑G‑C** major arpeggio chimes on square 1; it
-holds, then the screen clears and the normal SML title runs. Nothing is copied —
+on a white screen the author tag comes in as two words — **ELEFAS-** slides in
+from the left edge and **RETRODEV** from the right, both on the screen's middle
+row, one 4 px (byte) step every 2 frames, and meet in the centre (~1.2 s); then a
+rising **C‑E‑G‑C** major arpeggio chimes on square 1; it holds, then the screen
+clears and the normal SML title runs. (Horizontal steps are 4 px because the
+blitter is byte-aligned; a tile whose column is off-screen or past the ring
+margin is skipped, which is what lets the words enter from beyond the edges.) Nothing is copied —
 original layout, original jingle, the porter's nickname.
 
 ## Why it needed infrastructure
@@ -29,10 +33,12 @@ always reachable with bank 0 mapped. The solution mirrors `boot6`/`w3aux`:
 - **Self-relocating.** Running at page 13's `$8000`, the blob's stub copies one
   page into the `$1500` RAM window and jumps into that copy (page 13 has no
   prefix, so the code cannot execute there once bank 0 is mapped back). It then
-  maps bank 0, clears, animates, and — to keep `clear_vram`+`title_screen` off
+  maps bank 0, clears, animates (one shared `words` routine draws or
+  white-fills both words, clipping off-screen tiles), and — to keep `clear_vram`+`title_screen` off
   the FIXED bank — clears and tail-calls the title itself before returning to the
   boot flow. The blob must stay ≤ 256 bytes (the stub copies one page); it is
-  currently 228 (15 tiles, cols 2–16; the HUD font's `-` is `$29`).
+  currently 226 (15 tiles, cols 2–16; the HUD font's `-` is `$29`), and the
+  source asserts the limit.
 
 ## Gameplay-neutral
 
