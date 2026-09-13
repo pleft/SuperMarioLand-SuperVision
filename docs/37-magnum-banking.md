@@ -180,3 +180,35 @@ memory (128K = 283648) does not apply to this build.
 Do NOT grow the image before the selection is converted: past 131072 bytes
 Potator switches to MAGNUM and the existing 3-bit writes stop banking, so the
 two changes have to land together.
+
+## Trap 3, resolved (2026-09-09): the SuperPico MAGNUM firmware
+
+The magic-channel idea above was refined and IMPLEMENTED end to end (port + Pico
+firmware). Two hardware facts forced the final shape:
+
+- **Register writes are address-only (docs/28).** A magic *read* (`lda base+page`)
+  would need `base` in an always-mapped region, but FIXED is full (2 free bytes:
+  the charset fills $EFF8-$FFF7, vectors $FFFA). So the channel is a magic
+  *write* instead: unmapped writes ARE address-visible (docs/28's own $3111
+  data point), and a write needs no readable ROM behind it.
+- The channel is **`sta $3F00+page`** (`src/magbank.inc`, macro `MAGBANK` /
+  `MAGBANKX`). `$3F00-$3F1F` is unmapped and untouched by the rest of the port
+  (verified), so the write is inert in Potator and on a real MAGNUM cart. The
+  Pico reads the page from A0..A4 of the write address; it never needs the data.
+
+Placed after all 16 `$2021` writes. To stay inside the tight banks, three call
+sites were restructured (all behaviour-neutral -- GOLD-OK + battery31 ALL PASS):
+
+- `set_bank` (prefix) and `cold_copy`'s `@map` (FIXED) now `jmp bank_set`; the
+  single FIXED-resident `bank_set` carries the one magic write. The prefix and
+  FIXED both SHRINK, which is what let the 2-3 bank (2 bytes free) still pack.
+- `w3_getop` (runs from the $1500 RAM window, survives a switch) now
+  `jsr w3_bank` for both its switches instead of two inline dances.
+- `w3stub`'s two switches share one `@sw` helper (also RAM-resident at $1F80).
+
+Firmware: `firmware/main.c` (see `firmware/README.md`). It is zwenergy's serve
+loop plus (1) the $3F0x snoop -> `bankOffset = page<<15` and (2) rom[] served
+from flash (XIP, `const`) with the serve loop pinned in SRAM, because 512K does
+not fit the RP2040's 264K. **Unvalidated on hardware:** the XIP cache-miss cost
+on a bank switch, and the glitch-immunity of the snoop (a real MAGNUM cart uses
+#WR, which SuperPico does not route). Both can only be confirmed on the cart.

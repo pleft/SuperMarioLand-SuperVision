@@ -458,6 +458,7 @@ probe_stripes:                   ; the full proven liturgy + stripes, FIXED-ROM
     jsr $8000                    ; the splash self-relocates, plays, then clears the
                                  ; screen and runs the title itself (waits for Start),
                                  ; and returns -- keeping clear_vram+title off FIXED
+game_start:                      ; GAME OVER re-enters here after its own title pass
     jsr clear_vram
     jsr load_level               ; map the bank + bind level pointers/limits to its header
     jsr ovl_bind                 ; window vectors for this level's overlay
@@ -663,7 +664,31 @@ main_loop:
 :   lda water_on                 ; 1-3: the $5D shore tiles shimmer every 8 frames
     beq :+
     jsr l3_water
-:   jsr render_all               ; sprites: overlap-safe erase set -> erases -> draws
+:
+    jsr render_all               ; sprites: overlap-safe erase set -> erases -> draws
+.ifdef SMOOTH
+    ; kill the "1px line" at the sky/playfield seam: on-screen scanline 15 reads
+    ; 40 bytes from the playfield XSCROLL byte (vxp>>2), spilling past line 15's
+    ; 48-byte end into the first playfield line (PHYSICAL line vyp+16) -- terrain
+    ; where sky belongs (the ring's downward spill; docs/27). Blank that spilled-into
+    ; region, line 16's bytes [0..X-1] (scanline 16 itself reads only [X..47]).
+    lda vxp
+    lsr
+    lsr                          ; X = XSCROLL byte 0..47
+    beq @noedge                  ; byte-aligned at 0: nothing spills
+    tay                          ; Y = X (bytes to blank: [0..X-1])
+    ldx vyp                      ; row48[vyp+16] direct (display reads PHYSICAL lines via
+    lda row48_lo+16,x            ; vyp/vxp; ring_b is already folded in -- NOT set_dst,
+    sta tmpL2                    ; whose ring map would hit the visible bytes). +$4000
+    lda row48_hi+16,x            ; via ora (row48_hi < $20, no carry)
+    ora #$40
+    sta tmpH2
+    lda #0
+@ledge: dey                      ; blank [X-1 .. 0]; byte X (scanline 16's first) is kept
+    sta (tmpL2),y
+    bne @ledge
+@noedge:
+.endif
     lda hud_dirty
     beq :+
     stz hud_dirty
@@ -890,9 +915,9 @@ main_loop:
     stx map_ptr
     ldy mrow
     lda (map_ptr),y
-    jmp map_transform
+    bra map_transform
 @off:
-    jmp map_offmap
+    bra map_offmap
 .endproc
 
 ; map_transform: A = a RAW map tile -> the effective tile. The used-block /
@@ -1080,10 +1105,16 @@ himod = $1C00                    ; windowed broken/used overlay for cols >= 360 
 
 .proc mod_set
     jsr mod_ptr
+.ifdef SMOOTH
+    lda (map_ptr)                ; flavor (b) byte reclaim (no raster split -> cycle-safe)
+    ora tmpL
+    sta (map_ptr)
+.else
     ldy #0
     lda (map_ptr),y
     ora tmpL
     sta (map_ptr),y
+.endif
     rts
 .endproc
 
@@ -4210,7 +4241,8 @@ music_data:
 .endif
 @clear:
 .ifdef SMOOTH
-    jsr smooth_hide_hud          ; flavor (b): blank the HUD rows back to sky
+    ldx vyp                      ; flavor (b): blank the ex-HUD top strip back to sky
+    jsr smooth_blank16           ; (16 scanlines from vyp)
 .endif
     lda scroll_s                 ; unpause: restore the map band under the strip
     clc
@@ -4232,8 +4264,8 @@ music_data:
 ; it pinned to screen rows 0-1 (scroll-anchored via the view), and on unpause blank
 ; those 16 scanlines back to sky.
 .proc smooth_blank16             ; blank 16 scanlines from X (each a FULL 48-byte ring
-    lda #16                      ; line so any XSCROLL shows sky)
-    sta hf_row
+    lda #16                      ; line so any XSCROLL shows sky). Count is fixed: every
+    sta hf_row                   ; caller blanks a 16-line ex-HUD strip.
 @row:
     lda row48_lo,x
     sta tmpL2
@@ -4251,20 +4283,18 @@ music_data:
     bne @row
     rts
 .endproc
-.proc smooth_hide_hud            ; unpause: re-blank the ex-HUD (top 16 scanlines)
-    ldx vyp
-    jmp smooth_blank16
-.endproc
-; smooth_clear_strips: level/scene entry -> blank BOTH ex-HUD zones. draw_column
-; redraws scanlines 16-159 (so the lower strip is re-blanked by render_background)
-; but NEVER the top 16, so a prior level/ending's leftovers persisted there until
-; something happened to overwrite them (user: 2-1 after 1-3 showed artifacts).
-.proc smooth_clear_strips
-    ldx #0                       ; top ex-HUD strip (scanlines 0-15)
-    jsr smooth_blank16
-    ldx #144                     ; lower strip (scanlines 144-159) -- belt & braces
-    jmp smooth_blank16
-.endproc
+; smooth_top_edge: the user's "1px line". On-screen scanline 15 (the last ex-HUD
+; row) reads 40 bytes starting at the playfield XSCROLL byte (vxp>>2), so once the
+; scroll passes 8 bytes it SPILLS past line 15's 48-byte end into the first
+; playfield line (line vyp+16) -- terrain where sky belongs, growing rightward as
+; XSCROLL climbs (the ring's downward spill at the sky/playfield seam; docs/27).
+; That region is line 16's bytes [0..X-1], which scanline 16 itself never reads
+; (it reads [X..47]), so blank it to sky. Inlined at its one call site (FIXED full).
+; smooth_clear_strips: level/scene entry -> blank the TOP ex-HUD strip. draw_column
+; redraws scanlines 16-159 (the lower strip's 144-159 are its @dirt sky rows, so
+; render_background already blanks them) but NEVER the top 16, so a prior level's
+; leftovers persisted there until overwritten (user: 2-1 after 1-3 showed artifacts).
+; (Inlined at its one call site in render_background.)
 .endif
 
 ; game_over: blank screen + "GAME OVER" text, hold ~4s, then a full machine restart
@@ -4292,25 +4322,10 @@ music_data:
     lda #1
     sta rb_rows
     jsr restore_bg
-    jsr @text                    ; draw the 17 glyphs at the new pixel Y
-    lda b_awt
-    cmp #64
-    bne @anim
-    lda #255                     ; hold
-    sta b_gap
-@hold:
-    jsr @wait1
-    dec b_gap
-    bne @hold
-    jmp reset
-@wait1:
-    lda frame_flag
-    beq @wait1
-    stz frame_flag
-    jsr sfx_tick
-    jmp mus_tick
-; (tail call)
-@text:
+    ; draw the 17 glyphs at the new pixel Y. INLINED: the title tail below costs 5
+    ; FIXED bytes; paying them HERE (jsr/rts -4, a provably redundant clc -1) keeps
+    ; game_over's size unchanged, so nothing after it moves -- 3-3 sits on the
+    ; frame-overrun cliff and any address shift there relands a sprite a frame later.
     stz b_i
 @t:
     lda scroll_s                 ; screen-anchored: 17 tiles from screen x=0 (original WX=7)
@@ -4318,8 +4333,7 @@ music_data:
     lsr
     sta dcol
     lda b_i
-    asl
-    clc
+    asl                          ; b_i <= 16, so asl leaves C clear: no clc needed
     adc dcol
     sta dcol
     lda b_awt
@@ -4333,7 +4347,25 @@ music_data:
     lda b_i
     cmp #17
     bne @t
-    rts
+    lda b_awt
+    cmp #64
+    bne @anim
+    lda #255                     ; hold
+    sta b_gap
+@hold:
+    jsr @wait1
+    dec b_gap
+    bne @hold
+    lda #0                       ; GAME OVER -> the title screen (NOT the ELEFAS boot
+    jsr bank_set                 ; splash, which plays on power-on only). Map bank 0 (font
+    jmp go_title                 ; +title) then run the bank-0 clear+title+restart tail
+@wait1:
+    lda frame_flag
+    beq @wait1
+    stz frame_flag
+    jsr sfx_tick
+    jmp mus_tick
+; (tail call)
 @txt: .byte $2C,$2C,$2C,$2C,$2C,$10,$0A,$16,$0E,$2C,$2C,$18,$1F,$0E,$1B,$2C,$2C  ; $1CD7
 .endif
 .endproc
@@ -4877,8 +4909,9 @@ W3HDR = $B540                    ; W3 headers: PINNED bank-1 tail (pack_banks
     cpx #24
     bne @col
 .ifdef SMOOTH
-    jsr smooth_clear_strips      ; flavor (b): the ex-HUD strips draw_column skips must
-.endif                           ; be blanked on every entry (else prior-level leftovers)
+    ldx #0                       ; flavor (b): blank the TOP ex-HUD strip draw_column skips
+    jsr smooth_blank16           ; (else a prior level's leftovers persist; 144-159 are its
+.endif                           ; @dirt sky rows, already blanked above)
     rts
 .endproc
 
@@ -8052,6 +8085,22 @@ death_curve:                     ; ROM $0C19 verbatim (signed y deltas + $7F end
     rts
 .endproc
 
+; go_title: GAME OVER re-entry. Kept in bank 0 (TITLE0) with title_screen -- game_over
+; already maps bank 0 to reach it -- so the clear+title+restart tail costs FIXED only a
+; jmp, not the whole sequence. (FIXED is full; the ELEFAS splash plays on power-on only.)
+.proc go_title
+    jsr clear_vram               ; wipe the frozen level under the GAME OVER text
+    jsr title_screen             ; waits for Start, sets cur_level
+    stz score                    ; a NEW game: score/coins to 0, lives back to 2 (next_level
+    stz score+1                  ; preserves them for level-to-level, so reset them here)
+    stz score+2
+    stz coins
+    lda #2
+    sta lives
+    dec cur_level                ; next_level RE-increments -- so it starts the level the
+    jmp next_level               ; title chose, with a full clean init (clears objects, cam,
+.endproc                         ; tile-mods, mario, hud, music; the state game_start assumes)
+
 ; title_lvl_show: draw the level-select pick ("1-1".."1-3") at the title's
 ; BOTTOM right (user request: keep the top clean).
 .proc title_lvl_show
@@ -10340,7 +10389,7 @@ spawn_base = $1FF0
     adc #8
     sta dy
     ldx #STONE_T
-    bra draw_quad
+    jmp draw_quad
 ; (tail call)
 .endproc
 .segment "L12"
@@ -10659,7 +10708,7 @@ wcyc: .byte 2, 5, 1              ; port pose ids for GB metasprites 1, 2, 3
     stz do_flip
     stz do_yflip
     pla
-    jmp cold_unmap               ; back to the resident page
+    bra cold_unmap               ; back to the resident page
 .endproc
 
 ; cold_map / cold_unmap: the per-world SLICE lives in the COLD page of a W3/W4
@@ -10673,7 +10722,7 @@ wcyc: .byte 2, 5, 1              ; port pose ids for GB metasprites 1, 2, 3
     cmp #6
     bcc done
     lda cur_bank
-    jmp bank_set
+    bra bank_set
 done:
     rts
 .endproc
@@ -10686,7 +10735,7 @@ done:
     bcs :+
     lda #5
 :   ina
-    jmp bank_set
+    bra bank_set
 .endproc
 
 ; bank_set: A = MAGNUM page. set_bank's FIXED twin (shared by draw_16w3 and
@@ -11279,8 +11328,12 @@ ok:
 @arow:                           ; transparent byte as well. Bit-identical.
     lda do_flip
     bne @afl
+.ifdef SMOOTH
+    lda (cur_src)                ; flavor (b) byte reclaim (no raster split -> cycle-safe)
+.else
     ldy #0
     lda (cur_src),y
+.endif
     sta s0
     ldy #1
     lda (cur_src),y
@@ -11292,8 +11345,12 @@ ok:
     tax
     lda revpix,x
     sta s0
+.ifdef SMOOTH
+    lda (cur_src)
+.else
     ldy #0
     lda (cur_src),y
+.endif
     tax
     lda revpix,x
     sta s1
@@ -11378,14 +11435,22 @@ ok:
     tax
     lda revpix,x
     sta s0
-    ldy #0                       ; new-right = revpix[src left]
+.ifdef SMOOTH
+    lda (cur_src)                ; new-right = revpix[src left]
+.else
+    ldy #0
     lda (cur_src),y
+.endif
     tax
     ldy revpix,x
     bra @vals
 @noflip:
+.ifdef SMOOTH
+    lda (cur_src)                ; flavor (b) byte reclaim (cycle-safe: no raster split)
+.else
     ldy #0
     lda (cur_src),y
+.endif
     sta s0
     ldy #1
     lda (cur_src),y
@@ -11617,12 +11682,20 @@ HUD_SPLIT_LINE = 16              ; timer reload = split scanline (IPeriod=256 cy
     sta cur_dst+1
     ldx #8                       ; 8 rows
 @row:
+.ifdef SMOOTH
+    lda (cur_src)                ; left 4 px (flavor (b) byte reclaim; cycle-safe, no split)
+    sta (cur_dst)
+    ldy #1
+    lda (cur_src),y              ; right 4 px
+    sta (cur_dst),y
+.else
     ldy #0
     lda (cur_src),y              ; left 4 px
     sta (cur_dst),y
     iny
     lda (cur_src),y              ; right 4 px
     sta (cur_dst),y
+.endif
     lda cur_src                  ; src += 2
     clc
     adc #2
@@ -11673,12 +11746,20 @@ HUDSHADOW = $1D00                ; 16 rows x 40 bytes (stride 40), WRAM ($1D00-$
     sta cur_src+1
     ldx #8
 @row:
+.ifdef SMOOTH
+    lda (cur_src)                ; flavor (b) byte reclaim (cycle-safe: no raster split)
+    sta (cur_dst)
+    ldy #1
+    lda (cur_src),y
+    sta (cur_dst),y
+.else
     ldy #0
     lda (cur_src),y
     sta (cur_dst),y
     iny
     lda (cur_src),y
     sta (cur_dst),y
+.endif
     lda cur_src
     clc
     adc #2

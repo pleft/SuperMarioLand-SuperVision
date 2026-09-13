@@ -43,3 +43,26 @@ before the title, and uses `tmpH3` (not `b_i`) for its counter, so no state
 leaks into the level — svgold levels 0–8 are byte-identical to the pre-splash
 build and battery31 passes. It runs in both flavors (each rebuilds its own blob
 against its own ABI). The title screen (level-select, sound test) is unchanged.
+
+## Game over returns to the title, not the splash
+
+The splash is a power-on thing. `game_over` used to end in `jmp reset`, which
+replayed the ELEFAS rise on every game over (user report). It now maps bank 0
+and jumps to `go_title` (bank 0, next to `title_screen`): `clear_vram`,
+`title_screen` (waits for Start, sets `cur_level`), zero score/coins, lives = 2,
+then `dec cur_level` and `jmp next_level` — `next_level` re-increments and does
+the full clean level init (objects, tile-mods, camera, Mario, HUD, music) that
+`reset`'s ZP/WRAM clear used to provide. Verified with a forced 0-lives death:
+death → GAME OVER strip → SML title; the original's flow.
+
+The five FIXED bytes for the tail (`lda #0`/`jsr bank_set`/`jmp go_title` vs
+`jmp reset`) are paid inside `game_over` itself (its glyph loop inlined, a
+provably redundant `clc` dropped), so `game_over`'s size — and every address
+after it — is unchanged. That matters: 3-3 sits on the frame-overrun cliff, and
+any shift there relands a sprite a frame later (docs/36, docs/47).
+
+**svgold note:** level 8's R900 hold runs blind into 3-3's opening and loses all
+three lives by ~f400, so the gate's frame 900 is *after* game over. Its hash
+therefore legitimately changed from "mid-splash/reboot" to "title screen"
+(`36977d829a47` → `be6beae3ad44`); levels 0–7 are unchanged. Re-baseline
+level 8 to the new value; it is the only level whose gate reaches game over.

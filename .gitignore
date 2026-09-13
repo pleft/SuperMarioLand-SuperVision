@@ -46,3 +46,7 @@ level select and invincible.cheats
 *.gb.ram
 *.ss[0-9]
 *.ss
+
+# SuperPico firmware: generated ROM header (ROM-derived) + build
+firmware/rom.h
+firmware/build/

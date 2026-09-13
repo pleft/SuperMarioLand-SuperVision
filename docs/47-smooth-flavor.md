@@ -68,3 +68,45 @@ better). It applies to every scene automatically.
 - **Open cosmetic:** the blanked strips are white (palette value 0) while the sky
   is value 1, so there is a faint shade seam at the strip edges. The proper fix
   is to extend the playfield to the full 160-line height.
+
+## The "1px line" at the top strip (fixed)
+
+Symptom (user): a garbage line along the bottom of the blank top strip, growing
+rightward as the level scrolls, worst when Mario jumps up into the band.
+
+Cause — a ring downward-spill at the sky/playfield seam (docs/27). The display
+(`watara.c`) reads each scanline as 40 bytes starting at the XSCROLL byte
+(`vxp>>2`, which sweeps 0..47 in the ring) from PHYSICAL line `vyp+i`. Once the
+scroll passes 8 bytes, on-screen scanline 15 spills past line 15's 48-byte end
+into the first playfield line (physical `vyp+16`) and shows terrain where sky
+belongs. A VRAM dump proved it: physical line 15 was all-zero; the garbage is
+line 16's terrain bytes read through the spill. Every playfield line spills the
+same way, harmlessly, because the next line IS its horizontal continuation — the
+seam is the one place where the continuation is a different kind of content.
+The bottom strip is immune because `draw_column` draws it as sky per column, so
+its spill lands in more sky. Blanking line 15 (the obvious fix) does nothing.
+
+Fix — in the render loop, after `render_all`, blank physical line `vyp+16`'s
+bytes `[0..X-1]` (X = `vxp>>2`), which only scanline 15 reads (scanline 16 reads
+`[X..47]`). Addressed via `row48_lo+16,x`/`row48_hi+16,x` (the displayed
+physical line), NOT `set_dst`, whose ring mapping lands on the visible bytes and
+erases the playfield (measured: scanline 16 dropped to 0). Result on the ship
+build (1-1, 240 frames of run+jump): scanline 15 160 px → **0 px**, scanline 16
+intact, bottom band clean. Smooth-only; ~30 bytes.
+
+### Paying for it: the flavor-a cycle law
+
+FIXED (and bank 0, the level prefix, RCODE) are full, and the real budget is
+CODE ≤ $2FFA (CHARS must clear the vectors at $FFFA). The bytes came from:
+`smooth_hide_hud`/`smooth_clear_strips` inlined at their single call sites, the
+redundant bottom-strip blank dropped, five cycle-neutral `jmp`→`bra`, and six
+`ldy #0`+`lda (zp),y`→`lda (zp)` reclaims in the blit paths.
+
+Those last ones are **gated `.ifdef SMOOTH`**, and that is a law now: the
+default flavor keeps the raster split, so its picture depends on the exact CPU
+cycle count per frame — a shared reclaim that changes cycles (dropping a
+`ldy #0`, `jsr`+`rts`→`jmp`) silently changed the svgold hashes of levels
+0/1/3/5. Smooth has no split and is cycle-insensitive. So a shared reclaim must
+be cycle-neutral (`bra` = `jmp` = 3 cycles: svgold-clean), or gated smooth-only.
+`lda (zp)`/`sta (zp)` themselves are fine (the core implements $B2/$92, equal to
+the `,y` forms with Y=0); it is purely the timing.
